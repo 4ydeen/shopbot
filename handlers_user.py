@@ -348,8 +348,21 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 (await asyncio.to_thread(db.set_acquisition_source, message.from_user.id, token))
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
-        await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot))
-        await _send_inline_main_menu(message, message.from_user.id)
+        reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
+        if reply_enabled:
+            # منوی پایین فعال است: طبق روال قبلی، پیام خوش‌آمد با منوی پایین
+            # ارسال می‌شود و منوی شیشه‌ای (در صورت فعال بودن) در پیام جدا می‌آید،
+            # چون یک پیام نمی‌تواند هم‌زمان هر دو نوع کیبورد را داشته باشد.
+            await message.answer(welcome, reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot))
+            await _send_inline_main_menu(message, message.from_user.id)
+        else:
+            # منوی پایین غیرفعال است: اگر منوی شیشه‌ای فعال باشد، دکمه‌ها مستقیم
+            # زیر همین پیام خوش‌آمد می‌آیند و پیام جدای «📋 منو:» حذف می‌شود.
+            inline_kb = (await asyncio.to_thread(kb.inline_menu_for_user, db, message.from_user.id, is_main_bot))
+            await message.answer(
+                welcome,
+                reply_markup=inline_kb if inline_kb is not None else kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
 
         for action in post_start_actions:
             if action == "__open_test__":
