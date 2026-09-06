@@ -12,7 +12,6 @@
 
 import os
 import glob
-import shutil
 import sqlite3
 import asyncio
 import logging
@@ -215,39 +214,14 @@ def restore_backup(db, db_path: str, uploaded_file_path: str) -> str:
     قبل از جایگزینی، از دیتابیس فعلی هم یک نسخه‌ی «قبل از بازیابی» گرفته
     می‌شود تا در صورت اشتباه قابل برگشت باشد. مسیر همان نسخه‌ی پیشین را
     برمی‌گرداند.
+
+    نکته: بستن اتصال و جایگزینی فایل عمداً داخل `Database.replace_file()`
+    و زیر یک لاک واحد انجام می‌شود (نه اینجا با db.close() جدا)، تا حلقه‌ی
+    پس‌زمینه‌ی کش نتواند وسط جایگزینی یک اتصال نیمه‌کاره باز کند و بات را
+    برای همیشه (تا ری‌استارت دستی) خراب نگه دارد. برای جزئیات به توضیح
+    داخل `Database.replace_file` نگاه کن.
     """
     if not is_valid_sqlite_db(uploaded_file_path):
         raise ValueError("فایل ارسالی یک دیتابیس sqlite معتبر نیست.")
 
-    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
-    os.makedirs(backup_dir, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    pre_restore_path = os.path.join(backup_dir, f"pre_restore_{timestamp}.db")
-
-    # اتصال persistent باز فعلی را می‌بندیم تا فایل دیتابیس قفل نباشد و
-    # جایگزینی فایل با خطا مواجه نشود.
-    db.close()
-
-    if os.path.exists(db_path):
-        src = sqlite3.connect(db_path)
-        try:
-            dst = sqlite3.connect(pre_restore_path)
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-        finally:
-            src.close()
-
-    # پاک‌کردن فایل‌های کمکی WAL دیتابیس فعلی، وگرنه ممکن است داده‌ی commit‌نشده
-    # قدیمی با دیتابیس جدید قاطی شود
-    for suffix in ("-wal", "-shm"):
-        stale = db_path + suffix
-        if os.path.exists(stale):
-            os.remove(stale)
-
-    shutil.copyfile(uploaded_file_path, db_path)
-
-    # اتصال بعدی که db._get_conn() صدا زده شود، خودش یک اتصال تازه به فایل
-    # جدید باز می‌کند (چون db.close() آن را None کرده).
-    return pre_restore_path
+    return db.replace_file(uploaded_file_path)

@@ -12,6 +12,8 @@
 
 import asyncio
 import logging
+import os
+import shutil
 import sqlite3
 import secrets
 import threading
@@ -19,6 +21,7 @@ import time
 import json
 from datetime import datetime, timedelta
 from contextlib import contextmanager
+
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +393,64 @@ class Database:
                 self._conn = None
             self._settings_cache = None
             self._admin_cache = None
+
+    def replace_file(self, uploaded_file_path: str) -> str:
+        """فایل دیتابیس را با فایل بکاپ آپلودشده جایگزین می‌کند (برای «بازیابی از
+        فایل بکاپ»). قبل از جایگزینی یک نسخه‌ی «قبل از بازیابی» گرفته می‌شود.
+
+        نکته‌ی مهم (باگ قبلی): قبلاً این عملیات با یک `db.close()` جدا و بعد
+        یک `shutil.copyfile` جدا انجام می‌شد، بدون این‌که لاک را بین این دو
+        نگه دارد. در همین فاصله‌ی کوتاه، حلقه‌ی پس‌زمینه‌ی
+        `cache_autorefresh_loop` (که هر ۲ ثانیه یک‌بار روی یک ترد جدا اجرا
+        می‌شود) می‌توانست دقیقاً وسط جایگزینی فایل، یک اتصال sqlite تازه به
+        فایلی که هنوز کامل نوشته نشده بود باز کند و آن را برای همیشه به‌عنوان
+        `self._conn` نگه دارد - نتیجه‌اش این بود که بعد از بازیابی، همه‌ی
+        دستورهای بعدی (حتی /start) تا ری‌استارت دستی پروسه با خطا مواجه
+        می‌شدند، بدون این‌که خود عملیات بازیابی خطایی نشان بدهد.
+
+        الان کل عملیات (بستن اتصال قدیمی + جایگزینی فایل) زیر یک لاک واحد
+        انجام می‌شود، پس هیچ ترد دیگری نمی‌تواند در همین فاصله یک اتصال به
+        فایل نیمه‌نوشته باز کند؛ اولین `_get_conn()` بعدی (که خودش هم منتظر
+        همین لاک می‌ماند) یک اتصال تازه و سالم به فایل جدید باز خواهد کرد.
+        """
+        backup_dir = os.path.join(os.path.dirname(os.path.abspath(self.db_path)), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        pre_restore_path = os.path.join(backup_dir, f"pre_restore_{timestamp}.db")
+
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+            self._settings_cache = None
+            self._admin_cache = None
+
+            if os.path.exists(self.db_path):
+                src = sqlite3.connect(self.db_path)
+                try:
+                    dst = sqlite3.connect(pre_restore_path)
+                    try:
+                        src.backup(dst)
+                    finally:
+                        dst.close()
+                finally:
+                    src.close()
+
+            # پاک‌کردن فایل‌های کمکی WAL دیتابیس فعلی، وگرنه ممکن است داده‌ی
+            # commit‌نشده‌ی قدیمی با دیتابیس جدید قاطی شود
+            for suffix in ("-wal", "-shm"):
+                stale = self.db_path + suffix
+                if os.path.exists(stale):
+                    os.remove(stale)
+
+            shutil.copyfile(uploaded_file_path, self.db_path)
+            # عمداً اتصال تازه اینجا باز نمی‌کنیم؛ self._conn همچنان None
+            # می‌ماند تا اولین _get_conn() بعدی (زیر همین لاک) آن را بسازد.
+
+        return pre_restore_path
 
     def init_db(self, owner_id: int):
         """owner_id: آیدی عددی کسی که مالک/ادمین اصلی همین یک نمونه از بات است

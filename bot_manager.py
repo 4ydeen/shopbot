@@ -303,7 +303,11 @@ class BotManager:
                         try:
                             reseller_db = Database(resolved_path)
                             reseller_db.init_db(owner_id=row["owner_telegram_id"])
-                            reseller_db.set_setting("miniapp_tenant_id", str(row["id"]))
+                            # فرمول یکسان با _reseller_miniapp_link (اسلاگ در
+                            # صورت وجود، وگرنه آیدی عددی) - وگرنه لینکی که پنل
+                            # مدیریت نشان می‌دهد با لینک واقعی دکمه‌ی منوی بات
+                            # یکی نمی‌شود.
+                            reseller_db.set_setting("miniapp_tenant_id", row["link_slug"] or str(row["id"]))
                         except Exception:
                             logger.exception(
                                 "همگام‌سازی miniapp_tenant_id برای @%s (reconcile) ناموفق بود.",
@@ -315,26 +319,42 @@ class BotManager:
                         if started:
                             logger.info("بات نمایندگی @%s توسط reconcile راه‌اندازی شد.", row["bot_username"])
 
-                # ترمیم یک‌بارهی بات‌های نمایندگی که از قبل در حال اجرا بودند: اگر
-                # miniapp_tenant_id روی دیتابیس‌شان درست نباشد یا Menu Button هنوز
-                # هیچ‌وقت با موفقیت sync نشده باشد، همین‌جا درستش کن - بدون نیاز به
-                # ری‌استارت بات. فقط یک‌بار به ازای هر توکن انجام می‌شود تا به
-                # Telegram API فشار اضافه وارد نشود.
+                # ترمیم مداوم Menu Button بات‌های نمایندگی که از قبل در حال اجرا
+                # بودند: هر چرخه (هر ۱۰ ثانیه) بررسی می‌شود که آیا
+                # miniapp_tenant_id روی دیتابیس‌شان با «آخرین اسلاگ/آیدی» جدول
+                # reseller_bots (منبع حقیقت، قابل تغییر با دکمه‌ی «تغییر لینک
+                # مینی‌اپ» در پنل مدیریت که در یک پروسه‌ی جدا اجرا می‌شود) یکی
+                # است یا نه؛ اگر نه، هم تنظیم داخلی و هم Menu Button واقعی بات
+                # به‌روزرسانی می‌شود - بدون نیاز به ری‌استارت بات.
+                #
+                # نکته‌ی مهم (باگ قبلی): قبلاً این کار فقط *یک‌بار* در طول عمر
+                # هر instance انجام می‌شد (پرچم menu_checked)، پس اگر ادمین بعداً
+                # از دکمه‌ی «تغییر لینک مینی‌اپ» لینک را عوض می‌کرد، بات
+                # نمایندگی‌ای که از قبل روشن بود هیچ‌وقت لینک جدید را نمی‌گرفت
+                # و همچنان لینک قدیمی را در دکمه‌ی منویش نشان می‌داد - دقیقاً
+                # همان چیزی که ادمین «هنوز لینک قدیمی را نشان می‌دهد» می‌دید.
                 for token, row in active_tokens.items():
                     inst = self.instances.get(token)
-                    if not inst or inst.get("menu_checked"):
+                    if not inst:
                         continue
                     try:
                         resolved_path = resolve_db_path(row["db_path"])
                         reseller_db = Database(resolved_path)
+                        expected = row["link_slug"] or str(row["id"])
                         current = reseller_db.get_setting("miniapp_tenant_id", "")
-                        if current != str(row["id"]):
-                            reseller_db.set_setting("miniapp_tenant_id", str(row["id"]))
+                        if current != expected:
+                            reseller_db.set_setting("miniapp_tenant_id", expected)
                             logger.warning(
-                                "miniapp_tenant_id برای @%s نادرست/خالی بود (%r) و اصلاح شد.",
-                                row["bot_username"], current,
+                                "miniapp_tenant_id برای @%s نادرست/قدیمی بود (%r) و به %r اصلاح شد.",
+                                row["bot_username"], current, expected,
                             )
-                        await self._sync_menu_button(inst["bot"], reseller_db)
+                            await self._sync_menu_button(inst["bot"], reseller_db)
+                        elif not inst.get("menu_checked"):
+                            # حتی وقتی مقدار درست است، حداقل یک‌بار در طول عمر
+                            # instance مطمئن می‌شویم Menu Button واقعی هم واقعاً
+                            # sync شده (مثلاً اگر تلاش قبلی موقع استارت‌آپ به‌خاطر
+                            # قطعی موقت تلگرام شکست خورده باشد).
+                            await self._sync_menu_button(inst["bot"], reseller_db)
                         inst["menu_checked"] = True
                     except Exception:
                         logger.exception("ترمیم Menu Button برای @%s ناموفق بود.", row["bot_username"])

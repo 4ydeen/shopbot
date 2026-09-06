@@ -51,7 +51,10 @@ async def main():
         try:
             reseller_db = Database(resolved_path)
             reseller_db.init_db(owner_id=rb["owner_telegram_id"])
-            reseller_db.set_setting("miniapp_tenant_id", str(rb["id"]))
+            # از همان فرمول _reseller_miniapp_link در miniapp/server.py استفاده
+            # می‌کنیم (اسلاگ در صورت وجود، وگرنه آیدی عددی) تا دکمه‌ی منوی بات
+            # همیشه دقیقاً همان لینکی باشد که پنل مدیریت نشان می‌دهد/کپی می‌کند.
+            reseller_db.set_setting("miniapp_tenant_id", rb["link_slug"] or str(rb["id"]))
         except Exception:
             logger.exception("همگام‌سازی miniapp_tenant_id برای @%s ناموفق بود.", rb["bot_username"])
 
