@@ -936,10 +936,32 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         mode = call.data.split(":", 1)[1]
         if mode == "unlimited":
             await state.update_data(duration_days=0)
+        await state.set_state(AdminAddProduct.waiting_auto_provision_volume_mode)
+        await safe_edit(call,
+            "📦 حجم این محصول چطور باشد؟\n\n"
+            "«مقدار مشخص» یعنی یک عدد گیگابایت مشخص می‌کنید؛ «نامحدود» یعنی این سرویس هیچ محدودیت حجمی ندارد.",
+            reply_markup=kb.admin_newprod_volume_mode_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(AdminAddProduct.waiting_auto_provision_volume_mode, F.data.startswith("adm_newprod_volmode:"))
+    async def cb_pick_provision_volume_mode(call: CallbackQuery, state: FSMContext):
+        mode = call.data.split(":", 1)[1]
+        if mode == "unlimited":
+            await state.update_data(auto_provision_volume_gb=0, payment_methods=None)
+            await state.set_state(AdminAddProduct.waiting_payment_methods)
+            await safe_edit(call,
+                "💳 این محصول با کدام روش(های) پرداخت قابل خرید باشد؟\n\n"
+                "با لمس هر گزینه، فعال/غیرفعال می‌شود. اگر «همه‌ی روش‌ها» تیک بخورد، این محصول از هر روش پرداخت فعالی قابل خرید است "
+                "(با اضافه‌شدن هر درگاه جدید در آینده هم خودکار برایش فعال می‌شود).",
+                reply_markup=kb.admin_new_product_payment_methods_kb(db, None),
+            )
+            await call.answer()
+            return
+
         await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
-        await safe_edit(call, 
-            "این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30).\n"
-            "برای حجم نامحدود، عدد 0 را ارسال کنید:",
+        await safe_edit(call,
+            "این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):",
             reply_markup=None,
         )
         await call.answer()

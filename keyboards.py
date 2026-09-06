@@ -1484,6 +1484,15 @@ def admin_newprod_duration_mode_kb(limited_days: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def admin_newprod_volume_mode_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="🔢 مقدار مشخص", callback_data="adm_newprod_volmode:limited")],
+        [InlineKeyboardButton(text="♾ نامحدود", callback_data="adm_newprod_volmode:unlimited")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_pick_product_kb(products, prefix) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
