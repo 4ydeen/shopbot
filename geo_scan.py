@@ -810,32 +810,52 @@ async def scan_subscription(
         # باشه، به‌جای preview خام متن، دقیقاً می‌گیم هر outbound چه
         # protocol/type و چه کلیدهایی داشته — تا معلوم بشه ساختارش با چیزی
         # که پارسر بلده فرق داره یا نه (به‌جای حدس زدن از روی preview بریده‌شده).
-        outbound_summary = None
+        # دیباگ: تا این‌جا یعنی درخواست *جواب گرفته* (وگرنه بالا exception
+        # می‌خورد) ولی هیچ‌کدام از پترن‌های vmess/vless/... یا outbound های
+        # JSON کامل قابل‌تشخیص نبود. مهم نیست "outbounds" لیست باشه یا نه —
+        # همیشه ساختار سطح‌بالای JSON (یا دلیل شکست پارس JSON) رو گزارش
+        # می‌کنیم تا دیگه لازم نباشه حدس بزنیم؛ چون preview ۳۰۰ کاراکتری
+        # همیشه به همون ابتدای متن (log/policy/inbounds) می‌رسه و اصلاً
+        # نشون نمی‌ده outbounds با چه ساختاری اونجاست یا اصلاً هست یا نه.
+        json_diag = None
         try:
-            parsed_json = json.loads(text)
-            if isinstance(parsed_json, dict) and isinstance(parsed_json.get("outbounds"), list):
-                rows = []
-                for ob in parsed_json["outbounds"]:
-                    if not isinstance(ob, dict):
-                        continue
-                    kind = ob.get("protocol") or ob.get("type") or "?"
-                    settings_keys = sorted((ob.get("settings") or {}).keys()) if isinstance(ob.get("settings"), dict) else []
-                    rows.append(f"{ob.get('tag') or '?'}:{kind}(keys={settings_keys or list(ob.keys())})")
-                outbound_summary = "; ".join(rows)[:400]
-        except (ValueError, TypeError):
-            pass
+            parsed_json = json.loads(text.strip())
+        except Exception as je:  # noqa: BLE001 - فقط برای دیباگ، هر نوع خطایی مهمه
+            json_diag = f"JSON پارس نشد: {je}"
+        else:
+            if isinstance(parsed_json, dict):
+                top_keys = sorted(parsed_json.keys())
+                ob = parsed_json.get("outbounds")
+                if isinstance(ob, list):
+                    rows = []
+                    for item in ob:
+                        if not isinstance(item, dict):
+                            rows.append(repr(item)[:60])
+                            continue
+                        kind = item.get("protocol") or item.get("type") or "?"
+                        skeys = sorted((item.get("settings") or {}).keys()) if isinstance(item.get("settings"), dict) else []
+                        rows.append(f"{item.get('tag') or '?'}:{kind}(keys={skeys or list(item.keys())})")
+                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — outbounds ({len(ob)} تا): {'; '.join(rows)[:400]}"
+                elif ob is not None:
+                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — outbounds لیست نیست (نوعش: {type(ob).__name__})"
+                else:
+                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — کلید outbounds اصلاً وجود نداره"
+            elif isinstance(parsed_json, list):
+                json_diag = f"JSON یک آرایه‌ی سطح‌بالاست با {len(parsed_json)} عضو (نه یک object)"
+            else:
+                json_diag = f"JSON از نوع {type(parsed_json).__name__} است"
 
         preview = " ".join(text.split())[:300]
         logger.warning(
-            "geo_scan: هیچ کانفیگی از لینک ساب پارس نشد | status=%s content_type=%s len=%d outbounds=%r preview=%r",
-            status, content_type, len(text), outbound_summary, preview,
+            "geo_scan: هیچ کانفیگی از لینک ساب پارس نشد | status=%s content_type=%s len=%d json_diag=%r preview=%r",
+            status, content_type, len(text), json_diag, preview,
         )
         detail = f"(HTTP {status}"
         if content_type:
             detail += f", {content_type}"
         detail += f", طول متن: {len(text)} کاراکتر)"
-        if outbound_summary is not None:
-            detail += f" — outbounds یافت‌شده: «{outbound_summary or 'خالی'}»"
+        if json_diag:
+            detail += f" — {json_diag}"
         elif preview:
             detail += f" — نمونه‌ی متن برگشتی: «{preview}»"
         return {
