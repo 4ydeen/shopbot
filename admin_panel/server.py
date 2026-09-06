@@ -1396,8 +1396,13 @@ def api_panel_servers_lite(admin=Depends(require_permission("catalog"))):
 
 @app.post("/api/products")
 def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog"))):
-    if body.provision_server_id and not body.auto_provision_volume_gb:
-        raise HTTPException(400, "برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
+    if body.duration_days < 0:
+        raise HTTPException(400, "مدت اعتبار نامعتبر است.")
+    if body.duration_days == 0 and not body.provision_server_id:
+        raise HTTPException(400, "مدت نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
+    if body.provision_server_id:
+        if body.auto_provision_volume_gb is None or body.auto_provision_volume_gb < 0:
+            raise HTTPException(400, "برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
     pid = db.add_product(
         body.category_id, body.name, body.price, body.description, body.duration_days,
         body.is_auto_provision or bool(body.provision_server_id), body.auto_provision_volume_gb,
@@ -1430,6 +1435,20 @@ def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(requi
         if not db.get_panel_server(body.provision_server_id):
             raise HTTPException(status_code=404, detail="سرور پنل یافت نشد.")
         provision_server_id = body.provision_server_id
+
+    effective_server_id = provision_server_id if provision_server_id is not None else old_product["provision_server_id"]
+
+    if body.duration_days is not None:
+        if body.duration_days < 0:
+            raise HTTPException(status_code=400, detail="مدت اعتبار نامعتبر است.")
+        if body.duration_days == 0 and not effective_server_id:
+            raise HTTPException(status_code=400, detail="مدت نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
+
+    if body.auto_provision_volume_gb is not None:
+        if body.auto_provision_volume_gb < 0:
+            raise HTTPException(status_code=400, detail="حجم نامعتبر است.")
+        if body.auto_provision_volume_gb == 0 and not effective_server_id:
+            raise HTTPException(status_code=400, detail="حجم نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
 
     db.edit_product(
         product_id, body.name, body.price, body.description, body.duration_days,
