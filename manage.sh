@@ -234,6 +234,34 @@ MSG_FA[prompt_new_owner]="آیدی عددی جدید ادمین (اگر تغیی
 MSG_EN[saved_restarting]="✅ Saved. Restarting..."
 MSG_FA[saved_restarting]="✅ ذخیره شد. در حال ری‌استارت..."
 
+# restore_backup_cli (new-server migration wizard)
+MSG_EN[prompt_backup_path]="Full path of the backup .db file already placed on this server (e.g. /root/bot_database.db): "
+MSG_FA[prompt_backup_path]="مسیر کامل فایل بکاپ .db که از قبل روی همین سرور گذاشتی (مثلاً /root/bot_database.db): "
+MSG_EN[backup_file_missing]="⛔️ File not found at this path."
+MSG_FA[backup_file_missing]="⛔️ فایلی در این مسیر پیدا نشد."
+MSG_EN[validating_backup]="🔎 Validating the backup file..."
+MSG_FA[validating_backup]="🔎 بررسی صحت فایل بکاپ..."
+MSG_EN[venv_missing]="⛔️ Python venv not found. Install the bot first (option 1)."
+MSG_FA[venv_missing]="⛔️ محیط مجازی پایتون پیدا نشد. اول بات را نصب کن (گزینه ۱)."
+MSG_EN[backup_invalid]="⛔️ This file is not a valid SQLite database. Cancelled."
+MSG_FA[backup_invalid]="⛔️ این فایل یک دیتابیس SQLite معتبر نیست. لغو شد."
+MSG_EN[restore_warning]="⚠️ This will completely replace the current database with the uploaded backup (a safety copy of the current one is kept)."
+MSG_FA[restore_warning]="⚠️ این کار دیتابیس فعلی را کاملاً با فایل بکاپ جایگزین می‌کند (یک نسخه‌ی امن از وضعیت فعلی هم نگه داشته می‌شود)."
+MSG_EN[stopping_services_for_restore]="⏸ Stopping services to safely replace the database..."
+MSG_FA[stopping_services_for_restore]="⏸ توقف سرویس‌ها برای جایگزینی امن دیتابیس..."
+MSG_EN[restoring_backup]="♻️ Restoring the database..."
+MSG_FA[restoring_backup]="♻️ در حال بازیابی دیتابیس..."
+MSG_EN[restore_failed]="⛔️ Restore failed: %s\nServices have been started back up unchanged."
+MSG_FA[restore_failed]="⛔️ بازیابی ناموفق بود: %s\nسرویس‌ها بدون تغییر دوباره روشن شدند."
+MSG_EN[restore_done]="✅ Database restored. A safety copy of the previous one was saved as: %s"
+MSG_FA[restore_done]="✅ دیتابیس بازیابی شد. یک نسخه‌ی امن از دیتابیس قبلی با نام «%s» ذخیره شد."
+MSG_EN[prompt_had_miniapp]="Was the Mini App enabled on the old server? Set up a new domain for it now on this server? (y/n): "
+MSG_FA[prompt_had_miniapp]="آیا مینی‌اپ روی سرور قبلی فعال بود؟ الان یک دامنه‌ی جدید برایش روی این سرور تنظیم شود؟ (y/n): "
+MSG_EN[prompt_had_panel]="Was the standalone Admin Panel enabled on the old server? Set up a new domain for it now on this server? (y/n): "
+MSG_FA[prompt_had_panel]="آیا پنل مدیریت وب مستقل روی سرور قبلی فعال بود؟ الان یک دامنه‌ی جدید برایش روی این سرور تنظیم شود؟ (y/n): "
+MSG_EN[restore_flow_done]="🎉 Migration to the new server finished."
+MSG_FA[restore_flow_done]="🎉 انتقال به سرور جدید تمام شد."
+
 # setup_miniapp / setup_admin_panel (shared)
 MSG_EN[miniapp_dir_missing]="⛔️ miniapp folder not found. Update the project code first (git pull/update)."
 MSG_FA[miniapp_dir_missing]="⛔️ پوشه miniapp پیدا نشد. اول باید کد مینی‌اپ را داخل پروژه بیاوری (git pull/آپدیت)."
@@ -424,12 +452,14 @@ MSG_EN[menu_19]="Remove VPN panel domain proxy"
 MSG_FA[menu_19]="حذف دامنه پروکسی پنل VPN"
 MSG_EN[menu_20]="Mini App / Admin Panel domains (view + delete)"
 MSG_FA[menu_20]="دامنه‌های مینی‌اپ / پنل مدیریت (نمایش + حذف)"
+MSG_EN[menu_21]="Restore backup from another server (new server migration wizard)"
+MSG_FA[menu_21]="بازیابی بکاپ از سرور دیگر (ویزارد انتقال به سرور جدید)"
 MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_EN[menu_0]="Exit"
 MSG_FA[menu_0]="خروج"
-MSG_EN[enter_choice_prompt]="Enter choice [0-20, L]: "
-MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-20, L]: "
+MSG_EN[enter_choice_prompt]="Enter choice [0-21, L]: "
+MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-21, L]: "
 MSG_EN[invalid_choice]="Invalid option."
 MSG_FA[invalid_choice]="گزینه نامعتبر است."
 MSG_EN[goodbye]="Goodbye 👋"
@@ -1419,6 +1449,112 @@ setup_vapid_keys() {
 }
 
 # ---------------------------------------------------------------------------
+# Action: restore a database backup that was already copied onto this server
+# (e.g. via scp), meant for migrating an existing bot to a brand-new server.
+# After the database swap, optionally walks through Mini App / Admin Panel
+# domain setup again (their domain/SSL/systemd config lives in .env and
+# nginx on the OLD server, NOT inside the database backup, so a fresh server
+# needs it redone with a new domain).
+# عملیات: بازیابی یک فایل بکاپ دیتابیس که از قبل (مثلاً با scp) روی همین
+# سرور کپی شده - برای انتقال یک بات موجود به یک سرور کاملاً جدید. بعد از
+# جایگزینی دیتابیس، در صورت نیاز مینی‌اپ/پنل مدیریت را هم با دامنه‌ی جدید
+# دوباره راه‌اندازی می‌کند (چون تنظیمات دامنه/SSL/سرویس آن‌ها داخل .env و
+# nginx سرور قبلی است، نه داخل خود فایل بکاپ، و روی سرور جدید باید با یک
+# دامنه‌ی جدید از نو انجام شود).
+# ---------------------------------------------------------------------------
+restore_backup_cli() {
+    if [ ! -f "$INSTALL_DIR/main.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
+        return
+    fi
+    if [ ! -x "$INSTALL_DIR/venv/bin/python3" ]; then
+        echo -e "${RED}$(t venv_missing)${RESET}"
+        return
+    fi
+
+    read -rp "$(t prompt_backup_path)" BACKUP_FILE
+    if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
+        echo -e "${RED}$(t backup_file_missing)${RESET}"
+        return
+    fi
+    BACKUP_FILE="$(readlink -f "$BACKUP_FILE")"
+
+    echo -e "${CYAN}$(t validating_backup)${RESET}"
+    cd "$INSTALL_DIR"
+    if ! venv/bin/python3 -c "
+import sys
+sys.path.insert(0, '.')
+from backup import is_valid_sqlite_db
+sys.exit(0 if is_valid_sqlite_db(sys.argv[1]) else 1)
+" "$BACKUP_FILE"; then
+        echo -e "${RED}$(t backup_invalid)${RESET}"
+        return
+    fi
+
+    echo -e "${YELLOW}${BOLD}$(t restore_warning)${RESET}"
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+
+    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
+    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
+    MINIAPP_WAS_ACTIVE=false
+    PANEL_WAS_ACTIVE=false
+    systemctl is-active --quiet "$MINIAPP_SERVICE" 2>/dev/null && MINIAPP_WAS_ACTIVE=true
+    systemctl is-active --quiet "$PANEL_SERVICE" 2>/dev/null && PANEL_WAS_ACTIVE=true
+
+    echo -e "${CYAN}$(t stopping_services_for_restore)${RESET}"
+    sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    [ "$MINIAPP_WAS_ACTIVE" = true ] && sudo systemctl stop "$MINIAPP_SERVICE" 2>/dev/null || true
+    [ "$PANEL_WAS_ACTIVE" = true ] && sudo systemctl stop "$PANEL_SERVICE" 2>/dev/null || true
+
+    echo -e "${CYAN}$(t restoring_backup)${RESET}"
+    RESTORE_OUT=$(venv/bin/python3 -c "
+import sys
+sys.path.insert(0, '.')
+from database import Database
+from backup import restore_backup
+db = Database('bot_database.db')
+try:
+    pre = restore_backup(db, 'bot_database.db', sys.argv[1])
+    print('OK:' + pre)
+except Exception as e:
+    print('ERR:' + str(e))
+    sys.exit(1)
+" "$BACKUP_FILE" 2>&1)
+
+    if [[ "$RESTORE_OUT" != OK:* ]]; then
+        echo -e "${RED}$(t restore_failed "$RESTORE_OUT")${RESET}"
+        sudo systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        [ "$MINIAPP_WAS_ACTIVE" = true ] && sudo systemctl start "$MINIAPP_SERVICE" 2>/dev/null || true
+        [ "$PANEL_WAS_ACTIVE" = true ] && sudo systemctl start "$PANEL_SERVICE" 2>/dev/null || true
+        return
+    fi
+
+    echo -e "${GREEN}$(t restore_done "$(basename "${RESTORE_OUT#OK:}")")${RESET}"
+
+    echo -e "${CYAN}$(t restarting_bot_service)${RESET}"
+    sudo systemctl start "$SERVICE_NAME"
+    sleep 2
+
+    echo ""
+    read -rp "$(t prompt_had_miniapp)" HAD_MINIAPP
+    if [[ "$HAD_MINIAPP" =~ ^[yY]$ ]]; then
+        setup_miniapp
+    elif [ "$MINIAPP_WAS_ACTIVE" = true ]; then
+        sudo systemctl start "$MINIAPP_SERVICE" 2>/dev/null || true
+    fi
+
+    read -rp "$(t prompt_had_panel)" HAD_PANEL
+    if [[ "$HAD_PANEL" =~ ^[yY]$ ]]; then
+        setup_admin_panel
+    elif [ "$PANEL_WAS_ACTIVE" = true ]; then
+        sudo systemctl start "$PANEL_SERVICE" 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}${BOLD}$(t restore_flow_done)${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
 ensure_figlet
@@ -1453,6 +1589,8 @@ while true; do
     echo -e "${YELLOW}[19]${RESET} » ${GREEN}$(t menu_19)${RESET}"
     echo -e "${YELLOW}[20]${RESET} » ${GREEN}$(t menu_20)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
+    echo -e "${YELLOW}[21]${RESET} » ${GREEN}$(t menu_21)${RESET}"
+    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${MAGENTA}[L]${RESET} » ${GREEN}$(t menu_lang)${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}$(t menu_0)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
@@ -1480,6 +1618,7 @@ while true; do
         18) list_panel_proxies; pause ;;
         19) remove_panel_proxy; pause ;;
         20) list_service_domains; pause ;;
+        21) restore_backup_cli; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
