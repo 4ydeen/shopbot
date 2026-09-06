@@ -356,8 +356,13 @@ def _parse_xray_outbound(ob: dict) -> Optional[dict]:
         if not host:
             return None
         users = v.get("users") or []
-        auth = users[0].get("id") if users and isinstance(users[0], dict) else None
-        item = {"protocol": protocol, "host": host, "port": port, "remark": tag or host}
+        user0 = users[0] if users and isinstance(users[0], dict) else {}
+        auth = user0.get("id")
+        # خیلی از پنل‌ها اسم/پرچمِ کانفیگ رو به‌جای tag (که عمومیه، مثلاً
+        # همیشه «proxy») توی فیلد email کاربر می‌ذارن — یک قرارداد رایج در
+        # Xray برای شناسایی کلاینت.
+        email = user0.get("email") if isinstance(user0.get("email"), str) else None
+        item = {"protocol": protocol, "host": host, "port": port, "remark": (email or "").strip() or tag or host}
         if protocol == "vless" and auth:
             item["auth"] = auth
             item["net_params"] = _net_params_from_stream(ob.get("streamSettings"), host)
@@ -373,7 +378,8 @@ def _parse_xray_outbound(ob: dict) -> Optional[dict]:
         if not host:
             return None
         proto_name = "trojan" if protocol == "trojan" else "ss"
-        item = {"protocol": proto_name, "host": host, "port": port, "remark": tag or host}
+        email = s.get("email") if isinstance(s.get("email"), str) else None
+        item = {"protocol": proto_name, "host": host, "port": port, "remark": (email or "").strip() or tag or host}
         if protocol == "trojan":
             item["auth"] = s.get("password")
             item["net_params"] = _net_params_from_stream(ob.get("streamSettings"), host)
@@ -412,6 +418,19 @@ def _parse_singbox_outbound(ob: dict) -> Optional[dict]:
     return item
 
 
+def _profile_remark(profile: dict) -> Optional[str]:
+    """اسم/پرچمِ واقعیِ هر پروفایل معمولاً یک فیلد سطح‌بالای جداست (نه چیزی
+    داخل outbound) — چون tag داخل outbound اغلب یک مقدار عمومی و ثابت است
+    (مثلاً همیشه «proxy»)، در همه‌ی پروفایل‌ها یکسان، و هیچ اطلاعات
+    کشور/پرچمی نداره. کلیدهای رایجی که پنل‌های مختلف برای این اسم نمایشی
+    استفاده می‌کنند را امتحان می‌کنیم."""
+    for key in ("remarks", "remark", "ps", "name", "title", "alias", "profile_title"):
+        val = profile.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
 def _parse_full_json_config(text: str) -> list:
     try:
         data = json.loads(text)
@@ -434,11 +453,17 @@ def _parse_full_json_config(text: str) -> list:
         outbounds = profile.get("outbounds")
         if not isinstance(outbounds, list):
             continue
+        profile_remark = _profile_remark(profile)
         for ob in outbounds:
             if not isinstance(ob, dict):
                 continue
             item = _parse_xray_outbound(ob) if "protocol" in ob else _parse_singbox_outbound(ob)
             if item:
+                # اسم سطح‌بالای پروفایل (اگر بود) همیشه به tag عمومی داخل
+                # outbound ارجحیت داره — چون معمولاً همون چیزیه که پرچم/نام
+                # کشور توش هست (detect_label_country از همین remark می‌خونه).
+                if profile_remark:
+                    item["remark"] = profile_remark
                 out.append(item)
             if len(out) >= _MAX_CONFIGS:
                 return out
