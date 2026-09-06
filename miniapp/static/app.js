@@ -3881,7 +3881,13 @@ function productProvisionFieldsHtml(panelServers) {
     </div>
     <div id="new-prod-direct-fields" style="display:none;margin-bottom:8px">
       <select class="input" id="new-prod-server" style="margin-bottom:8px">${panelServers.map((s) => `<option value="${s.id}">${s.name}</option>`).join("")}</select>
-      <input class="input" id="new-prod-volume" type="number" placeholder="حجم (گیگابایت)" />
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <input type="checkbox" id="new-prod-duration-unlimited" /> ♾ مدت اعتبار نامحدود (هیچ‌وقت روی پنل منقضی نمی‌شود)
+      </label>
+      <input class="input" id="new-prod-volume" type="number" placeholder="حجم (گیگابایت)" style="margin-bottom:8px" />
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="new-prod-volume-unlimited" /> ♾ حجم نامحدود
+      </label>
     </div>
   `;
 }
@@ -3984,20 +3990,35 @@ async function renderAdminProducts(body) {
     document.getElementById("new-prod-direct-fields").style.display =
       body.querySelector('input[name="new-prod-source"]:checked').value === "direct" ? "block" : "none";
   }));
+  const newDurUnlimitedCb = document.getElementById("new-prod-duration-unlimited");
+  if (newDurUnlimitedCb) {
+    newDurUnlimitedCb.addEventListener("change", () => {
+      document.getElementById("new-prod-duration").disabled = newDurUnlimitedCb.checked;
+    });
+  }
+  const newVolUnlimitedCb = document.getElementById("new-prod-volume-unlimited");
+  if (newVolUnlimitedCb) {
+    newVolUnlimitedCb.addEventListener("change", () => {
+      document.getElementById("new-prod-volume").disabled = newVolUnlimitedCb.checked;
+    });
+  }
   document.getElementById("new-prod-save").onclick = async () => {
     const errBox = document.getElementById("new-prod-error");
     errBox.textContent = "";
     const name = document.getElementById("new-prod-name").value.trim();
     const price = Number(document.getElementById("new-prod-price").value);
-    const duration = Number(document.getElementById("new-prod-duration").value) || 30;
     const desc = document.getElementById("new-prod-desc").value.trim();
     if (!name || !price) { errBox.textContent = "نام و قیمت الزامی است."; return; }
-    const payload = { category_id: categoryId, name, price, duration_days: duration, description: desc };
     const sourceEl = body.querySelector('input[name="new-prod-source"]:checked');
-    if (sourceEl && sourceEl.value === "direct") {
+    const isDirect = sourceEl && sourceEl.value === "direct";
+    const durationUnlimited = isDirect && newDurUnlimitedCb && newDurUnlimitedCb.checked;
+    const duration = durationUnlimited ? 0 : (Number(document.getElementById("new-prod-duration").value) || 30);
+    const payload = { category_id: categoryId, name, price, duration_days: duration, description: desc };
+    if (isDirect) {
       const provision_server_id = Number(document.getElementById("new-prod-server").value);
-      const auto_provision_volume_gb = Number(document.getElementById("new-prod-volume").value);
-      if (!provision_server_id || !auto_provision_volume_gb) {
+      const volumeUnlimited = newVolUnlimitedCb && newVolUnlimitedCb.checked;
+      const auto_provision_volume_gb = volumeUnlimited ? 0 : Number(document.getElementById("new-prod-volume").value);
+      if (!provision_server_id || (!volumeUnlimited && !auto_provision_volume_gb)) {
         errBox.textContent = "برای اتصال مستقیم به پنل، پنل و حجم (گیگابایت) را مشخص کنید.";
         return;
       }
@@ -4017,6 +4038,9 @@ async function renderAdminEditProduct(body) {
   const panelServers = p.is_auto_provision
     ? await api("/api/admin/panel-servers-lite").catch(() => [])
     : [];
+  const isDirectEditable = p.is_auto_provision && panelServers.length > 0;
+  const durationIsUnlimited = p.duration_days === 0;
+  const volumeIsUnlimited = p.auto_provision_volume_gb === 0;
   body.innerHTML = `
     <button class="btn outline small" id="edit-prod-back" style="width:auto;margin-bottom:12px">→ بازگشت به محصولات «${categoryName}»</button>
     <div class="card">
@@ -4026,7 +4050,11 @@ async function renderAdminEditProduct(body) {
       <label class="field-label">قیمت (تومان)</label>
       <input class="input" id="edit-prod-price" type="number" value="${p.price}" style="margin-bottom:10px" />
       <label class="field-label">مدت اعتبار (روز)</label>
-      <input class="input" id="edit-prod-duration" type="number" value="${p.duration_days}" style="margin-bottom:10px" />
+      <input class="input" id="edit-prod-duration" type="number" value="${p.duration_days}" style="margin-bottom:${isDirectEditable ? "4" : "10"}px" ${durationIsUnlimited ? "disabled" : ""} />
+      ${isDirectEditable ? `
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+        <input type="checkbox" id="edit-prod-duration-unlimited" ${durationIsUnlimited ? "checked" : ""} /> ♾ مدت اعتبار نامحدود
+      </label>` : ""}
       <label class="field-label">توضیحات (اختیاری)</label>
       <input class="input" id="edit-prod-desc" type="text" value="${(p.description || "").replace(/"/g, "&quot;")}" style="direction:rtl;text-align:right;font-family:var(--font-body);margin-bottom:10px" />
       ${p.is_auto_provision ? (panelServers.length ? `
@@ -4034,9 +4062,12 @@ async function renderAdminEditProduct(body) {
       <select class="input" id="edit-prod-server" style="margin-bottom:8px">
         ${panelServers.map((s) => `<option value="${s.id}" ${s.id === p.provision_server_id ? "selected" : ""}>${s.name}</option>`).join("")}
       </select>
-      <input class="input" id="edit-prod-volume" type="number" placeholder="حجم (گیگابایت)" value="${p.auto_provision_volume_gb || ""}" style="margin-bottom:10px" />
+      <input class="input" id="edit-prod-volume" type="number" placeholder="حجم (گیگابایت)" value="${p.auto_provision_volume_gb || ""}" style="margin-bottom:4px" ${volumeIsUnlimited ? "disabled" : ""} />
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+        <input type="checkbox" id="edit-prod-volume-unlimited" ${volumeIsUnlimited ? "checked" : ""} /> ♾ حجم نامحدود
+      </label>
       <p class="hint-text">🔌 با تغییر پنل، ساخت‌های بعدیِ همین محصول از پنل/اینباند جدید انجام می‌شود؛ سرویس‌های قبلاً ساخته‌شده تغییر نمی‌کنند.</p>
-      ` : `<p class="hint-text">🔌 این محصول به‌صورت خودکار (${p.auto_provision_volume_gb || "?"} گیگ) ساخته می‌شود. برای تغییر پنل/اینباند باید نمایندگی سطح ۲ باشی.</p>`) : ""}
+      ` : `<p class="hint-text">🔌 این محصول به‌صورت خودکار (${p.auto_provision_volume_gb ? p.auto_provision_volume_gb + " گیگ" : "نامحدود"}) ساخته می‌شود. برای تغییر پنل/اینباند باید نمایندگی سطح ۲ باشی.</p>`) : ""}
       <div class="field-error" id="edit-prod-error"></div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn" id="edit-prod-save">💾 ذخیره تغییرات</button>
@@ -4050,20 +4081,34 @@ async function renderAdminEditProduct(body) {
   };
   document.getElementById("edit-prod-back").onclick = back;
   document.getElementById("edit-prod-cancel").onclick = back;
+  const editDurUnlimitedCb = document.getElementById("edit-prod-duration-unlimited");
+  if (editDurUnlimitedCb) {
+    editDurUnlimitedCb.addEventListener("change", () => {
+      document.getElementById("edit-prod-duration").disabled = editDurUnlimitedCb.checked;
+    });
+  }
+  const editVolUnlimitedCb = document.getElementById("edit-prod-volume-unlimited");
+  if (editVolUnlimitedCb) {
+    editVolUnlimitedCb.addEventListener("change", () => {
+      document.getElementById("edit-prod-volume").disabled = editVolUnlimitedCb.checked;
+    });
+  }
   document.getElementById("edit-prod-save").onclick = async () => {
     const errBox = document.getElementById("edit-prod-error");
     errBox.textContent = "";
     const name = document.getElementById("edit-prod-name").value.trim();
     const price = Number(document.getElementById("edit-prod-price").value);
-    const duration = Number(document.getElementById("edit-prod-duration").value);
     const description = document.getElementById("edit-prod-desc").value.trim();
-    if (!name || !price || !duration) { errBox.textContent = "نام، قیمت و مدت اعتبار الزامی هستند."; return; }
+    const durationUnlimited = editDurUnlimitedCb && editDurUnlimitedCb.checked;
+    const duration = durationUnlimited ? 0 : Number(document.getElementById("edit-prod-duration").value);
+    if (!name || !price || (!durationUnlimited && !duration)) { errBox.textContent = "نام، قیمت و مدت اعتبار الزامی هستند."; return; }
     const payload = { name, price, duration_days: duration, description };
     const serverSel = document.getElementById("edit-prod-server");
     if (serverSel) {
       const provision_server_id = Number(serverSel.value);
-      const auto_provision_volume_gb = Number(document.getElementById("edit-prod-volume").value);
-      if (!provision_server_id || !auto_provision_volume_gb) {
+      const volumeUnlimited = editVolUnlimitedCb && editVolUnlimitedCb.checked;
+      const auto_provision_volume_gb = volumeUnlimited ? 0 : Number(document.getElementById("edit-prod-volume").value);
+      if (!provision_server_id || (!volumeUnlimited && !auto_provision_volume_gb)) {
         errBox.textContent = "پنل و حجم (گیگابایت) الزامی هستند.";
         return;
       }
