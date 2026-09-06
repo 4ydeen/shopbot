@@ -3636,6 +3636,7 @@ class Database:
                 "label": m["label"],
                 "enabled": enabled,
                 "min_amount": int(self.get_setting(f"min_amount_{m['key']}", "0") or 0),
+                "push_enabled": self.get_setting(f"push_pm_{m['key']}", "1") == "1",
                 "is_custom": False,
             })
         for gw in self.list_custom_gateways(only_enabled=only_enabled):
@@ -3644,6 +3645,7 @@ class Database:
                 "label": f"💠 {gw['name']}",
                 "enabled": bool(gw["enabled"]),
                 "min_amount": int(gw["min_amount"] or 0) if "min_amount" in gw.keys() else 0,
+                "push_enabled": self.get_setting(f"push_pm_custom:{gw['gateway_key']}", "1") == "1",
                 "is_custom": True,
                 "gateway_id": gw["id"],
             })
@@ -3657,6 +3659,44 @@ class Database:
                 return int(gw["min_amount"] or 0)
             return 0
         return int(self.get_setting(f"min_amount_{method_key}", "0") or 0)
+
+    def set_payment_method_push_enabled(self, method_key: str, enabled: bool):
+        """روشن/خاموش‌کردن پوش نوتیف ادمین برای یک روش پرداخت (داخلی یا 'custom:<key>')."""
+        self.set_setting(f"push_pm_{method_key}", "1" if enabled else "0")
+
+    def is_payment_method_push_enabled(self, method_key: str) -> bool:
+        return self.get_setting(f"push_pm_{method_key}", "1") == "1"
+
+    def resolve_payment_method(self, kind: str, ref_id: int):
+        """گیت‌وی واقعی یک سفارش/شارژ (order/wallet_topup) را از روی رکورد
+        فاکتور مرتبط تشخیص می‌دهد: crypto/abangateway/custom:<key>/card_auto/card.
+        None یعنی هنوز هیچ روش پرداختی برایش مشخص نشده (نه فاکتوری ساخته شده،
+        نه رسیدی ارسال شده) - یعنی هنوز چیزی برای پوش‌کردن به ادمین نیست."""
+        with self._get_conn() as conn:
+            if conn.execute(
+                "SELECT 1 FROM crypto_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
+            ).fetchone():
+                return "crypto"
+            if conn.execute(
+                "SELECT 1 FROM abangateway_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
+            ).fetchone():
+                return "abangateway"
+            row = conn.execute(
+                "SELECT cg.gateway_key FROM custom_gateway_invoices cgi "
+                "JOIN custom_gateways cg ON cg.id = cgi.gateway_id "
+                "WHERE cgi.kind=? AND cgi.ref_id=? LIMIT 1", (kind, ref_id)
+            ).fetchone()
+            if row:
+                return f"custom:{row['gateway_key']}"
+            if conn.execute(
+                "SELECT 1 FROM card_to_card_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
+            ).fetchone():
+                return "card_auto"
+            table = "orders" if kind == "order" else "wallet_topups"
+            row = conn.execute(f"SELECT receipt_file_id FROM {table} WHERE id=?", (ref_id,)).fetchone()
+            if row and row["receipt_file_id"]:
+                return "card"
+            return None
 
     # -----------------------------------------------------------------------
     # محدودسازی روش پرداخت مجاز به ازای هر محصول
