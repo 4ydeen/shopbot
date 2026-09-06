@@ -35,6 +35,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiohttp
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Query, Request
 from fastapi.staticfiles import StaticFiles
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles که به مرورگر می‌گه هر بار فایل رو revalidate کنه (ETag/
+    Last-Modified) و بدون سوال‌کردن از سرور کش نکنه. جواب سرور معمولاً با
+    304 برمی‌گرده، پس ترافیک زیاد نمی‌شه، ولی هیچ نسخه‌ی قدیمی هم کش نمی‌مونه
+    (مهم برای WebView تلگرام که کش‌کردنش خیلی تهاجمی‌تره)."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -367,7 +379,7 @@ def serve_index(tenant: Tenant = Depends(get_tenant)):
         html = html.replace("{{HEADER_LOGO_CLASS}}", "")
         html = html.replace("{{HEADER_LOGO_HTML}}", "")
 
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 # ---------------------------------------------------------------------------
@@ -5190,4 +5202,4 @@ async def api_admin_factory_reset(confirm_phrase: str = Form(""), auth=Depends(r
     return {"status": "ok", "safety_backup": os.path.basename(safety_backup) if safety_backup else None}
 
 
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")
