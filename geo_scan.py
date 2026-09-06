@@ -315,8 +315,132 @@ _CONFIG_URI_RE = re.compile(
 )
 
 
+# --------------------------------------------------- full Xray-core JSON --
+# بعضی پنل‌ها (بسته به نوع «سابسکریپشن» تنظیم‌شده برای آن کاربر خاص) به‌جای
+# لیست base64 از لینک‌های vmess://... یک کانفیگ *کامل* Xray-core به‌صورت
+# JSON برمی‌گردانند — همان چیزی که مستقیم داخل هسته (v2rayNG/Xray/...) لود
+# می‌شود، شامل inbounds/outbounds/policy/log. سرور واقعی این‌جا توی
+# outbounds[].settings.vnext (برای vmess/vless) یا .servers (برای
+# trojan/shadowsocks) است، نه در قالب یک URI ساده.
+def _net_params_from_stream(stream: dict, host: str) -> dict:
+    stream = stream or {}
+    security = (stream.get("security") or "none").lower()
+    network = (stream.get("network") or "tcp").lower()
+    ws_path, ws_host = "/", host
+    if network in ("ws", "httpupgrade", "h2"):
+        key = {"ws": "wsSettings", "httpupgrade": "httpupgradeSettings", "h2": "httpSettings"}[network]
+        settings = stream.get(key) or {}
+        ws_path = settings.get("path") or "/"
+        headers = settings.get("headers") or {}
+        ws_host = headers.get("Host") or settings.get("host") or host
+    sni = ws_host or host
+    if security == "tls":
+        sni = (stream.get("tlsSettings") or {}).get("serverName") or sni
+    elif security == "reality":
+        sni = (stream.get("realitySettings") or {}).get("serverName") or sni
+    return {"security": security, "network": network, "sni": sni, "ws_path": ws_path, "ws_host": ws_host}
+
+
+def _parse_xray_outbound(ob: dict) -> Optional[dict]:
+    protocol = (ob.get("protocol") or "").lower()
+    settings = ob.get("settings") or {}
+    tag = str(ob.get("tag") or "").strip()
+
+    if protocol in ("vmess", "vless"):
+        vnext = settings.get("vnext") or []
+        if not vnext or not isinstance(vnext[0], dict):
+            return None
+        v = vnext[0]
+        host = str(v.get("address") or "").strip()
+        port = str(v.get("port") or "").strip()
+        if not host:
+            return None
+        users = v.get("users") or []
+        auth = users[0].get("id") if users and isinstance(users[0], dict) else None
+        item = {"protocol": protocol, "host": host, "port": port, "remark": tag or host}
+        if protocol == "vless" and auth:
+            item["auth"] = auth
+            item["net_params"] = _net_params_from_stream(ob.get("streamSettings"), host)
+        return item
+
+    if protocol in ("trojan", "shadowsocks"):
+        servers = settings.get("servers") or []
+        if not servers or not isinstance(servers[0], dict):
+            return None
+        s = servers[0]
+        host = str(s.get("address") or "").strip()
+        port = str(s.get("port") or "").strip()
+        if not host:
+            return None
+        proto_name = "trojan" if protocol == "trojan" else "ss"
+        item = {"protocol": proto_name, "host": host, "port": port, "remark": tag or host}
+        if protocol == "trojan":
+            item["auth"] = s.get("password")
+            item["net_params"] = _net_params_from_stream(ob.get("streamSettings"), host)
+        return item
+
+    return None  # freedom/blackhole/dns و بقیه‌ی outboundهای غیر پروکسی
+
+
+def _parse_singbox_outbound(ob: dict) -> Optional[dict]:
+    """فرمت sing-box: کلیدهای «type»/«server»/«server_port» به‌جای
+    protocol/settings.vnext مربوط به Xray-core."""
+    otype = (ob.get("type") or "").lower()
+    if otype not in ("vmess", "vless", "trojan", "shadowsocks", "hysteria2", "tuic"):
+        return None
+    host = str(ob.get("server") or "").strip()
+    port = str(ob.get("server_port") or "").strip()
+    if not host:
+        return None
+    tag = str(ob.get("tag") or "").strip()
+    proto_name = "ss" if otype == "shadowsocks" else otype
+    item = {"protocol": proto_name, "host": host, "port": port, "remark": tag or host}
+    auth = ob.get("uuid") or ob.get("password")
+    if otype in ("vless", "trojan") and auth:
+        item["auth"] = auth
+        tls = ob.get("tls") or {}
+        transport = ob.get("transport") or {}
+        network = (transport.get("type") or "tcp").lower()
+        ws_host = (transport.get("headers") or {}).get("Host") or host
+        item["net_params"] = {
+            "security": "tls" if tls.get("enabled") else "none",
+            "network": "ws" if network == "ws" else network,
+            "sni": tls.get("server_name") or ws_host,
+            "ws_path": transport.get("path") or "/",
+            "ws_host": ws_host,
+        }
+    return item
+
+
+def _parse_full_json_config(text: str) -> list:
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    outbounds = data.get("outbounds")
+    if not isinstance(outbounds, list):
+        return []
+    out = []
+    for ob in outbounds:
+        if not isinstance(ob, dict):
+            continue
+        item = _parse_xray_outbound(ob) if "protocol" in ob else _parse_singbox_outbound(ob)
+        if item:
+            out.append(item)
+        if len(out) >= _MAX_CONFIGS:
+            break
+    return out
+
+
 def parse_subscription_text(text: str) -> list:
     body = text.strip()
+
+    json_configs = _parse_full_json_config(body)
+    if json_configs:
+        return json_configs
+
     decoded = _b64_decode_text(body)
     candidate = decoded if decoded and "://" in decoded else body
     out = []
