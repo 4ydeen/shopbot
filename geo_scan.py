@@ -24,6 +24,7 @@ vmess/vless/trojan/ss/hysteria2/tuic که هرکدام آدرس یک سرور ر
 """
 
 import asyncio
+import logging
 import re
 
 import base64
@@ -41,6 +42,8 @@ from typing import Optional
 from urllib.parse import urlparse, unquote, parse_qs
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=12)
 _TCP_TIMEOUT = 7.0  # چک واقعی تونل؛ نزدیک به timeout پیش‌فرض کلاینت‌های Xray/V2Box
@@ -669,13 +672,35 @@ async def scan_subscription(
     try:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             async with session.get(link, headers={"User-Agent": "v2rayNG/1.8.29"}) as resp:
+                status = resp.status
+                content_type = resp.headers.get("Content-Type", "")
                 text = await resp.text(errors="ignore")
     except Exception as e:
         return {"ok": False, "error": f"دریافت لینک ساب ناموفق بود: {e}"}
 
     configs = parse_subscription_text(text)
     if not configs:
-        return {"ok": False, "error": "هیچ کانفیگ قابل‌شناسایی‌ای در این لینک ساب پیدا نشد."}
+        # دیباگ: تا این‌جا یعنی درخواست *جواب گرفته* (وگرنه بالا exception
+        # می‌خورد) ولی هیچ‌کدام از پترن‌های vmess/vless/... در بدنه پیدا
+        # نشد — دلیلش می‌تونه فیلتر User-Agent سمت پنل، توکن نامعتبر/منقضی،
+        # یا یک صفحه‌ی HTML/JSON ارور به‌جای متن ساب باشه. status/content-type
+        # و یک preview کوتاه از بدنه رو لاگ و در پیام خطا برمی‌گردانیم تا علت
+        # واقعی بدون حدس‌زدن مشخص شود.
+        preview = " ".join(text.split())[:300]
+        logger.warning(
+            "geo_scan: هیچ کانفیگی از لینک ساب پارس نشد | status=%s content_type=%s len=%d preview=%r",
+            status, content_type, len(text), preview,
+        )
+        detail = f"(HTTP {status}"
+        if content_type:
+            detail += f", {content_type}"
+        detail += f", طول متن: {len(text)} کاراکتر)"
+        if preview:
+            detail += f" — نمونه‌ی متن برگشتی: «{preview}»"
+        return {
+            "ok": False,
+            "error": f"هیچ کانفیگ قابل‌شناسایی‌ای در این لینک ساب پیدا نشد. {detail}",
+        }
 
     dns_sem = asyncio.Semaphore(_DNS_CONCURRENCY)
     hosts = list({c["host"] for c in configs})
