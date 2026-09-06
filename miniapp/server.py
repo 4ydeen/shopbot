@@ -4000,10 +4000,30 @@ def api_admin_regenerate_reseller_link(reseller_id: int, auth=Depends(require_ma
         raise HTTPException(status_code=500, detail="ساخت لینک یکتا ممکن نشد، دوباره تلاش کن.")
     db.set_reseller_link_slug(reseller_id, slug)
     reseller_bot = db.get_reseller_bot(reseller_id)
+
+    # این پروسه (Mini App/FastAPI) از پروسه‌ی بات (bot_manager.py) جداست، پس
+    # نمی‌تواند مستقیماً Menu Button واقعی تلگرام بات نماینده را همین الان
+    # آپدیت کند - آن کار را حلقه‌ی reconcile_resellers_loop در پروسه‌ی بات
+    # (هر ۱۰ ثانیه) انجام می‌دهد. اما مقدار miniapp_tenant_id را همین‌جا هم
+    # به‌صورت best-effort روی دیتابیس خود نماینده به‌روز می‌کنیم تا هر
+    # درخواستی که از همین لحظه با اسلاگ جدید به مینی‌اپ برسد بلافاصله درست
+    # کار کند (بدون این‌که منتظر چرخه‌ی بعدی reconcile بمانیم).
+    try:
+        resolved_path = resolve_db_path(reseller_bot["db_path"])
+        reseller_db = Database(resolved_path)
+        reseller_db.set_setting("miniapp_tenant_id", slug)
+    except Exception:
+        logging.getLogger("miniapp.resellers").exception(
+            "همگام‌سازی فوری miniapp_tenant_id برای نماینده %s ناموفق بود.", reseller_id
+        )
+
     return {
         "status": "ok",
         "miniapp_link": _reseller_miniapp_link(reseller_bot),
-        "note": "لینک قبلی مینی‌اپ این نماینده دیگر کار نمی‌کند؛ فقط لینک جدید معتبر است.",
+        "note": (
+            "لینک قبلی مینی‌اپ این نماینده دیگر کار نمی‌کند؛ فقط لینک جدید معتبر است. "
+            "دکمه‌ی منوی بات نماینده هم حداکثر تا ۱۰ ثانیه دیگر با لینک جدید به‌روز می‌شود."
+        ),
     }
 
 
