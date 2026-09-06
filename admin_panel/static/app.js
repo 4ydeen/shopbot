@@ -5428,6 +5428,8 @@ function _gwFormHtml(gw) {
       <input class="input" id="gw-cr-resp-url" placeholder="مسیر لینک پرداخت در پاسخ (data.link)" style="direction:ltr;text-align:left" value="${esc(crResp.invoice_url_path || '')}">
       <input class="input" id="gw-cr-resp-txn" placeholder="مسیر شناسه‌ی تراکنش در پاسخ (data.id)" style="direction:ltr;text-align:left" value="${esc(crResp.txn_id_path || '')}">
     </div>
+    <label class="field field-row"><span>این درگاه به شماره موبایل مشتری نیاز دارد</span>${_swSpan('gw-req-phone', !!c.require_customer_phone)}</label>
+    <div class="card-sub" style="margin:6px 0 0;color:var(--muted,#9ca3af);font-size:12px">اگه فعال کنی، قبل از ساخت فاکتور از مشتری خواسته می‌شه با دکمه‌ی تلگرامی «اشتراک‌گذاری شماره موبایل» شماره‌اش رو بفرسته. دو پلیس‌هولدر همیشه در دسترس‌اند: <code>{customer_user_id}</code> (آیدی عددی تلگرام مشتری، خودکار و بدون نیاز به این گزینه) و <code>{customer_phone}</code> (فقط با فعال بودن این گزینه پر می‌شه، وگرنه خالیه).</div>
 
     <div class="card-sub" style="margin:16px 0 6px"><b>✅ استعلام پرداخت (Verify) — برای درگاه‌هایی که کاربر را برمی‌گردانند</b></div>
     <label class="field field-row"><span>فعال باشد</span>${_swSpan('gw-v-enabled', !!c.verify_enabled)}</label>
@@ -5509,6 +5511,7 @@ function _gwCollectConfig(body) {
       headers: _gwTextToHeaders($('#gw-cr-headers', body).value), body_type: $('#gw-cr-bodytype', body).value, body: crBody,
     },
     create_response: { invoice_url_path: $('#gw-cr-resp-url', body).value.trim(), txn_id_path: $('#gw-cr-resp-txn', body).value.trim() },
+    require_customer_phone: _swOn(body, 'gw-req-phone'),
     verify_enabled: _swOn(body, 'gw-v-enabled'),
     verify_request: {
       method: $('#gw-v-method', body).value, url: $('#gw-v-url', body).value.trim(),
@@ -5608,6 +5611,8 @@ function _gwGuideHtml() {
       <li><code>{تنظیم اعتبارنامه}</code> مثل <code>{api_key}</code> — هر فیلدی که تو بخش اعتبارنامه تعریف کردی</li>
       <li><code>{query.X}</code> — فقط تو Verify: پارامتر X از query صفحه‌ی بازگشت</li>
       <li><code>{gateway_ref}</code> — فقط تو Verify: شناسه‌ای که خودِ درگاه موقع ساخت فاکتور برگردونده</li>
+      <li><code>{customer_user_id}</code> — آیدی عددی تلگرام مشتری، همیشه و خودکار پر می‌شه</li>
+      <li><code>{customer_phone}</code> — شماره موبایل مشتری؛ فقط اگه تیک «این درگاه به شماره موبایل مشتری نیاز دارد» رو فعال کنی از مشتری گرفته و پر می‌شه</li>
     </ul>
     <p class="card-sub"><b>ساخت فاکتور</b> (اجباری): URL و بدنه‌ی درخواستی که فاکتور می‌سازه، به‌علاوه
     این‌که تو پاسخ JSON درگاه، «لینک پرداخت» و «شناسه‌ی تراکنش» تو کدوم مسیر هستن (مثلاً
