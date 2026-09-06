@@ -1502,6 +1502,10 @@ class DiscountBody(BaseModel):
     fixed_amount: Optional[int] = None
     max_uses: int = 0
     expires_at: Optional[str] = None
+    min_purchase: Optional[int] = None
+    max_purchase: Optional[int] = None
+    product_id: Optional[int] = None
+    category_id: Optional[int] = None
 
 
 @app.get("/api/discounts")
@@ -1511,7 +1515,11 @@ def api_discounts(admin=Depends(require_permission("discounts"))):
 
 @app.post("/api/discounts")
 def api_add_discount(body: DiscountBody, admin=Depends(require_permission("discounts"))):
-    code_id = db.create_discount_code(body.code, body.percent, body.fixed_amount, body.max_uses, body.expires_at)
+    code_id = db.create_discount_code(
+        body.code, body.percent, body.fixed_amount, body.max_uses, body.expires_at,
+        min_purchase=body.min_purchase, max_purchase=body.max_purchase,
+        product_id=body.product_id, category_id=body.category_id,
+    )
     db.log_admin_action(admin["id"], "discount_add", body.code, "discount", code_id)
     return {"id": code_id}
 
