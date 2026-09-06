@@ -452,7 +452,7 @@ def renewal_pricing_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"🔋 نرخ هر گیگ: {price_per_gb:,} تومان", callback_data="adm_renewal_price_gb")],
         [InlineKeyboardButton(text=f"⏱ نرخ هر روز: {price_per_day:,} تومان", callback_data="adm_renewal_price_day")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
     ])
 
 
@@ -466,7 +466,7 @@ def account_settings_kb(db) -> InlineKeyboardMarkup:
         state_on = db.get_setting(key, default) == "1"
         icon = "🟢" if state_on else "🔴"
         rows.append([InlineKeyboardButton(text=f"{icon} {label}", callback_data=f"adm_acct_toggle:{key}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:appearance")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -828,17 +828,20 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_test_menu",
         "adm_custom_config_settings",
         "adm_delivery_settings",
+        "adm_renewal_pricing",
     ]),
     ("resellers", "🤝 نمایندگی‌ها", [
         "adm_resellers_menu",
         "adm_credit_resellers_menu",
     ]),
-    ("marketing", "🎯 بازاریابی و تشویقی", [
+    ("marketing", "🎯 بازاریابی و رشد", [
         "adm_discounts_menu",
         "adm_wheel_settings",
         "adm_referral_settings",
         "adm_broadcast",
         "adm_deeplink_tools",
+        "adm_forcejoin_menu",
+        "adm_temp_message",
     ]),
     ("finance", "💰 مالی و پرداخت", [
         "adm_set_card",
@@ -848,30 +851,27 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
-        "adm_renewal_pricing",
     ]),
     ("alerts", "🔔 یادآوری‌ها و هشدارها", [
         "adm_renewal_settings",
         "adm_volume_reminder_settings",
         "adm_stock_alert_settings",
+        "adm_account_settings",
     ]),
-    ("access", "🔐 دسترسی و امنیت", [
-        "adm_forcejoin_menu",
+    ("access", "👤 ادمین و دسترسی", [
         "adm_admins_menu",
         "adm_set_support_contact",
     ]),
     ("appearance", "🎨 ظاهر و رنگ‌بندی", [
         "adm_edit_buttons",
-        "adm_account_settings",
         "adm_main_menu_settings",
         "adm_edit_welcome",
         "adm_panel_colors_menu",
         "adm_buyflow_colors_menu",
     ]),
-    ("management", "👥 مدیریت و آمار", [
+    ("management", "📊 گزارش و سیستم", [
         "adm_stats",
         "adm_backup_menu",
-        "adm_temp_message",
     ]),
 ]
 
@@ -1090,7 +1090,7 @@ def admin_temp_message_target_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="👤 به خودم", callback_data="adm_tempmsg_target:self")],
         [InlineKeyboardButton(text="🔢 آیدی عددی کاربر", callback_data="adm_tempmsg_target:custom")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:marketing")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1579,7 +1579,7 @@ def admin_forcejoin_menu_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=channel_text, callback_data="noop")],
         [InlineKeyboardButton(text="✏️ تنظیم / تغییر کانال", callback_data="adm_forcejoin_set_channel")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_forcejoin_toggle")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:marketing")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1682,7 +1682,7 @@ def admin_admins_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ افزودن ادمین", callback_data="adm_admin_add")],
         [InlineKeyboardButton(text="🔄 تغییر نقش ادمین", callback_data="adm_admin_role_change")],
         [InlineKeyboardButton(text="➖ حذف ادمین", callback_data="adm_admin_remove")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:access")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
