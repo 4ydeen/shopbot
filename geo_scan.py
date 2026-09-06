@@ -417,20 +417,31 @@ def _parse_full_json_config(text: str) -> list:
         data = json.loads(text)
     except (ValueError, TypeError):
         return []
-    if not isinstance(data, dict):
+
+    # بعضی پنل‌ها به‌جای یک کانفیگ کامل تنها، یک آرایه‌ی JSON برمی‌گردانند
+    # که هر عضوش خودش یک کانفیگ کامل Xray-core جدا است (یک آرایه‌ی چند
+    # پروفایلی، معادل چند خط vmess://... در فرمت لینکی) — پس هم حالت
+    # «یک object» و هم «آرایه‌ای از چند object» را پشتیبانی می‌کنیم.
+    if isinstance(data, dict):
+        profiles = [data]
+    elif isinstance(data, list):
+        profiles = [p for p in data if isinstance(p, dict)]
+    else:
         return []
-    outbounds = data.get("outbounds")
-    if not isinstance(outbounds, list):
-        return []
+
     out = []
-    for ob in outbounds:
-        if not isinstance(ob, dict):
+    for profile in profiles:
+        outbounds = profile.get("outbounds")
+        if not isinstance(outbounds, list):
             continue
-        item = _parse_xray_outbound(ob) if "protocol" in ob else _parse_singbox_outbound(ob)
-        if item:
-            out.append(item)
-        if len(out) >= _MAX_CONFIGS:
-            break
+        for ob in outbounds:
+            if not isinstance(ob, dict):
+                continue
+            item = _parse_xray_outbound(ob) if "protocol" in ob else _parse_singbox_outbound(ob)
+            if item:
+                out.append(item)
+            if len(out) >= _MAX_CONFIGS:
+                return out
     return out
 
 
@@ -823,9 +834,9 @@ async def scan_subscription(
         except Exception as je:  # noqa: BLE001 - فقط برای دیباگ، هر نوع خطایی مهمه
             json_diag = f"JSON پارس نشد: {je}"
         else:
-            if isinstance(parsed_json, dict):
-                top_keys = sorted(parsed_json.keys())
-                ob = parsed_json.get("outbounds")
+            def _describe_profile(d: dict) -> str:
+                top_keys = sorted(d.keys())
+                ob = d.get("outbounds")
                 if isinstance(ob, list):
                     rows = []
                     for item in ob:
@@ -835,13 +846,22 @@ async def scan_subscription(
                         kind = item.get("protocol") or item.get("type") or "?"
                         skeys = sorted((item.get("settings") or {}).keys()) if isinstance(item.get("settings"), dict) else []
                         rows.append(f"{item.get('tag') or '?'}:{kind}(keys={skeys or list(item.keys())})")
-                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — outbounds ({len(ob)} تا): {'; '.join(rows)[:400]}"
-                elif ob is not None:
-                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — outbounds لیست نیست (نوعش: {type(ob).__name__})"
-                else:
-                    json_diag = f"کلیدهای سطح‌بالا: {top_keys} — کلید outbounds اصلاً وجود نداره"
+                    return f"کلیدهای سطح‌بالا: {top_keys} — outbounds ({len(ob)} تا): {'; '.join(rows)[:400]}"
+                if ob is not None:
+                    return f"کلیدهای سطح‌بالا: {top_keys} — outbounds لیست نیست (نوعش: {type(ob).__name__})"
+                return f"کلیدهای سطح‌بالا: {top_keys} — کلید outbounds اصلاً وجود نداره"
+
+            if isinstance(parsed_json, dict):
+                json_diag = _describe_profile(parsed_json)
             elif isinstance(parsed_json, list):
-                json_diag = f"JSON یک آرایه‌ی سطح‌بالاست با {len(parsed_json)} عضو (نه یک object)"
+                dict_items = [p for p in parsed_json if isinstance(p, dict)]
+                if dict_items:
+                    json_diag = (
+                        f"JSON آرایه‌ای با {len(parsed_json)} عضو است؛ عضو اول → "
+                        + _describe_profile(dict_items[0])
+                    )
+                else:
+                    json_diag = f"JSON آرایه‌ای با {len(parsed_json)} عضو است و هیچ‌کدام object نیستند"
             else:
                 json_diag = f"JSON از نوع {type(parsed_json).__name__} است"
 
