@@ -2884,23 +2884,61 @@ async function showConfigBank(productId) {
 }
 
 /* ========================================================== discounts === */
+function discountExtraFieldsHtml(categories, products) {
+  return `
+      <div class="form-row">
+        <input class="input" id="code-minpurchase" type="number" placeholder="حداقل مبلغ خرید (تومان)">
+        <input class="input" id="code-maxpurchase" type="number" placeholder="حداکثر مبلغ خرید (تومان)">
+      </div>
+      <select class="input" id="code-scope">
+        <option value="">🌐 بدون محدودیت (همه‌ی محصولات)</option>
+        ${categories.length ? `<optgroup label="فقط یک دسته‌بندی خاص">${categories.map(c => `<option value="cat:${c.id}">📁 ${esc(c.name)}</option>`).join('')}</optgroup>` : ''}
+        ${products.length ? `<optgroup label="فقط یک محصول خاص">${products.map(p => `<option value="prod:${p.id}">📦 ${esc(p.name)}</option>`).join('')}</optgroup>` : ''}
+      </select>
+      <label class="field"><span>تاریخ انقضا (اختیاری)</span><input class="input" id="code-expires" type="date"></label>`;
+}
+function discountExtraFieldsPayload(b) {
+  const scope = $('#code-scope', b).value;
+  let product_id = null, category_id = null;
+  if (scope.startsWith('cat:')) category_id = Number(scope.split(':')[1]);
+  if (scope.startsWith('prod:')) product_id = Number(scope.split(':')[1]);
+  const expiresRaw = $('#code-expires', b).value;
+  return {
+    min_purchase: Number($('#code-minpurchase', b).value) || null,
+    max_purchase: Number($('#code-maxpurchase', b).value) || null,
+    product_id, category_id,
+    expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null,
+  };
+}
+function discountConstraintsLine(c, categories, products) {
+  const parts = [];
+  if (c.min_purchase) parts.push(`حداقل خرید ${fmt(c.min_purchase)}ت`);
+  if (c.max_purchase) parts.push(`حداکثر خرید ${fmt(c.max_purchase)}ت`);
+  if (c.product_id) { const p = products.find(x => x.id === c.product_id); parts.push(`مخصوص محصول: ${p ? esc(p.name) : '#' + c.product_id}`); }
+  else if (c.category_id) { const cat = categories.find(x => x.id === c.category_id); parts.push(`مخصوص دسته: ${cat ? esc(cat.name) : '#' + c.category_id}`); }
+  if (c.expires_at) parts.push(`انقضا: ${String(c.expires_at).slice(0, 10)}`);
+  return parts.join(' · ');
+}
 async function renderDiscounts() {
-  const codes = await apiGet('/discounts');
-  if (loadTheme().theme === 'brutalist') return renderDiscountsBrutalist(codes);
-  if (loadTheme().theme === 'bento') return renderDiscountsBento(codes);
+  const [codes, categories, products] = await Promise.all([
+    apiGet('/discounts'), apiGet('/categories'), apiGet('/products'),
+  ]);
+  if (loadTheme().theme === 'brutalist') return renderDiscountsBrutalist(codes, categories, products);
+  if (loadTheme().theme === 'bento') return renderDiscountsBento(codes, categories, products);
   setContent(`
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>کد</th><th>تخفیف</th><th>سقف استفاده</th><th>مصرف‌شده</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+      <thead><tr><th>کد</th><th>تخفیف</th><th>محدودیت‌ها</th><th>سقف استفاده</th><th>مصرف‌شده</th><th>وضعیت</th><th>عملیات</th></tr></thead>
       <tbody>${codes.map(c => `<tr>
         <td class="mono">${esc(c.code)}</td>
         <td>${c.percent ? c.percent + '%' : fmt(c.fixed_amount) + ' تومان'}</td>
+        <td style="font-size:12px;color:var(--muted,#888)">${discountConstraintsLine(c, categories, products) || '—'}</td>
         <td class="mono">${c.max_uses ? fmt(c.max_uses) : 'نامحدود'}</td>
         <td class="mono">${fmt(c.used_count)}</td>
         <td>${c.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
         <td><button class="btn btn-sm" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
         <button class="btn btn-danger btn-sm" data-del="${c.id}">حذف</button></td>
-      </tr>`).join('') || '<tr><td colspan="6" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
   `);
   $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
@@ -2911,6 +2949,7 @@ async function renderDiscounts() {
         <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
       </div>
       <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      ${discountExtraFieldsHtml(categories, products)}
       <button class="btn btn-primary" id="code-save">ثبت</button>
     </div>`, (b, close) => {
     $('#code-save', b).addEventListener('click', async () => {
@@ -2922,6 +2961,7 @@ async function renderDiscounts() {
           percent: Number($('#code-percent', b).value) || null,
           fixed_amount: Number($('#code-fixed', b).value) || null,
           max_uses: Number($('#code-maxuses', b).value) || 0,
+          ...discountExtraFieldsPayload(b),
         });
         toast('کد اضافه شد.'); close(); renderDiscounts();
       } catch (e) { handleErr(e); }
@@ -2937,7 +2977,7 @@ async function renderDiscounts() {
 }
 
 /* ------------------------------------------------------ discounts: bento */
-function renderDiscountsBento(codes) {
+function renderDiscountsBento(codes, categories, products) {
   setContent(`
     <div class="bn-hero">
       <div><h2>کدهای تخفیف</h2><p>${fmt(codes.length)} کد ثبت‌شده</p></div>
@@ -2951,6 +2991,7 @@ function renderDiscountsBento(codes) {
           </div>
           <div class="bn-row-title mono" style="font-size:14px">${esc(c.code)}</div>
           <div class="bn-row-sub">سقف: ${c.max_uses ? fmt(c.max_uses) : 'نامحدود'} · مصرف: ${fmt(c.used_count)}</div>
+          ${discountConstraintsLine(c, categories, products) ? `<div class="bn-row-sub" style="font-size:11px">${discountConstraintsLine(c, categories, products)}</div>` : ''}
           ${bnPill(c.is_active ? 'فعال' : 'غیرفعال', c.is_active ? 'ok' : 'no')}
           <div style="display:flex;gap:8px;margin-top:6px">
             <button class="bn-btn bn-btn-ghost" data-toggle="${c.id}">${c.is_active ? 'غیرفعال' : 'فعال'}</button>
@@ -2968,6 +3009,7 @@ function renderDiscountsBento(codes) {
         <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
       </div>
       <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      ${discountExtraFieldsHtml(categories, products)}
       <button class="btn btn-primary" id="code-save">ثبت</button>
     </div>`, (b, close) => {
     $('#code-save', b).addEventListener('click', async () => {
@@ -2979,6 +3021,7 @@ function renderDiscountsBento(codes) {
           percent: Number($('#code-percent', b).value) || null,
           fixed_amount: Number($('#code-fixed', b).value) || null,
           max_uses: Number($('#code-maxuses', b).value) || 0,
+          ...discountExtraFieldsPayload(b),
         });
         toast('کد اضافه شد.'); close(); renderDiscounts();
       } catch (e) { handleErr(e); }
@@ -3007,7 +3050,7 @@ function renderDiscountsBento(codes) {
 /* ------------------------------------------------ discounts: brutalist -- */
 // کدهای تخفیف به‌شکل «بلیط پانچ‌شده» (کوپن) با خط بریدگی دایره‌ای وسط —
 // عدد تخفیف با فونت درشت مثل تگ قیمت.
-function renderDiscountsBrutalist(codes) {
+function renderDiscountsBrutalist(codes, categories, products) {
   setContent(`
     <div class="bru-hero" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
       <div>
@@ -3026,6 +3069,7 @@ function renderDiscountsBrutalist(codes) {
             <div class="bru-coupon-code mono">${esc(c.code)}</div>
             <div class="bru-coupon-row"><span>سقف مصرف</span><b class="mono">${c.max_uses ? fmt(c.max_uses) : 'نامحدود'}</b></div>
             <div class="bru-coupon-row"><span>مصرف‌شده</span><b class="mono">${fmt(c.used_count)}</b></div>
+            ${discountConstraintsLine(c, categories, products) ? `<div class="bru-coupon-row" style="font-size:11px"><span>محدودیت</span><b>${discountConstraintsLine(c, categories, products)}</b></div>` : ''}
             <span class="bru-flag ${c.is_active ? 'bru-flag-ok' : 'bru-flag-no'}" style="align-self:flex-start">${c.is_active ? 'فعال' : 'غیرفعال'}</span>
           </div>
           <div class="bru-coupon-actions">
@@ -3044,6 +3088,7 @@ function renderDiscountsBrutalist(codes) {
         <input class="input" id="code-fixed" type="number" placeholder="یا مبلغ ثابت">
       </div>
       <input class="input" id="code-maxuses" type="number" placeholder="سقف تعداد استفاده (۰=نامحدود)" value="0">
+      ${discountExtraFieldsHtml(categories, products)}
       <button class="btn btn-primary" id="code-save">ثبت</button>
     </div>`, (b, close) => {
     $('#code-save', b).addEventListener('click', async () => {
@@ -3055,6 +3100,7 @@ function renderDiscountsBrutalist(codes) {
           percent: Number($('#code-percent', b).value) || null,
           fixed_amount: Number($('#code-fixed', b).value) || null,
           max_uses: Number($('#code-maxuses', b).value) || 0,
+          ...discountExtraFieldsPayload(b),
         });
         toast('کد اضافه شد.'); close(); renderDiscounts();
       } catch (e) { handleErr(e); }
