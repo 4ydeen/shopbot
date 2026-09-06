@@ -13,6 +13,7 @@ import asyncio
 from datetime import date, timedelta
 import tempfile
 import logging
+import zipfile
 
 from aiogram import Router, F, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -29,7 +30,10 @@ from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
-from backup import create_backup, restore_backup, is_valid_sqlite_db, push_backup_sftp, test_sftp_connection, backup_and_notify
+from backup import (
+    create_backup, restore_backup, is_valid_sqlite_db, push_backup_sftp,
+    test_sftp_connection, backup_and_notify, create_full_backup, restore_full_backup,
+)
 import crypto_payment
 import abangateway_payment
 from panel_providers import (
@@ -80,6 +84,7 @@ from states import (
     AdminMinAmountSettings,
     AdminCustomGatewayMinAmount,
     AdminRestoreBackup,
+    AdminRestoreFullBackup,
     AdminBackupInterval,
     AdminBackupSecondaryChat,
     AdminBackupSftp,
@@ -6387,12 +6392,22 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not owner_only(call.from_user.id):
             return await deny_support(call)
         await state.clear()
+        show_full = is_main_bot and owner_only(call.from_user.id)
+        extra_hint = (
+            "\n• «دریافت بکاپ کامل» یک فایل zip شامل دیتابیس بات اصلی + دیتابیس تک‌تک "
+            "نماینده‌ها (سطح ۱ و سطح ۲) می‌فرستد؛ برای جابجایی کامل به سرور دیگر از همین گزینه استفاده کن.\n"
+            "• «بازیابی کامل» همان فایل zip را می‌گیرد و هم بات اصلی هم دیتابیس تک‌تک "
+            "نماینده‌ها را با هم بازیابی می‌کند (برخلاف «بازیابی از فایل بکاپ» معمولی که فقط "
+            "دیتابیس همین یک بات را عوض می‌کند و اطلاعات نماینده‌ها را برنمی‌گرداند)."
+            if show_full else ""
+        )
         await replace_admin_view(call, 
             "🗄 بکاپ و بازیابی دیتابیس\n\n"
             "• «دریافت بکاپ فوری» یک نسخه از دیتابیس فعلی را همین الان برایت می‌فرستد.\n"
             "• «بازیابی از فایل بکاپ» دیتابیس فعلی را با فایلی که آپلود می‌کنی جایگزین می‌کند "
-            "(این کار قابل بازگشت نیست مگر با بکاپ دیگری).",
-            reply_markup=kb.admin_backup_menu_kb(),
+            "(این کار قابل بازگشت نیست مگر با بکاپ دیگری)."
+            + extra_hint,
+            reply_markup=kb.admin_backup_menu_kb(show_full_backup=show_full),
         )
         await call.answer()
 
@@ -6412,6 +6427,209 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.message.answer_document(
             FSInputFile(backup_path), caption="🗄 بکاپ فوری دیتابیس"
         )
+
+    @router.callback_query(F.data == "adm_backup_full")
+    async def cb_backup_full(call: CallbackQuery):
+        # این گزینه عمداً روی هر بات نمایندگی مخفی است (کیبورد فقط وقتی
+        # is_main_bot=True آن را نشان می‌دهد)، ولی این چک سمت سرور هم لازم
+        # است چون callback_data را می‌شود دستی هم فرستاد؛ یک نماینده هرگز نباید
+        # بتواند اطلاعات کل نماینده‌های دیگر را با این دکمه بگیرد.
+        if not (is_main_bot and owner_only(call.from_user.id)):
+            return await deny_support(call)
+        await call.answer("⏳ در حال ساخت بکاپ کامل (بات اصلی + همه‌ی نماینده‌ها)...")
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(db.db_path)), "backups", "full")
+        try:
+            zip_path = await asyncio.to_thread(create_full_backup, db, db.db_path, output_dir, 5)
+        except Exception:
+            logger.exception("ساخت بکاپ کامل ناموفق بود.")
+            return await call.message.answer("❌ ساخت بکاپ کامل ناموفق بود.")
+        if not zip_path:
+            return await call.message.answer("❌ فایل دیتابیس اصلی پیدا نشد.")
+        file_size_mb = os.path.getsize(zip_path) / (1024 * 1024)
+        (await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "backup_full_create",
+            "دریافت بکاپ کامل (بات اصلی + همه‌ی نماینده‌ها) از طریق بات",
+        ))
+        caption = (
+            "🗂 بکاپ کامل\n"
+            "شامل: دیتابیس بات اصلی + دیتابیس تک‌تک نماینده‌ها (سطح ۱ و سطح ۲)\n"
+            f"📦 حجم: {file_size_mb:.1f} مگابایت\n\n"
+            "برای انتقال به سرور جدید: همین فایل zip را روی سرور جدید باز کن؛ "
+            "«main_bot.db» همان دیتابیس بات اصلی است و فایل‌های «reseller_*.db» "
+            "باید در مسیر دیتابیس همان نماینده جایگزین شوند (طبق manifest.txt داخل zip)."
+        )
+        if file_size_mb > 49:
+            await call.message.answer(
+                f"⚠️ حجم فایل ({file_size_mb:.1f} مگابایت) ممکن است از سقف ارسال فایل تلگرام "
+                "برای بات‌ها بیشتر باشد. اگر ارسال زیر با خطا مواجه شد، فایل را مستقیم از مسیر "
+                f"زیر روی خود سرور بردار:\n{zip_path}"
+            )
+        try:
+            await call.message.answer_document(FSInputFile(zip_path), caption=caption)
+        except Exception:
+            logger.exception("ارسال فایل بکاپ کامل ناموفق بود.")
+            await call.message.answer(
+                f"❌ ارسال فایل از طریق تلگرام ناموفق بود. فایل روی خود سرور اینجاست:\n{zip_path}"
+            )
+
+    # -------------------------------------------------------------------
+    # بازیابی کامل (از فایل zip ساخته‌شده توسط «دریافت بکاپ کامل»)
+    # -------------------------------------------------------------------
+    # این بخش دقیقاً معادل «بازیابی از فایل بکاپ» است، با این تفاوت که
+    # به‌جای یک فایل .db تنها، یک zip شامل بات اصلی + همه‌ی نماینده‌ها را
+    # می‌گیرد و هرکدام را در مسیر خودش جایگزین می‌کند - وگرنه (باگ قبلی)
+    # «بازیابی از فایل بکاپ» فقط دیتابیس همان بات را عوض می‌کرد و چون
+    # اطلاعات کاربرها/کانفیگ‌ها/کیف پول هر نماینده داخل دیتابیس مستقل خودش
+    # است (نه دیتابیس بات اصلی)، آن‌ها هیچ‌وقت برنمی‌گشتند.
+
+    @router.callback_query(F.data == "adm_restore_full_start")
+    async def cb_restore_full_start(call: CallbackQuery, state: FSMContext):
+        if not (is_main_bot and owner_only(call.from_user.id)):
+            return await deny_support(call)
+        await state.set_state(AdminRestoreFullBackup.waiting_file)
+        await safe_edit(call, 
+            "♻️ فایل zip «بکاپ کامل» (همان چیزی که از «دریافت بکاپ کامل» گرفتی) را همین‌جا "
+            "به‌صورت Document ارسال کن.\n\n"
+            "⚠️ توجه: بعد از تایید، هم دیتابیس بات اصلی و هم دیتابیس تک‌تک نماینده‌هایی که داخل "
+            "این zip باشند، جایگزین می‌شوند. هر بات نماینده‌ای که در همین لحظه در حال اجراست، برای "
+            "چند ثانیه در زمان جایگزینی دیتابیسش متوقف و دوباره خودکار روشن می‌شود.",
+            reply_markup=kb.admin_restore_full_waiting_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(AdminRestoreFullBackup.waiting_file, F.data == "adm_restore_full_cancel_wait")
+    async def cb_restore_full_cancel_wait(call: CallbackQuery, state: FSMContext):
+        if not (is_main_bot and owner_only(call.from_user.id)):
+            return await deny_support(call)
+        await state.clear()
+        await safe_edit(call, "❌ بازیابی کامل لغو شد.", reply_markup=kb.admin_back_kb())
+        await call.answer()
+
+    @router.message(AdminRestoreFullBackup.waiting_file, F.document)
+    async def on_restore_full_file(message: Message, state: FSMContext):
+        if not (is_main_bot and owner_only(message.from_user.id)):
+            return
+        doc = message.document
+        if not doc.file_name.lower().endswith(".zip"):
+            return await message.answer("❌ فایل باید همان zip «بکاپ کامل» باشد. دوباره ارسال کن.")
+
+        tmp_dir = tempfile.mkdtemp(prefix="restore_full_")
+        tmp_path = os.path.join(tmp_dir, "uploaded.zip")
+        file = await message.bot.get_file(doc.file_id)
+        await message.bot.download_file(file.file_path, destination=tmp_path)
+
+        try:
+            with zipfile.ZipFile(tmp_path, "r") as zf:
+                names = zf.namelist()
+        except Exception:
+            return await message.answer("❌ این فایل یک zip معتبر نیست. عملیات لغو شد.")
+        if "main_bot.db" not in names:
+            return await message.answer("❌ این zip شامل main_bot.db نیست؛ فایل «بکاپ کامل» درستی به نظر نمی‌رسد.")
+
+        reseller_count = sum(1 for n in names if n.startswith("reseller_") and n.endswith(".db"))
+        await state.update_data(restore_full_tmp_path=tmp_path)
+        await state.set_state(AdminRestoreFullBackup.waiting_confirm)
+        size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+        await message.answer(
+            f"📦 فایل دریافت شد ({size_mb:.1f} مگابایت) — شامل بات اصلی + {reseller_count} دیتابیس نماینده.\n\n"
+            "⚠️ با تایید، دیتابیس بات اصلی و دیتابیس همین نماینده‌ها جایگزین می‌شود (از وضعیت فعلی هر "
+            "کدام هم قبلش یک نسخه‌ی pre_restore ذخیره می‌شود). مطمئنی؟",
+            reply_markup=kb.admin_restore_full_confirm_kb(),
+        )
+
+    @router.message(AdminRestoreFullBackup.waiting_file)
+    async def on_restore_full_file_wrong_type(message: Message):
+        if not (is_main_bot and owner_only(message.from_user.id)):
+            return
+        await message.answer("❌ باید فایل zip بکاپ کامل را به‌صورت Document ارسال کنی، نه متن یا عکس.")
+
+    @router.callback_query(AdminRestoreFullBackup.waiting_confirm, F.data == "adm_restore_full_confirm")
+    async def cb_restore_full_confirm(call: CallbackQuery, state: FSMContext):
+        if not (is_main_bot and owner_only(call.from_user.id)):
+            return await deny_support(call)
+        data = await state.get_data()
+        tmp_path = data.get("restore_full_tmp_path")
+        await state.clear()
+        if not tmp_path or not os.path.exists(tmp_path):
+            return await safe_edit(call, "❌ فایل موقت پیدا نشد، دوباره تلاش کن.")
+
+        await safe_edit(call, "⏳ در حال بازیابی کامل...")
+
+        # قبل از جایگزینی فایل هر نماینده، اگر بات همان نماینده همین الان در حال
+        # اجراست باید متوقفش کنیم - وگرنه اتصال زنده‌اش ممکن است وسط جایگزینی
+        # فایل نیمه‌نوشته را باز نگه دارد (همان باگی که در replace_file توضیح
+        # داده شده). چون این کار قبل از دانستن لیست نماینده‌ها (که داخل خود
+        # zip است) ممکن نیست، ابتدا zip را باز و لیست را می‌خوانیم، هر بات
+        # مرتبط را متوقف می‌کنیم، بعد فایل‌ها را جایگزین می‌کنیم؛ حلقه‌ی
+        # reconcile هر بات متوقف‌شده‌ای که هنوز فعال باشد را ظرف چند ثانیه
+        # خودش دوباره روشن می‌کند.
+        stopped_tokens = []
+        try:
+            with zipfile.ZipFile(tmp_path, "r") as zf:
+                names = zf.namelist()
+            reseller_ids = []
+            for n in names:
+                if n.startswith("reseller_") and n.endswith(".db"):
+                    try:
+                        reseller_ids.append(int(n[len("reseller_"):-len(".db")].split("_level")[0]))
+                    except (ValueError, IndexError):
+                        pass
+            if bot_manager is not None:
+                for rid in reseller_ids:
+                    row = await asyncio.to_thread(db.get_reseller_bot, rid)
+                    if row and bot_manager.is_running(row["bot_token"]):
+                        await bot_manager.stop_bot(row["bot_token"])
+                        stopped_tokens.append(row["bot_token"])
+
+            result = await asyncio.to_thread(restore_full_backup, db, db.db_path, tmp_path)
+        except Exception as e:
+            logger.exception("بازیابی کامل ناموفق بود.")
+            return await safe_edit(call, f"❌ بازیابی کامل ناموفق بود: {e}")
+        else:
+            (await asyncio.to_thread(
+                db.log_admin_action, call.from_user.id, "backup_full_restore",
+                f"بازیابی کامل: {len(result['resellers_restored'])} نماینده بازیابی، "
+                f"{len(result['resellers_skipped'])} رد شد.",
+            ))
+        finally:
+            try:
+                os.remove(tmp_path)
+                os.rmdir(os.path.dirname(tmp_path))
+            except OSError:
+                pass
+
+        lines = ["✅ دیتابیس بات اصلی بازیابی شد."]
+        if result["resellers_restored"]:
+            lines.append(f"✅ {len(result['resellers_restored'])} دیتابیس نماینده بازیابی شد:")
+            for r in result["resellers_restored"]:
+                lines.append(f"  • @{r['bot_username'] or r['id']}")
+        if result["resellers_skipped"]:
+            lines.append(f"⚠️ {len(result['resellers_skipped'])} مورد رد شد:")
+            for s in result["resellers_skipped"]:
+                lines.append(f"  • {s['file']}: {s['reason']}")
+        if stopped_tokens:
+            lines.append(
+                f"\nℹ️ {len(stopped_tokens)} بات نماینده برای جایگزینی دیتابیس موقتاً متوقف شد و ظرف چند "
+                "ثانیه‌ی آینده خودش دوباره روشن می‌شود."
+            )
+        await safe_edit(call, "\n".join(lines))
+        await call.answer()
+
+    @router.callback_query(AdminRestoreFullBackup.waiting_confirm, F.data == "adm_restore_full_cancel")
+    async def cb_restore_full_cancel(call: CallbackQuery, state: FSMContext):
+        if not (is_main_bot and owner_only(call.from_user.id)):
+            return await deny_support(call)
+        data = await state.get_data()
+        tmp_path = data.get("restore_full_tmp_path")
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+                os.rmdir(os.path.dirname(tmp_path))
+            except OSError:
+                pass
+        await state.clear()
+        await safe_edit(call, "❌ بازیابی کامل لغو شد.", reply_markup=kb.admin_back_kb())
+        await call.answer()
 
     # -------------------------------------------------------------------
     # زمان‌بندی بکاپ خودکار + جابجایی بین دو سرور

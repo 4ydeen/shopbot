@@ -238,6 +238,11 @@ class AdminRestoreBackup(StatesGroup):
     waiting_confirm = State()
 
 
+class AdminRestoreFullBackup(StatesGroup):
+    waiting_file = State()
+    waiting_confirm = State()
+
+
 class AdminBackupInterval(StatesGroup):
     waiting_hours = State()
 

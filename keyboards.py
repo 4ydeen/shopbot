@@ -938,14 +938,27 @@ def admin_category_label(cat_key: str) -> str:
     return "🔧 پنل مدیریت"
 
 
-def admin_backup_menu_kb() -> InlineKeyboardMarkup:
+def admin_backup_menu_kb(show_full_backup: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📥 دریافت بکاپ فوری", callback_data="adm_backup_now")],
-        [InlineKeyboardButton(text="♻️ بازیابی از فایل بکاپ", callback_data="adm_restore_start")],
-        [InlineKeyboardButton(text="🔁 زمان‌بندی و جابجایی بین سرورها", callback_data="adm_backup_sync_menu")],
-        [InlineKeyboardButton(text="🏭 بازگشت به حالت کارخانه", callback_data="adm_factory_reset_start")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
     ]
+    if show_full_backup:
+        # فقط برای مالک اصلی روی بات اصلی نمایش داده می‌شود (نه هر بات نمایندگی):
+        # این بکاپ، دیتابیس اصلی + دیتابیس تک‌تک نماینده‌ها (سطح ۱ و ۲) را با هم
+        # در یک فایل واحد می‌فرستد؛ همان چیزی که برای جابجایی کامل بین دو سرور لازم است.
+        rows.append([InlineKeyboardButton(
+            text="🗂 دریافت بکاپ کامل (بات اصلی + همه‌ی نماینده‌ها)",
+            callback_data="adm_backup_full",
+        )])
+    rows.append([InlineKeyboardButton(text="♻️ بازیابی از فایل بکاپ", callback_data="adm_restore_start")])
+    if show_full_backup:
+        rows.append([InlineKeyboardButton(
+            text="♻️ بازیابی کامل (از فایل zip بکاپ کامل)",
+            callback_data="adm_restore_full_start",
+        )])
+    rows.append([InlineKeyboardButton(text="🔁 زمان‌بندی و جابجایی بین سرورها", callback_data="adm_backup_sync_menu")])
+    rows.append([InlineKeyboardButton(text="🏭 بازگشت به حالت کارخانه", callback_data="adm_factory_reset_start")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1039,6 +1052,21 @@ def admin_restore_confirm_kb() -> InlineKeyboardMarkup:
 def admin_restore_waiting_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_restore_cancel_wait")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_restore_full_confirm_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="✅ بله، همه‌چیز را جایگزین کن", callback_data="adm_restore_full_confirm")],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_restore_full_cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_restore_full_waiting_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="❌ انصراف", callback_data="adm_restore_full_cancel_wait")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
