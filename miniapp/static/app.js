@@ -4812,13 +4812,14 @@ async function renderAdminSalesSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const [referral, wheel, renewal, volumeRem, discounts, allProducts] = await Promise.all([
+    const [referral, wheel, renewal, volumeRem, discounts, allProducts, allCategories] = await Promise.all([
       api("/api/admin/settings/referral"),
       api("/api/admin/settings/wheel"),
       api("/api/admin/settings/renewal"),
       api("/api/admin/settings/volume-reminder"),
       api("/api/admin/discounts"),
       api("/api/admin/products/all").catch(() => []),
+      api("/api/admin/categories").catch(() => []),
     ]);
 
     const eligibleProducts = (allProducts || []).filter((p) => p.is_auto_provision && p.provision_server_id);
@@ -4934,7 +4935,14 @@ async function renderAdminSalesSection() {
       <div class="card">
         <div class="eyebrow" style="margin-top:0">🏷️ کدهای تخفیف</div>
         <div id="discounts-list">
-          ${discounts.length === 0 ? `<div class="hint-text" style="margin:0">هنوز کد تخفیفی ثبت نشده.</div>` : discounts.map((d) => `
+          ${discounts.length === 0 ? `<div class="hint-text" style="margin:0">هنوز کد تخفیفی ثبت نشده.</div>` : discounts.map((d) => {
+            const constraints = [];
+            if (d.min_purchase) constraints.push(`حداقل خرید ${fmt(d.min_purchase)} ت`);
+            if (d.max_purchase) constraints.push(`حداکثر خرید ${fmt(d.max_purchase)} ت`);
+            if (d.product_id) { const p = (allProducts || []).find((x) => x.id === d.product_id); constraints.push(`مخصوص محصول: ${p ? p.name : "#" + d.product_id}`); }
+            else if (d.category_id) { const c = (allCategories || []).find((x) => x.id === d.category_id); constraints.push(`مخصوص دسته: ${c ? c.name : "#" + d.category_id}`); }
+            if (d.expires_at) constraints.push(`انقضا: ${String(d.expires_at).slice(0, 10)}`);
+            return `
             <div class="admin-list-row">
               <div class="admin-list-row-main">
                 <span style="direction:ltr">${d.code}</span>
@@ -4943,13 +4951,14 @@ async function renderAdminSalesSection() {
                   استفاده: ${d.used_count}${d.max_uses ? "/" + d.max_uses : " (نامحدود)"}
                   ${d.is_active ? "" : "· غیرفعال"}
                 </span>
+                ${constraints.length ? `<span class="hint-text" style="margin:0;font-size:11px">${constraints.join(" · ")}</span>` : ""}
               </div>
               <div class="admin-list-row-actions">
                 <button class="btn small outline" data-toggle-disc="${d.id}">${d.is_active ? "⛔️" : "✅"}</button>
                 <button class="btn small outline danger" data-del-disc="${d.id}">🗑️</button>
               </div>
             </div>
-          `).join("")}
+          `;}).join("")}
         </div>
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--glass-brd)">
           <div class="eyebrow">افزودن کد تخفیف جدید</div>
@@ -4961,6 +4970,18 @@ async function renderAdminSalesSection() {
           <input class="input" id="new-disc-fixed" type="number" placeholder="مثال: 50000" style="margin-bottom:10px" />
           <label class="field-label">حداکثر تعداد دفعات استفاده (۰ یعنی نامحدود)</label>
           <input class="input" id="new-disc-maxuses" type="number" placeholder="0" value="0" style="margin-bottom:4px" />
+          <label class="field-label">حداقل مبلغ سبد خرید (تومان — خالی یعنی بدون محدودیت)</label>
+          <input class="input" id="new-disc-minpurchase" type="number" placeholder="مثال: 100000" style="margin-bottom:10px" />
+          <label class="field-label">حداکثر مبلغ سبد خرید (تومان — خالی یعنی بدون محدودیت)</label>
+          <input class="input" id="new-disc-maxpurchase" type="number" placeholder="مثال: 1000000" style="margin-bottom:10px" />
+          <label class="field-label">محدود به یک محصول یا دسته‌بندی خاص (اختیاری)</label>
+          <select class="input" id="new-disc-scope" style="margin-bottom:10px">
+            <option value="">🌐 بدون محدودیت (همه‌ی محصولات)</option>
+            ${(allCategories || []).length ? `<optgroup label="فقط یک دسته‌بندی خاص">${(allCategories || []).map((c) => `<option value="cat:${c.id}">📁 ${c.name}</option>`).join("")}</optgroup>` : ""}
+            ${(allProducts || []).length ? `<optgroup label="فقط یک محصول خاص">${(allProducts || []).map((p) => `<option value="prod:${p.id}">📦 ${p.name}</option>`).join("")}</optgroup>` : ""}
+          </select>
+          <label class="field-label">تاریخ انقضا (اختیاری)</label>
+          <input class="input" id="new-disc-expires" type="date" style="margin-bottom:4px" />
           <div class="field-error" id="new-disc-error"></div>
           <button class="btn" id="new-disc-save" style="margin-top:8px">➕ افزودن کد تخفیف</button>
         </div>
@@ -5119,12 +5140,23 @@ async function renderAdminSalesSection() {
       if (!code) { errBox.textContent = "کد تخفیف را وارد کن."; return; }
       if (!percentVal && !fixedVal) { errBox.textContent = "باید یکی از دو کادر درصد یا مبلغ ثابت را پر کنی."; return; }
       if (percentVal && fixedVal) { errBox.textContent = "فقط یکی از دو کادر درصد یا مبلغ ثابت را پر کن، نه هردو."; return; }
+      const minPurchaseVal = document.getElementById("new-disc-minpurchase").value.trim();
+      const maxPurchaseVal = document.getElementById("new-disc-maxpurchase").value.trim();
+      const scopeVal = document.getElementById("new-disc-scope").value;
+      const expiresVal = document.getElementById("new-disc-expires").value;
+      let productId = null, categoryId = null;
+      if (scopeVal.startsWith("cat:")) categoryId = Number(scopeVal.split(":")[1]);
+      if (scopeVal.startsWith("prod:")) productId = Number(scopeVal.split(":")[1]);
       try {
         await api("/api/admin/discounts", {
           method: "POST",
           body: JSON.stringify({
             code, percent: percentVal ? Number(percentVal) : null,
             fixed_amount: fixedVal ? Number(fixedVal) : null, max_uses: maxUses,
+            min_purchase: minPurchaseVal ? Number(minPurchaseVal) : null,
+            max_purchase: maxPurchaseVal ? Number(maxPurchaseVal) : null,
+            product_id: productId, category_id: categoryId,
+            expires_at: expiresVal ? new Date(expiresVal + "T23:59:59").toISOString() : null,
           }),
         });
         tg.HapticFeedback.notificationOccurred("success");
