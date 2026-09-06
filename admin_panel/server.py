@@ -175,11 +175,24 @@ async def _notifier_loop():
     last_topup_id = max((t["id"] for t in init_topups), default=0)
     last_ticket_id = max((t["id"] for t in init_tickets), default=0)
     last_support_id = (await asyncio.to_thread(db.get_latest_user_support_message_id))
+    # سفارش/شارژهایی که دیده شده‌اند ولی هنوز روش پرداختشان مشخص نیست (نه
+    # فاکتور درگاهی برایشان ساخته شده، نه رسیدی ارسال شده) - هر دور دوباره
+    # چک می‌شوند تا همین که روش مشخص شد (و اگر پوش آن روش فعال بود) پوش برود.
+    pending_order_methods = set()
+    pending_topup_methods = set()
     while True:
         try:
             all_pending_orders = (await asyncio.to_thread(db.get_pending_orders))
-            orders = [o for o in all_pending_orders if o["id"] > last_order_id]
-            for o in orders:
+            pending_order_methods &= {o["id"] for o in all_pending_orders}
+            new_orders = [o for o in all_pending_orders if o["id"] > last_order_id]
+            for o in [o for o in all_pending_orders if o["id"] in pending_order_methods] + new_orders:
+                method = (await asyncio.to_thread(db.resolve_payment_method, "order", o["id"]))
+                if method is None:
+                    pending_order_methods.add(o["id"])
+                    continue
+                pending_order_methods.discard(o["id"])
+                if not (await asyncio.to_thread(db.is_payment_method_push_enabled, method)):
+                    continue
                 user = (await asyncio.to_thread(db.get_user, o["user_id"]))
                 uname = (user["username"] if user else None) or o["user_id"]
                 await _notify_admins("orders", {
@@ -187,12 +200,20 @@ async def _notifier_loop():
                     "body": f"سفارش #{o['id']} از {uname} در انتظار بررسی است.",
                     "tag": "orders",
                 })
-            if orders:
-                last_order_id = max(o["id"] for o in orders)
+            if new_orders:
+                last_order_id = max(o["id"] for o in new_orders)
 
             all_pending_topups = (await asyncio.to_thread(db.get_pending_topups))
-            topups = [t for t in all_pending_topups if t["id"] > last_topup_id]
-            for t in topups:
+            pending_topup_methods &= {t["id"] for t in all_pending_topups}
+            new_topups = [t for t in all_pending_topups if t["id"] > last_topup_id]
+            for t in [t for t in all_pending_topups if t["id"] in pending_topup_methods] + new_topups:
+                method = (await asyncio.to_thread(db.resolve_payment_method, "wallet_topup", t["id"]))
+                if method is None:
+                    pending_topup_methods.add(t["id"])
+                    continue
+                pending_topup_methods.discard(t["id"])
+                if not (await asyncio.to_thread(db.is_payment_method_push_enabled, method)):
+                    continue
                 user = (await asyncio.to_thread(db.get_user, t["user_id"]))
                 uname = (user["username"] if user else None) or t["user_id"]
                 await _notify_admins("orders", {
@@ -200,8 +221,8 @@ async def _notifier_loop():
                     "body": f"شارژ #{t['id']} از {uname} به مبلغ {t['amount']:,} تومان.",
                     "tag": "topups",
                 })
-            if topups:
-                last_topup_id = max(t["id"] for t in topups)
+            if new_topups:
+                last_topup_id = max(t["id"] for t in new_topups)
 
             all_open_tickets = (await asyncio.to_thread(db.get_all_tickets, "open"))
             tickets = [tk for tk in all_open_tickets if tk["id"] > last_ticket_id]
@@ -2595,6 +2616,24 @@ def api_set_payment_method_min_amount(method_key: str, body: PaymentMethodMinAmo
         db.set_setting(f"min_amount_{method_key}", str(value))
     db.log_admin_action(admin["id"], "payment_method_min_amount",
                          f"{method_key}={value} (پنل وب - {admin['username']})", "setting", method_key)
+    return {"ok": True}
+
+
+class PaymentMethodPushBody(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/payment-methods/{method_key}/push")
+def api_set_payment_method_push(method_key: str, body: PaymentMethodPushBody,
+                                 admin=Depends(require_permission("settings"))):
+    """روشن/خاموش‌کردن پوش نوتیف ادمین برای یک روش پرداخت (داخلی یا
+    درگاه سفارشی با کلید 'custom:<key>') - مستقل از بقیه‌ی روش‌ها."""
+    if method_key.startswith("custom:") and not db.get_custom_gateway_by_key(method_key.split(":", 1)[1]):
+        raise HTTPException(status_code=404, detail="این درگاه پیدا نشد.")
+    db.set_payment_method_push_enabled(method_key, body.enabled)
+    db.log_admin_action(admin["id"], "payment_method_push",
+                         f"{method_key} push={'on' if body.enabled else 'off'} (پنل وب - {admin['username']})",
+                         "setting", method_key)
     return {"ok": True}
 
 
