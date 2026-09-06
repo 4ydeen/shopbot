@@ -10,7 +10,7 @@ import os
 import re
 import secrets
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import tempfile
 import logging
 import zipfile
@@ -21,7 +21,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.exceptions import TelegramBadRequest
 
 import keyboards as kb
@@ -2517,9 +2517,110 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await message.answer("لطفاً فقط عدد ارسال کنید (0 برای نامحدود).")
             return
         max_uses = int(message.text.strip())
+        await state.update_data(disc_maxuses=max_uses)
+        await state.set_state(AdminCreateDiscount.waiting_min_purchase)
+        await message.answer("حداقل مبلغ سبد خرید برای اعمال این کد چقدر باشد؟ (تومان — برای بدون محدودیت عدد 0 را بفرست)")
+
+    @router.message(AdminCreateDiscount.waiting_min_purchase)
+    async def process_disc_min_purchase(message: Message, state: FSMContext):
+        if not message.text.strip().isdigit():
+            await message.answer("لطفاً فقط عدد ارسال کنید (0 برای بدون محدودیت).")
+            return
+        await state.update_data(disc_min_purchase=int(message.text.strip()) or None)
+        await state.set_state(AdminCreateDiscount.waiting_max_purchase)
+        await message.answer("حداکثر مبلغ سبد خرید برای اعمال این کد چقدر باشد؟ (تومان — برای بدون محدودیت عدد 0 را بفرست)")
+
+    @router.message(AdminCreateDiscount.waiting_max_purchase)
+    async def process_disc_max_purchase(message: Message, state: FSMContext):
+        if not message.text.strip().isdigit():
+            await message.answer("لطفاً فقط عدد ارسال کنید (0 برای بدون محدودیت).")
+            return
+        await state.update_data(disc_max_purchase=int(message.text.strip()) or None)
+        await state.set_state(AdminCreateDiscount.waiting_scope)
+        await message.answer(
+            "این کد تخفیف روی چه چیزی قابل استفاده باشد؟",
+            reply_markup=kb.discount_scope_picker_kb(),
+        )
+
+    @router.callback_query(AdminCreateDiscount.waiting_scope, F.data.startswith("adm_disc_scope:"))
+    async def process_disc_scope_pick(call: CallbackQuery, state: FSMContext):
+        scope = call.data.split(":", 1)[1]
+        if scope == "all":
+            await state.update_data(disc_product_id=None, disc_category_id=None)
+            await state.set_state(AdminCreateDiscount.waiting_expiry)
+            await safe_edit(call, "چند روز دیگر این کد تخفیف منقضی شود؟ (برای بدون انقضا عدد 0 را بفرست)")
+            await call.answer()
+            return
+        if scope == "cat":
+            categories = (await asyncio.to_thread(db.get_categories, active_only=True))
+            if not categories:
+                await call.answer("هیچ دسته‌بندی‌ای وجود ندارد.", show_alert=True)
+                return
+            await state.set_state(AdminCreateDiscount.waiting_scope_category)
+            await safe_edit(call, "کدام دسته‌بندی؟", reply_markup=kb.discount_scope_categories_kb(categories))
+            await call.answer()
+            return
+        if scope == "prod":
+            categories = (await asyncio.to_thread(db.get_categories, active_only=True))
+            if not categories:
+                await call.answer("هیچ دسته‌بندی‌ای وجود ندارد.", show_alert=True)
+                return
+            await state.set_state(AdminCreateDiscount.waiting_scope_product)
+            await safe_edit(
+                call, "محصول موردنظر در کدام دسته‌بندی است؟",
+                reply_markup=kb.discount_scope_categories_kb(categories),
+            )
+            await call.answer()
+            return
+
+    @router.callback_query(AdminCreateDiscount.waiting_scope_category, F.data.startswith("adm_disc_scope_cat:"))
+    async def process_disc_scope_category(call: CallbackQuery, state: FSMContext):
+        cat_id = int(call.data.split(":", 1)[1])
+        await state.update_data(disc_product_id=None, disc_category_id=cat_id)
+        await state.set_state(AdminCreateDiscount.waiting_expiry)
+        await safe_edit(call, "چند روز دیگر این کد تخفیف منقضی شود؟ (برای بدون انقضا عدد 0 را بفرست)")
+        await call.answer()
+
+    @router.callback_query(AdminCreateDiscount.waiting_scope_product, F.data.startswith("adm_disc_scope_cat:"))
+    async def process_disc_scope_product_category(call: CallbackQuery, state: FSMContext):
+        cat_id = int(call.data.split(":", 1)[1])
+        products = (await asyncio.to_thread(db.get_products, cat_id, active_only=True))
+        if not products:
+            await call.answer("محصولی در این دسته‌بندی نیست.", show_alert=True)
+            return
+        await safe_edit(call, "کدام محصول؟", reply_markup=kb.discount_scope_products_kb(products))
+        await call.answer()
+
+    @router.callback_query(AdminCreateDiscount.waiting_scope_product, F.data.startswith("adm_disc_scope_prod:"))
+    async def process_disc_scope_product(call: CallbackQuery, state: FSMContext):
+        product_id = int(call.data.split(":", 1)[1])
+        await state.update_data(disc_product_id=product_id, disc_category_id=None)
+        await state.set_state(AdminCreateDiscount.waiting_expiry)
+        await safe_edit(call, "چند روز دیگر این کد تخفیف منقضی شود؟ (برای بدون انقضا عدد 0 را بفرست)")
+        await call.answer()
+
+    @router.callback_query(
+        StateFilter(AdminCreateDiscount.waiting_scope, AdminCreateDiscount.waiting_scope_category, AdminCreateDiscount.waiting_scope_product),
+        F.data == "adm_disc_scope_back",
+    )
+    async def process_disc_scope_back(call: CallbackQuery, state: FSMContext):
+        await state.set_state(AdminCreateDiscount.waiting_scope)
+        await safe_edit(call, "این کد تخفیف روی چه چیزی قابل استفاده باشد؟", reply_markup=kb.discount_scope_picker_kb())
+        await call.answer()
+
+    @router.message(AdminCreateDiscount.waiting_expiry)
+    async def process_disc_expiry(message: Message, state: FSMContext):
+        if not message.text.strip().isdigit():
+            await message.answer("لطفاً فقط عدد روز ارسال کنید (0 برای بدون انقضا).")
+            return
+        days = int(message.text.strip())
+        expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat() if days > 0 else None
         data = await state.get_data()
-        (await asyncio.to_thread(db.create_discount_code, 
-            data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"), max_uses=max_uses
+        (await asyncio.to_thread(db.create_discount_code,
+            data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"),
+            max_uses=data.get("disc_maxuses", 0), expires_at=expires_at,
+            min_purchase=data.get("disc_min_purchase"), max_purchase=data.get("disc_max_purchase"),
+            product_id=data.get("disc_product_id"), category_id=data.get("disc_category_id"),
         ))
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "discount_add", f"کد «{data['disc_code']}»"))
         await state.clear()
@@ -5897,6 +5998,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "با ورود کاربر، همان بخش از منو مستقیم برایش باز می‌شود:\n\n"
             f"🛒 <b>خرید</b> — <code>{base}buy</code>\n"
             "باز شدن مستقیم منوی خرید (دسته‌بندی محصولات)\n\n"
+            f"🎯 <b>محصول خاص</b> — <code>{base}prod_&lt;آیدی محصول&gt;</code>\n"
+            "باز شدن مستقیم صفحه‌ی همان محصول (مثل انتخاب از منو)\n\n"
             f"🧪 <b>کانفیگ تست</b> — <code>{base}test</code>\n"
             "باز شدن مستقیم فلوی دریافت کانفیگ تست رایگان\n\n"
             f"🎡 <b>گردونه شانس</b> — <code>{base}wheel</code>\n"
@@ -5909,7 +6012,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "به‌عنوان «منبع ورود کاربر» (برای آمار کمپین) ثبت می‌شود و اکشنی "
             "در منو باز نمی‌کند.\n\n"
             "ℹ️ می‌توانید چند کلید را با «-» ترکیب کنید، مثلاً:\n"
-            f"<code>{base}buy-disc_SUMMER10</code>"
+            f"<code>{base}buy-disc_SUMMER10</code>\n"
+            f"یا برای بازکردن یک محصول خاص با کد تخفیف مخصوص همان: <code>{base}prod_12-disc_SUMMER10</code>"
         )
         await safe_edit(
             call, text, reply_markup=kb.admin_back_kb("adm_deeplink_tools"), parse_mode="HTML",
@@ -5997,6 +6101,22 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer()
             return
 
+        if dl_type == "prod":
+            categories = (await asyncio.to_thread(db.get_categories, active_only=True))
+            if not categories:
+                await safe_edit(
+                    call, "❌ هیچ دسته‌بندی/محصولی وجود ندارد.",
+                    reply_markup=kb.admin_back_kb("adm_deeplink_tools"),
+                )
+                await call.answer()
+                return
+            await safe_edit(
+                call, "محصول موردنظر در کدام دسته‌بندی است؟",
+                reply_markup=kb.deeplink_product_categories_kb(categories, "adm_dl_build"),
+            )
+            await call.answer()
+            return
+
         if dl_type == "custom":
             data = await state.get_data()
             in_channel_flow = bool(data.get("channel_chat_id"))
@@ -6019,6 +6139,57 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("کد پیدا نشد.", show_alert=True)
             return
         await _finalize_deeplink(call, state, f"disc_{code_row['code']}", call.bot)
+
+    @router.callback_query(F.data.startswith("adm_dlp_prodcat:"))
+    async def cb_dlp_prodcat(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        cat_id = int(call.data.split(":", 1)[1])
+        products = (await asyncio.to_thread(db.get_products, cat_id, active_only=True))
+        if not products:
+            await call.answer("محصولی در این دسته‌بندی نیست.", show_alert=True)
+            return
+        await safe_edit(
+            call, "کدام محصول؟",
+            reply_markup=kb.deeplink_products_kb(products, "adm_dl_build"),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_dlp_prod:"))
+    async def cb_dlp_prod(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        product_id = int(call.data.split(":", 1)[1])
+        product_token = f"prod_{product_id}"
+        codes = (await asyncio.to_thread(db.list_discount_codes))
+        active_codes = [c for c in codes if c["is_active"]]
+        if not active_codes:
+            await _finalize_deeplink(call, state, product_token, call.bot)
+            return
+        await safe_edit(
+            call, "می‌خواهید یک کد تخفیف هم به این لینک محصول اضافه شود؟",
+            reply_markup=kb.deeplink_attach_discount_picker_kb(active_codes, product_token, "adm_dl_build"),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_dlp_prod_nodisc:"))
+    async def cb_dlp_prod_nodisc(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        product_token = call.data.split(":", 1)[1]
+        await _finalize_deeplink(call, state, product_token, call.bot)
+
+    @router.callback_query(F.data.startswith("adm_dlp_prod_disc:"))
+    async def cb_dlp_prod_disc(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        _, product_token, code_id = call.data.split(":")
+        code_row = (await asyncio.to_thread(db.get_discount_code_by_id, int(code_id)))
+        if not code_row:
+            await call.answer("کد پیدا نشد.", show_alert=True)
+            return
+        combined_token = f"{product_token}-disc_{code_row['code']}"
+        await _finalize_deeplink(call, state, combined_token, call.bot)
 
     @router.message(AdminDeepLinkTools.waiting_custom_param)
     async def process_dl_custom_param(message: Message, state: FSMContext, bot: Bot):

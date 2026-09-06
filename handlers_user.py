@@ -342,6 +342,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 post_start_actions.append("__open_wheel__")
             elif token == "buy":
                 post_start_actions.append("__open_buy__")
+            elif token.startswith("prod_"):
+                prod_part = token[len("prod_"):]
+                if prod_part.isdigit():
+                    post_start_actions.append(f"__open_product__:{int(prod_part)}")
             elif token == "nofj":
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
             elif token:
@@ -371,8 +375,29 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await wheel_of_fortune(message, bot)
             elif action == "__open_buy__":
                 await show_categories(message, state)
+            elif action.startswith("__open_product__:"):
+                product_id = int(action.split(":", 1)[1])
+                await _open_product_from_deeplink(message, state, product_id)
             else:
                 await message.answer(action)
+
+    async def _open_product_from_deeplink(message: Message, state: FSMContext, product_id: int):
+        """معادلِ کلیک روی یک محصول از منو، ولی به‌صورت پیام جدید (برای بازکردن
+        مستقیم صفحه‌ی یک محصول خاص از طریق دیپ‌لینک ?start=prod_<id>)."""
+        product = (await asyncio.to_thread(db.get_product, product_id))
+        if not product or not product["is_active"]:
+            await message.answer("⛔️ محصول موردنظر یافت نشد یا دیگر فعال نیست.")
+            return
+        stock = (await asyncio.to_thread(db.count_available_configs, product_id))
+        wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id))
+        if stock <= 0:
+            text = _product_confirm_text(product, 1, stock, wallet_credit)
+            text += "\n⛔️ در حال حاضر موجودی این محصول تمام شده است."
+            await message.answer(text)
+            return
+        discount_amount, discount_label = await _apply_pending_discount(state, product["price"], product_id)
+        text = _product_confirm_text(product, 1, stock, wallet_credit, discount_amount, discount_label)
+        await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id, 1, stock))
 
     async def _handle_referral_invite_rewards(bot: Bot, referrer_id: int, reward_info: dict):
         """پیام و تحویل جوایز حالت‌های ۲ و ۳ زیرمجموعه‌گیری (که با صرفِ دعوت، بدون
@@ -520,15 +545,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             text += f"\n👛 موجودی کیف پول شما: {wallet_credit:,} تومان (به‌صورت خودکار در پرداخت اعمال می‌شود)\n"
         return text
 
-    async def _apply_pending_discount(state: FSMContext, total_price: int):
+    async def _apply_pending_discount(state: FSMContext, total_price: int, product_id: int = None):
         """اگر از دیپ‌لینک کد تخفیف پندینگ داریم و هنوز روی این خرید اعمال نشده،
-        همین‌جا اعمالش می‌کند و مبلغ تخفیف/برچسب را برمی‌گرداند."""
+        همین‌جا اعمالش می‌کند و مبلغ تخفیف/برچسب را برمی‌گرداند. اگر کد به این
+        محصول/مبلغ نخورد (مثلاً مخصوص محصول دیگری یا زیر حداقل خرید است)، ساکت
+        نادیده گرفته می‌شود (کاربر می‌تواند دستی هم امتحان کند)."""
         data = await state.get_data()
         pending_id = data.get("pending_discount_code_id")
         if not pending_id:
             return data.get("discount_amount", 0) or 0, ""
         code_row = (await asyncio.to_thread(db.get_discount_code_by_id, pending_id))
-        if not (await asyncio.to_thread(db.is_discount_code_valid, code_row)):
+        if not (await asyncio.to_thread(db.is_discount_code_valid, code_row, total_price, product_id)):
             await state.update_data(pending_discount_code_id=None, pending_discount_code_label=None)
             return 0, ""
         discount_amount = (await asyncio.to_thread(db.compute_discount_amount, code_row, total_price))
@@ -550,7 +577,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await _safe_edit(call.message, text)
             await call.answer()
             return
-        discount_amount, discount_label = await _apply_pending_discount(state, product["price"])
+        discount_amount, discount_label = await _apply_pending_discount(state, product["price"], product_id)
         text = _product_confirm_text(product, 1, stock, wallet_credit, discount_amount, discount_label)
         await _safe_edit(call.message, text, reply_markup=kb.product_confirm_kb(db, product_id, 1, stock))
         await call.answer()
@@ -568,7 +595,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         quantity = max(1, min(quantity + delta, stock))
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, call.from_user.id))
-        discount_amount, discount_label = await _apply_pending_discount(state, product["price"] * quantity)
+        discount_amount, discount_label = await _apply_pending_discount(state, product["price"] * quantity, product_id)
         text = _product_confirm_text(product, quantity, stock, wallet_credit, discount_amount, discount_label)
         await _safe_edit(call.message, text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, stock))
         await call.answer()
@@ -607,15 +634,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         stock = (await asyncio.to_thread(db.count_available_configs, product_id))
         quantity = max(1, min(quantity, stock)) if stock > 0 else quantity
 
+        total_price = product["price"] * quantity
         code_row = (await asyncio.to_thread(db.get_discount_code, message.text.strip()))
-        if not (await asyncio.to_thread(db.is_discount_code_valid, code_row)):
+        invalid_reason = (await asyncio.to_thread(
+            db.get_discount_invalid_reason, code_row, total_price, product_id
+        ))
+        if invalid_reason:
             await message.answer(
-                "❌ این کد تخفیف نامعتبر، غیرفعال یا به سقف استفاده رسیده است. دوباره تلاش کنید یا بدون کد ادامه دهید.",
+                f"❌ {invalid_reason}\nدوباره تلاش کنید یا بدون کد ادامه دهید.",
                 reply_markup=kb.cancel_kb(),
             )
             return
-
-        total_price = product["price"] * quantity
         discount_amount = (await asyncio.to_thread(db.compute_discount_amount, code_row, total_price))
         # کد وارد شده دستی جایگزین کد پندینگِ احتمالی دیپ‌لینک می‌شود
         await state.update_data(

@@ -1238,6 +1238,7 @@ def deeplink_tools_menu_kb() -> InlineKeyboardMarkup:
 def deeplink_type_picker_kb(back_callback: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 خرید", callback_data="adm_dlp_type:buy")],
+        [InlineKeyboardButton(text="🎯 محصول خاص", callback_data="adm_dlp_type:prod")],
         [InlineKeyboardButton(text="🎟 کد تخفیف", callback_data="adm_dlp_type:disc")],
         [InlineKeyboardButton(text="🧪 کانفیگ تست", callback_data="adm_dlp_type:test")],
         [InlineKeyboardButton(text="🎡 گردونه شانس", callback_data="adm_dlp_type:wheel")],
@@ -1251,6 +1252,37 @@ def deeplink_discount_picker_kb(codes, back_callback: str) -> InlineKeyboardMark
         [InlineKeyboardButton(text=f"🎟 {c['code']}", callback_data=f"adm_dlp_code:{c['id']}")]
         for c in codes if c["is_active"]
     ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def deeplink_product_categories_kb(categories, back_callback: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📁 {cat['name']}", callback_data=f"adm_dlp_prodcat:{cat['id']}")]
+        for cat in categories
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def deeplink_products_kb(products, back_callback: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📦 {p['name']} ({p['price']:,}ت)", callback_data=f"adm_dlp_prod:{p['id']}")]
+        for p in products
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def deeplink_attach_discount_picker_kb(codes, product_token: str, back_callback: str) -> InlineKeyboardMarkup:
+    """بعد از انتخاب محصول برای دیپ‌لینک، اختیاری یک کد تخفیف هم به آن اضافه
+    می‌شود. product_token همان start_param محصول (مثلاً prod_12) است که در
+    callback_data کدهای تخفیف قرار می‌گیرد تا در مرحله‌ی نهایی ترکیب شوند."""
+    rows = [
+        [InlineKeyboardButton(text=f"🎟 {c['code']}", callback_data=f"adm_dlp_prod_disc:{product_token}:{c['id']}")]
+        for c in codes if c["is_active"]
+    ]
+    rows.append([InlineKeyboardButton(text="بدون کد تخفیف", callback_data=f"adm_dlp_prod_nodisc:{product_token}")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1735,6 +1767,28 @@ def pending_topups_kb(topups) -> InlineKeyboardMarkup:
 # مدیریت کدهای تخفیف
 # ---------------------------------------------------------------------------
 
+def discount_code_constraints_line(c) -> str:
+    """یک خط خلاصه از محدودیت‌های یک کد تخفیف (حداقل/حداکثر خرید، محصول/دسته‌ی
+    اختصاصی، تاریخ انقضا) برای نمایش زیر اسم کد."""
+    parts = []
+    min_purchase = c["min_purchase"] if "min_purchase" in c.keys() else None
+    max_purchase = c["max_purchase"] if "max_purchase" in c.keys() else None
+    product_id = c["product_id"] if "product_id" in c.keys() else None
+    category_id = c["category_id"] if "category_id" in c.keys() else None
+    expires_at = c["expires_at"] if "expires_at" in c.keys() else None
+    if min_purchase:
+        parts.append(f"حداقل خرید {min_purchase:,}ت")
+    if max_purchase:
+        parts.append(f"حداکثر خرید {max_purchase:,}ت")
+    if product_id:
+        parts.append(f"مخصوص محصول #{product_id}")
+    elif category_id:
+        parts.append(f"مخصوص دسته #{category_id}")
+    if expires_at:
+        parts.append(f"انقضا: {str(expires_at)[:10]}")
+    return " | ".join(parts)
+
+
 def discount_codes_kb(codes) -> InlineKeyboardMarkup:
     rows = []
     for c in codes:
@@ -1751,6 +1805,9 @@ def discount_codes_kb(codes) -> InlineKeyboardMarkup:
                 )
             ]
         )
+        constraints_txt = discount_code_constraints_line(c)
+        if constraints_txt:
+            rows.append([InlineKeyboardButton(text=f"ℹ️ {constraints_txt}", callback_data="noop")])
         rows.append(
             [
                 InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_disc_toggle:{c['id']}"),
@@ -1759,6 +1816,32 @@ def discount_codes_kb(codes) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="➕ ساخت کد تخفیف جدید", callback_data="adm_disc_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_scope_picker_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 همه‌ی محصولات", callback_data="adm_disc_scope:all")],
+        [InlineKeyboardButton(text="📁 فقط یک دسته‌بندی خاص", callback_data="adm_disc_scope:cat")],
+        [InlineKeyboardButton(text="📦 فقط یک محصول خاص", callback_data="adm_disc_scope:prod")],
+    ])
+
+
+def discount_scope_categories_kb(categories) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📁 {cat['name']}", callback_data=f"adm_disc_scope_cat:{cat['id']}")]
+        for cat in categories
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_disc_scope_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_scope_products_kb(products) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📦 {p['name']} ({p['price']:,}ت)", callback_data=f"adm_disc_scope_prod:{p['id']}")]
+        for p in products
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_disc_scope_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

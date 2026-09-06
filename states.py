@@ -151,6 +151,12 @@ class AdminCreateDiscount(StatesGroup):
     waiting_code = State()
     waiting_type_value = State()
     waiting_maxuses = State()
+    waiting_min_purchase = State()
+    waiting_max_purchase = State()
+    waiting_scope = State()
+    waiting_scope_category = State()
+    waiting_scope_product = State()
+    waiting_expiry = State()
 
 
 class AdminReferralPercent(StatesGroup):

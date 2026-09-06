@@ -1021,6 +1021,10 @@ class Database:
             ("users", "last_wheel_spin_at", "TEXT"),
             ("discount_codes", "expires_at", "TEXT"),
             ("discount_codes", "source", "TEXT"),
+            ("discount_codes", "min_purchase", "INTEGER"),
+            ("discount_codes", "max_purchase", "INTEGER"),
+            ("discount_codes", "product_id", "INTEGER"),
+            ("discount_codes", "category_id", "INTEGER"),
             ("products", "duration_days", "INTEGER DEFAULT 30"),
             ("configs", "expires_at", "TEXT"),
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
@@ -2968,15 +2972,32 @@ class Database:
 
     def create_discount_code(
         self, code: str, percent: int = None, fixed_amount: int = None, max_uses: int = 0,
-        expires_at: str = None, source: str = "admin",
+        expires_at: str = None, source: str = "admin", min_purchase: int = None,
+        max_purchase: int = None, product_id: int = None, category_id: int = None,
     ) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses, expires_at, source) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (code.strip().upper(), percent, fixed_amount, max_uses, expires_at, source),
+                "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses, expires_at, source, "
+                "min_purchase, max_purchase, product_id, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    code.strip().upper(), percent, fixed_amount, max_uses, expires_at, source,
+                    min_purchase or None, max_purchase or None, product_id or None, category_id or None,
+                ),
             )
             return cur.lastrowid
+
+    def update_discount_code(
+        self, code_id: int, min_purchase: int = None, max_purchase: int = None,
+        product_id: int = None, category_id: int = None, expires_at: str = None,
+    ) -> None:
+        """ویرایش محدودیت‌های یک کد تخفیف موجود (حداقل/حداکثر خرید، محصول/دسته‌ی
+        اختصاصی، تاریخ انقضا). مقادیر None یعنی «بدون محدودیت» برای همان فیلد."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE discount_codes SET min_purchase=?, max_purchase=?, product_id=?, "
+                "category_id=?, expires_at=? WHERE id=?",
+                (min_purchase or None, max_purchase or None, product_id or None, category_id or None, expires_at, code_id),
+            )
 
     def get_discount_code(self, code: str):
         with self._get_conn() as conn:
@@ -3015,17 +3036,46 @@ class Database:
                 "UPDATE discount_codes SET used_count = MAX(used_count - 1, 0) WHERE id=?", (code_id,)
             )
 
-    def is_discount_code_valid(self, row) -> bool:
+    def get_discount_invalid_reason(
+        self, row, price: int = None, product_id: int = None, category_id: int = None,
+    ) -> str:
+        """اگر کد تخفیف معتبر نباشد، دلیل قابل‌نمایش به کاربر را برمی‌گرداند؛
+        اگر معتبر باشد None برمی‌گردد. price/product_id در صورت وجود، شرط‌های
+        حداقل/حداکثر خرید و محصول/دسته‌ی اختصاصی را هم چک می‌کنند."""
         if not row:
-            return False
+            return "کد تخفیف یافت نشد."
         if not row["is_active"]:
-            return False
+            return "این کد تخفیف غیرفعال است."
         if row["max_uses"] and row["used_count"] >= row["max_uses"]:
-            return False
+            return "سقف استفاده از این کد تخفیف تمام شده است."
         expires_at = row["expires_at"] if "expires_at" in row.keys() else None
         if expires_at and datetime.utcnow().isoformat() > expires_at:
-            return False
-        return True
+            return "این کد تخفیف منقضی شده است."
+
+        row_product_id = row["product_id"] if "product_id" in row.keys() else None
+        row_category_id = row["category_id"] if "category_id" in row.keys() else None
+        if row_product_id:
+            if product_id is None or int(product_id) != int(row_product_id):
+                return "این کد تخفیف فقط برای یک محصول خاص معتبر است."
+        elif row_category_id:
+            effective_cat_id = category_id
+            if effective_cat_id is None and product_id is not None:
+                product = self.get_product(product_id)
+                effective_cat_id = product["category_id"] if product else None
+            if effective_cat_id is None or int(effective_cat_id) != int(row_category_id):
+                return "این کد تخفیف فقط برای یک دسته‌بندی خاص معتبر است."
+
+        min_purchase = row["min_purchase"] if "min_purchase" in row.keys() else None
+        max_purchase = row["max_purchase"] if "max_purchase" in row.keys() else None
+        if price is not None:
+            if min_purchase and price < min_purchase:
+                return f"حداقل مبلغ خرید برای این کد {min_purchase:,} تومان است."
+            if max_purchase and price > max_purchase:
+                return f"این کد فقط برای خریدهای تا سقف {max_purchase:,} تومان معتبر است."
+        return None
+
+    def is_discount_code_valid(self, row, price: int = None, product_id: int = None, category_id: int = None) -> bool:
+        return self.get_discount_invalid_reason(row, price, product_id, category_id) is None
 
     def compute_discount_amount(self, row, price: int) -> int:
         if row["percent"]:
