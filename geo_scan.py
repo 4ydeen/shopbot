@@ -29,6 +29,7 @@ import re
 import base64
 import binascii
 import hashlib
+import html as html_lib
 import ipaddress
 import json
 import os
@@ -306,6 +307,11 @@ _PARSERS = {
 }
 
 
+_CONFIG_URI_RE = re.compile(
+    r"(?:vmess|vless|trojan|hysteria2|hy2|hysteria|tuic|ss)://[^\s\"'<>]+"
+)
+
+
 def parse_subscription_text(text: str) -> list:
     body = text.strip()
     decoded = _b64_decode_text(body)
@@ -323,6 +329,23 @@ def parse_subscription_text(text: str) -> list:
                 break
         if len(out) >= _MAX_CONFIGS:
             break
+
+    if not out:
+        # بعضی پنل‌ها (به‌جای متن خام) یک صفحه‌ی HTML «Subscription
+        # Information» برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند، نه
+        # ابتدای خط. این‌جا با regex از هر جای متن (حتی وسط HTML) استخراج
+        # می‌کنیم تا این حالت هم پوشش داده شود.
+        for match in _CONFIG_URI_RE.finditer(candidate):
+            uri = html_lib.unescape(match.group(0))
+            for prefix, parser in _PARSERS.items():
+                if uri.startswith(prefix):
+                    item = parser(uri)
+                    if item:
+                        out.append(item)
+                    break
+            if len(out) >= _MAX_CONFIGS:
+                break
+
     return out
 
 
