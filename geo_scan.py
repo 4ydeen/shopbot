@@ -805,21 +805,38 @@ async def scan_subscription(
     configs = parse_subscription_text(text)
     if not configs:
         # دیباگ: تا این‌جا یعنی درخواست *جواب گرفته* (وگرنه بالا exception
-        # می‌خورد) ولی هیچ‌کدام از پترن‌های vmess/vless/... در بدنه پیدا
-        # نشد — دلیلش می‌تونه فیلتر User-Agent سمت پنل، توکن نامعتبر/منقضی،
-        # یا یک صفحه‌ی HTML/JSON ارور به‌جای متن ساب باشه. status/content-type
-        # و یک preview کوتاه از بدنه رو لاگ و در پیام خطا برمی‌گردانیم تا علت
-        # واقعی بدون حدس‌زدن مشخص شود.
+        # می‌خورد) ولی هیچ‌کدام از پترن‌های vmess/vless/... یا outbound های
+        # JSON کامل قابل‌تشخیص نبود. اگر بدنه اصلاً JSON با کلید outbounds
+        # باشه، به‌جای preview خام متن، دقیقاً می‌گیم هر outbound چه
+        # protocol/type و چه کلیدهایی داشته — تا معلوم بشه ساختارش با چیزی
+        # که پارسر بلده فرق داره یا نه (به‌جای حدس زدن از روی preview بریده‌شده).
+        outbound_summary = None
+        try:
+            parsed_json = json.loads(text)
+            if isinstance(parsed_json, dict) and isinstance(parsed_json.get("outbounds"), list):
+                rows = []
+                for ob in parsed_json["outbounds"]:
+                    if not isinstance(ob, dict):
+                        continue
+                    kind = ob.get("protocol") or ob.get("type") or "?"
+                    settings_keys = sorted((ob.get("settings") or {}).keys()) if isinstance(ob.get("settings"), dict) else []
+                    rows.append(f"{ob.get('tag') or '?'}:{kind}(keys={settings_keys or list(ob.keys())})")
+                outbound_summary = "; ".join(rows)[:400]
+        except (ValueError, TypeError):
+            pass
+
         preview = " ".join(text.split())[:300]
         logger.warning(
-            "geo_scan: هیچ کانفیگی از لینک ساب پارس نشد | status=%s content_type=%s len=%d preview=%r",
-            status, content_type, len(text), preview,
+            "geo_scan: هیچ کانفیگی از لینک ساب پارس نشد | status=%s content_type=%s len=%d outbounds=%r preview=%r",
+            status, content_type, len(text), outbound_summary, preview,
         )
         detail = f"(HTTP {status}"
         if content_type:
             detail += f", {content_type}"
         detail += f", طول متن: {len(text)} کاراکتر)"
-        if preview:
+        if outbound_summary is not None:
+            detail += f" — outbounds یافت‌شده: «{outbound_summary or 'خالی'}»"
+        elif preview:
             detail += f" — نمونه‌ی متن برگشتی: «{preview}»"
         return {
             "ok": False,
