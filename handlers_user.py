@@ -1404,7 +1404,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         if order["final_price"] <= 0:
             await state.clear()
-            (await asyncio.to_thread(db.approve_custom_config_order, order_id))
             server_row = (await asyncio.to_thread(db.get_panel_server, server["id"]))
             try:
                 provider = get_provider(server_row)
@@ -1417,6 +1416,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 (await asyncio.to_thread(db.reject_order, order_id))
                 await message.answer(f"⛔️ خطا در ساخت کانفیگ روی پنل: {e}\nمبلغ به کیف پول بازگردانده شد.")
                 return
+            (await asyncio.to_thread(db.approve_custom_config_order, order_id))
             (await asyncio.to_thread(db.add_custom_config, 
                 message.from_user.id, server["id"], result.username, volume_gb,
                 duration_days, result.subscription_url, order_id=order_id, product_id=product_id,
