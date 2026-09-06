@@ -2437,9 +2437,11 @@ function productProvisionFieldsHtml(panelServers) {
       <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="bank" checked> بانک کانفیگ</label>
       <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="direct"> اتصال مستقیم به پنل</label>
     </div>
-    <div id="prod-direct-fields" class="form-row" style="display:none">
+    <div id="prod-direct-fields" class="form-grid" style="display:none">
       <select class="input" id="prod-server">${panelServers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <label class="field field-row"><span>♾ مدت اعتبار نامحدود (هیچ‌وقت روی پنل منقضی نمی‌شود)</span><input type="checkbox" id="prod-duration-unlimited"></label>
       <input class="input" id="prod-volume" type="number" placeholder="حجم (گیگابایت)">
+      <label class="field field-row"><span>♾ حجم نامحدود</span><input type="checkbox" id="prod-volume-unlimited"></label>
     </div>`;
 }
 
@@ -2448,19 +2450,40 @@ function wireProductProvisionToggle(b) {
     const df = $('#prod-direct-fields', b);
     if (df) df.style.display = $('input[name="prod-source"]:checked', b).value === 'direct' ? '' : 'none';
   }));
+  const durUnlimitedCb = $('#prod-duration-unlimited', b);
+  if (durUnlimitedCb) {
+    durUnlimitedCb.addEventListener('change', () => {
+      const durInput = $('#prod-duration', b);
+      if (durInput) durInput.disabled = durUnlimitedCb.checked;
+    });
+  }
+  const volUnlimitedCb = $('#prod-volume-unlimited', b);
+  if (volUnlimitedCb) {
+    volUnlimitedCb.addEventListener('change', () => {
+      const volInput = $('#prod-volume', b);
+      if (volInput) volInput.disabled = volUnlimitedCb.checked;
+    });
+  }
 }
 
 function readProductProvisionFields(b) {
   const sourceEl = $('input[name="prod-source"]:checked', b);
   const source = sourceEl ? sourceEl.value : 'bank';
-  if (source !== 'direct') return { ok: true, provision_server_id: null, auto_provision_volume_gb: null };
+  const isDirect = source === 'direct';
+  const durUnlimitedCb = $('#prod-duration-unlimited', b);
+  const durationUnlimited = isDirect && durUnlimitedCb && durUnlimitedCb.checked;
+  const durInput = $('#prod-duration', b);
+  const duration_days = durationUnlimited ? 0 : (Number(durInput ? durInput.value : 0) || 30);
+  if (!isDirect) return { ok: true, provision_server_id: null, auto_provision_volume_gb: null, duration_days };
   const provision_server_id = Number($('#prod-server', b).value);
-  const auto_provision_volume_gb = Number($('#prod-volume', b).value);
-  if (!provision_server_id || !auto_provision_volume_gb) {
+  const volUnlimitedCb = $('#prod-volume-unlimited', b);
+  const volumeUnlimited = volUnlimitedCb && volUnlimitedCb.checked;
+  const auto_provision_volume_gb = volumeUnlimited ? 0 : Number($('#prod-volume', b).value);
+  if (!provision_server_id || (!volumeUnlimited && !auto_provision_volume_gb)) {
     toast('برای اتصال مستقیم به پنل، پنل و حجم (گیگابایت) را مشخص کنید.', true);
     return { ok: false };
   }
-  return { ok: true, provision_server_id, auto_provision_volume_gb };
+  return { ok: true, provision_server_id, auto_provision_volume_gb, duration_days };
 }
 
 // روش‌های پرداخت مجاز حین «ساخت» محصول جدید (پیش‌فرض: همه تیک‌خورده = بدون
@@ -2568,7 +2591,7 @@ async function renderCatalog() {
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
-          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          description: $('#prod-desc', b).value, duration_days: prov.duration_days,
           provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
           payment_methods,
         });
@@ -2682,7 +2705,7 @@ function renderCatalogBento(categories, products, panelServers, paymentMethods) 
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
-          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          description: $('#prod-desc', b).value, duration_days: prov.duration_days,
           provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
           payment_methods,
         });
@@ -2808,7 +2831,7 @@ function renderCatalogBrutalist(categories, products, panelServers, paymentMetho
       try {
         await apiPost('/products', {
           category_id: Number($('#prod-cat', b).value), name, price,
-          description: $('#prod-desc', b).value, duration_days: Number($('#prod-duration', b).value) || 30,
+          description: $('#prod-desc', b).value, duration_days: prov.duration_days,
           provision_server_id: prov.provision_server_id, auto_provision_volume_gb: prov.auto_provision_volume_gb,
           payment_methods,
         });
