@@ -127,6 +127,10 @@
         <div><label>مسیر شناسه‌ی تراکنش در پاسخ</label><input type="text" id="cr_resp_txn" placeholder="data.id"></div>
       </div>
       <p class="hint">مسیر یعنی محل فیلد داخل JSON پاسخ، مثلاً برای <code>{"data":{"id":"x"}}</code> بنویس <code>data.id</code></p>
+      <div class="row" style="margin-top:8px">
+        <div class="toggle"><input type="checkbox" id="req_customer_phone"><label style="margin:0" for="req_customer_phone">این درگاه به شماره موبایل مشتری نیاز دارد</label></div>
+      </div>
+      <p class="hint">اگه فعال کنی، قبل از ساخت فاکتور از مشتری خواسته می‌شه با دکمه‌ی تلگرامی «اشتراک‌گذاری شماره موبایل» شماره‌اش رو بفرسته. دو پلیس‌هولدر همیشه در دسترس‌اند: <code>{customer_user_id}</code> (آیدی عددی تلگرام مشتری، خودکار و بدون نیاز به این گزینه) و <code>{customer_phone}</code> (فقط با فعال بودن این گزینه پر می‌شه، وگرنه خالیه) — می‌تونی توی URL/Headers/Body همین بخش ازشون استفاده کنی.</p>
     </details>
 
     <details><summary>✅ استعلام پرداخت (Verify) — برای درگاه‌هایی که کاربر را برمی‌گردانند</summary>
@@ -273,6 +277,7 @@ function collectConfig(){
       invoice_url_path: document.getElementById("cr_resp_url").value.trim(),
       txn_id_path: document.getElementById("cr_resp_txn").value.trim(),
     },
+    require_customer_phone: document.getElementById("req_customer_phone").checked,
     verify_enabled: document.getElementById("v_enabled").checked,
     verify_request: {
       method: document.getElementById("v_method").value,
@@ -329,6 +334,7 @@ function fillForm(gw){
   document.getElementById("cr_body").value = JSON.stringify(cr.body || {}, null, 2);
   document.getElementById("cr_resp_url").value = (c.create_response || {}).invoice_url_path || "";
   document.getElementById("cr_resp_txn").value = (c.create_response || {}).txn_id_path || "";
+  document.getElementById("req_customer_phone").checked = !!c.require_customer_phone;
 
   document.getElementById("v_enabled").checked = !!c.verify_enabled;
   const vr = c.verify_request || {};
