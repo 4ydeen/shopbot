@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class BuyFlow(StatesGroup):
     waiting_receipt = State()
+    waiting_customgw_phone = State()
 
 
 class DiscountEntry(StatesGroup):
@@ -13,6 +14,7 @@ class DiscountEntry(StatesGroup):
 class WalletTopup(StatesGroup):
     waiting_amount = State()
     waiting_receipt = State()
+    waiting_customgw_phone = State()
 
 
 class ContactFlow(StatesGroup):
@@ -349,6 +351,7 @@ class ServiceTransferFlow(StatesGroup):
 class RenewalFlow(StatesGroup):
     waiting_amount = State()
     waiting_receipt = State()
+    waiting_customgw_phone = State()
 
 
 class AdminRenewalPricing(StatesGroup):

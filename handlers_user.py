@@ -16,7 +16,7 @@ import logging
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
@@ -232,6 +232,55 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             ]]),
         )
         await _schedule_card_msg_autodelete(sent.chat.id, sent.message_id)
+
+    async def _start_customgw_payment(target_message, state: FSMContext, phone_state,
+                                       gw_row, prompt_prefix: str) -> bool:
+        """اگر درگاه سفارشی gw_row به شماره موبایل مشتری نیاز داشته باشد (تنظیم
+        require_customer_phone در پنل ادمین)، مرحله‌ی «اشتراک‌گذاری شماره» را
+        شروع می‌کند (کیبورد پایین با دکمه‌ی request_contact) و True برمی‌گرداند
+        (یعنی: فعلاً فاکتور نساز، منتظر شماره بمان). اگر نیازی نبود False
+        برمی‌گرداند (یعنی: همین الان فاکتور بساز). آیدی عددی تلگرام کاربر همیشه
+        و خودکار در create_invoice_for پاس داده می‌شود و نیازی به پرسیدن ندارد."""
+        if not custom_gateway_payment.gateway_requires_phone(db, gw_row["gateway_key"]):
+            return False
+        await state.update_data(customgw_gateway_id=gw_row["id"])
+        await state.set_state(phone_state)
+        await target_message.answer(
+            f"{prompt_prefix}\n\n📱 درگاه «{gw_row['name']}» به شماره موبایلت نیاز داره. "
+            "با زدن دکمه‌ی زیر شماره‌ات رو به اشتراک بذار:",
+            reply_markup=kb.share_phone_kb(),
+        )
+        return True
+
+    async def _send_customgw_invoice(target_message, gw_row, kind: str, ref_id: int, tg_id: int,
+                                      amount: int, order_name: str, customer_phone: str,
+                                      noun: str, verb: str) -> None:
+        """فاکتور درگاه سفارشی را می‌سازد و پیام نتیجه را ارسال می‌کند (مشترک بین
+        فلوی سفارش/تمدید/شارژ کیف پول). noun/verb برای متن پیام نهایی است، مثلاً
+        noun='سفارش' verb='تحویل داده می‌شود'، یا noun='کیف پول' verb='شارژ می‌شود'."""
+        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
+        try:
+            result = await custom_gateway_payment.create_invoice_for(
+                db, tenant_id, tg_id, gw_row["gateway_key"], kind, ref_id, amount,
+                order_name=order_name, customer_phone=customer_phone,
+            )
+        except custom_gateway_payment.CustomGatewayPaymentError as e:
+            await target_message.answer(f"⚠️ {e}", reply_markup=ReplyKeyboardRemove())
+            return
+        if not result.get("invoice_url"):
+            await target_message.answer(
+                f"💠 فاکتور «{gw_row['name']}» ساخته شد ولی این درگاه لینک پرداخت برنگرداند.\n"
+                f"پس از انجام پرداخت، {noun} به‌محض تایید درگاه به‌صورت خودکار {verb}.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return
+        await target_message.answer(
+            f"💠 فاکتور پرداخت «{gw_row['name']}» ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
+            f"به‌محض تایید پرداخت توسط درگاه، {noun} شما به‌صورت خودکار {verb}.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
+            ]]),
+        )
 
     @router.callback_query(F.data.startswith("check_c2c:"))
     async def cb_check_card_auto(call: CallbackQuery):
@@ -1148,29 +1197,59 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if err:
             await call.answer(err, show_alert=True)
             return
-        await call.answer("در حال ساخت فاکتور...")
+        await call.answer()
+        if await _start_customgw_payment(
+            call.message, state, BuyFlow.waiting_customgw_phone, gw_row,
+            prompt_prefix="⏳ در حال آماده‌سازی فاکتور...",
+        ):
+            return
+        await call.message.answer("⏳ در حال ساخت فاکتور...")
         product = (await asyncio.to_thread(db.get_product, order["product_id"]))
-        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
-        try:
-            result = await custom_gateway_payment.create_invoice_for(
-                db, tenant_id, call.from_user.id, gw_row["gateway_key"], "order", order_id, order["final_price"],
-                order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
-            )
-        except custom_gateway_payment.CustomGatewayPaymentError as e:
-            await call.message.answer(f"⚠️ {e}")
+        await _send_customgw_invoice(
+            call.message, gw_row, "order", order_id, call.from_user.id, order["final_price"],
+            order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+            customer_phone=None, noun="سفارش", verb="تحویل داده می‌شود",
+        )
+
+    @router.message(BuyFlow.waiting_customgw_phone, F.contact)
+    async def receive_customgw_phone_order(message: Message, state: FSMContext):
+        if not message.contact or message.contact.user_id != message.from_user.id:
+            await message.answer("❌ لطفاً با زدن همون دکمه‌ی «اشتراک‌گذاری شماره موبایل» شماره‌ی خودت رو بفرست.")
             return
-        if not result.get("invoice_url"):
-            await call.message.answer(
-                f"💠 فاکتور «{gw_row['name']}» ساخته شد ولی این درگاه لینک پرداخت برنگرداند.\n"
-                "پس از انجام پرداخت، سفارش به‌محض تایید درگاه به‌صورت خودکار تحویل داده می‌شود."
-            )
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        gw_id = data.get("customgw_gateway_id")
+        order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
+        gw_row = (await asyncio.to_thread(db.get_custom_gateway, gw_id)) if gw_id else None
+        if not order or order["status"] != "pending" or not gw_row or not gw_row["enabled"]:
+            await message.answer("سفارش معتبر یافت نشد.", reply_markup=ReplyKeyboardRemove())
+            await state.clear()
             return
-        await call.message.answer(
-            f"💠 فاکتور پرداخت «{gw_row['name']}» ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
-            "به‌محض تایید پرداخت توسط درگاه، سفارش شما به‌صورت خودکار تحویل داده می‌شود.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
-            ]]),
+        await state.set_state(BuyFlow.waiting_receipt)
+        await message.answer("⏳ در حال ساخت فاکتور...", reply_markup=ReplyKeyboardRemove())
+        product = (await asyncio.to_thread(db.get_product, order["product_id"]))
+        await _send_customgw_invoice(
+            message, gw_row, "order", order_id, message.from_user.id, order["final_price"],
+            order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+            customer_phone=message.contact.phone_number, noun="سفارش", verb="تحویل داده می‌شود",
+        )
+
+    @router.message(BuyFlow.waiting_customgw_phone, F.text == "❌ انصراف")
+    async def cancel_customgw_phone_order(message: Message, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        if order_id:
+            order = (await asyncio.to_thread(db.get_order, order_id))
+            if order and order["status"] == "pending":
+                (await asyncio.to_thread(db.reject_order, order_id))
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=ReplyKeyboardRemove())
+
+    @router.message(BuyFlow.waiting_customgw_phone)
+    async def receive_customgw_phone_invalid_order(message: Message):
+        await message.answer(
+            "📱 لطفاً با زدن دکمه‌ی «اشتراک‌گذاری شماره موبایل» ادامه بده، یا انصراف بده.",
+            reply_markup=kb.share_phone_kb(),
         )
 
     @router.message(BuyFlow.waiting_receipt, F.photo | F.document)
@@ -2970,28 +3049,57 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not gw_row or not gw_row["enabled"]:
             await call.answer("این درگاه در دسترس نیست.", show_alert=True)
             return
-        await call.answer("در حال ساخت فاکتور...")
-        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
-        try:
-            result = await custom_gateway_payment.create_invoice_for(
-                db, tenant_id, call.from_user.id, gw_row["gateway_key"], "order", order_id, order["final_price"],
-                order_name=f"تمدید سرویس #{order_id}",
-            )
-        except custom_gateway_payment.CustomGatewayPaymentError as e:
-            await call.message.answer(f"⚠️ {e}")
+        await call.answer()
+        if await _start_customgw_payment(
+            call.message, state, RenewalFlow.waiting_customgw_phone, gw_row,
+            prompt_prefix="⏳ در حال آماده‌سازی فاکتور...",
+        ):
             return
-        if not result.get("invoice_url"):
-            await call.message.answer(
-                f"💠 فاکتور «{gw_row['name']}» ساخته شد ولی این درگاه لینک پرداخت برنگرداند.\n"
-                "پس از انجام پرداخت، سرویس به‌محض تایید درگاه به‌صورت خودکار تمدید می‌شود."
-            )
+        await call.message.answer("⏳ در حال ساخت فاکتور...")
+        await _send_customgw_invoice(
+            call.message, gw_row, "order", order_id, call.from_user.id, order["final_price"],
+            order_name=f"تمدید سرویس #{order_id}",
+            customer_phone=None, noun="سرویس", verb="تمدید می‌شود",
+        )
+
+    @router.message(RenewalFlow.waiting_customgw_phone, F.contact)
+    async def receive_customgw_phone_renewal(message: Message, state: FSMContext):
+        if not message.contact or message.contact.user_id != message.from_user.id:
+            await message.answer("❌ لطفاً با زدن همون دکمه‌ی «اشتراک‌گذاری شماره موبایل» شماره‌ی خودت رو بفرست.")
             return
-        await call.message.answer(
-            f"💠 فاکتور پرداخت «{gw_row['name']}» ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
-            "به‌محض تایید پرداخت توسط درگاه، سرویس شما به‌صورت خودکار تمدید می‌شود.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
-            ]]),
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        gw_id = data.get("customgw_gateway_id")
+        order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
+        gw_row = (await asyncio.to_thread(db.get_custom_gateway, gw_id)) if gw_id else None
+        if not order or order["status"] != "pending" or not gw_row or not gw_row["enabled"]:
+            await message.answer("سفارش معتبر یافت نشد.", reply_markup=ReplyKeyboardRemove())
+            await state.clear()
+            return
+        await state.set_state(RenewalFlow.waiting_receipt)
+        await message.answer("⏳ در حال ساخت فاکتور...", reply_markup=ReplyKeyboardRemove())
+        await _send_customgw_invoice(
+            message, gw_row, "order", order_id, message.from_user.id, order["final_price"],
+            order_name=f"تمدید سرویس #{order_id}",
+            customer_phone=message.contact.phone_number, noun="سرویس", verb="تمدید می‌شود",
+        )
+
+    @router.message(RenewalFlow.waiting_customgw_phone, F.text == "❌ انصراف")
+    async def cancel_customgw_phone_renewal(message: Message, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        if order_id:
+            order = (await asyncio.to_thread(db.get_order, order_id))
+            if order and order["status"] == "pending":
+                (await asyncio.to_thread(db.reject_order, order_id))
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=ReplyKeyboardRemove())
+
+    @router.message(RenewalFlow.waiting_customgw_phone)
+    async def receive_customgw_phone_invalid_renewal(message: Message):
+        await message.answer(
+            "📱 لطفاً با زدن دکمه‌ی «اشتراک‌گذاری شماره موبایل» ادامه بده، یا انصراف بده.",
+            reply_markup=kb.share_phone_kb(),
         )
 
     @router.message(RenewalFlow.waiting_receipt, F.photo | F.document)
@@ -3261,29 +3369,52 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not gw_row or not gw_row["enabled"]:
             await call.answer("این درگاه در دسترس نیست.", show_alert=True)
             return
-        await call.answer("در حال ساخت فاکتور...")
+        await call.answer()
+        if await _start_customgw_payment(
+            call.message, state, WalletTopup.waiting_customgw_phone, gw_row,
+            prompt_prefix="⏳ در حال آماده‌سازی فاکتور...",
+        ):
+            return
+        await call.message.answer("⏳ در حال ساخت فاکتور...")
         topup_id = (await asyncio.to_thread(db.create_topup, call.from_user.id, amount))
-        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
-        try:
-            result = await custom_gateway_payment.create_invoice_for(
-                db, tenant_id, call.from_user.id, gw_row["gateway_key"], "wallet_topup", topup_id, amount,
-                order_name=f"شارژ کیف پول #{topup_id}",
-            )
-        except custom_gateway_payment.CustomGatewayPaymentError as e:
-            await call.message.answer(f"⚠️ {e}")
+        await _send_customgw_invoice(
+            call.message, gw_row, "wallet_topup", topup_id, call.from_user.id, amount,
+            order_name=f"شارژ کیف پول #{topup_id}",
+            customer_phone=None, noun="کیف پول", verb="شارژ می‌شود",
+        )
+
+    @router.message(WalletTopup.waiting_customgw_phone, F.contact)
+    async def receive_customgw_phone_topup(message: Message, state: FSMContext):
+        if not message.contact or message.contact.user_id != message.from_user.id:
+            await message.answer("❌ لطفاً با زدن همون دکمه‌ی «اشتراک‌گذاری شماره موبایل» شماره‌ی خودت رو بفرست.")
             return
-        if not result.get("invoice_url"):
-            await call.message.answer(
-                f"💠 فاکتور «{gw_row['name']}» ساخته شد ولی این درگاه لینک پرداخت برنگرداند.\n"
-                "پس از انجام پرداخت، کیف پول به‌محض تایید درگاه به‌صورت خودکار شارژ می‌شود."
-            )
+        data = await state.get_data()
+        amount = data.get("topup_amount")
+        gw_id = data.get("customgw_gateway_id")
+        gw_row = (await asyncio.to_thread(db.get_custom_gateway, gw_id)) if gw_id else None
+        if not amount or not gw_row or not gw_row["enabled"]:
+            await message.answer("درخواست معتبر یافت نشد.", reply_markup=ReplyKeyboardRemove())
+            await state.clear()
             return
-        await call.message.answer(
-            f"💠 فاکتور پرداخت «{gw_row['name']}» ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
-            "به‌محض تایید پرداخت توسط درگاه، کیف پول شما به‌صورت خودکار شارژ می‌شود.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["invoice_url"]),
-            ]]),
+        await state.set_state(WalletTopup.waiting_receipt)
+        await message.answer("⏳ در حال ساخت فاکتور...", reply_markup=ReplyKeyboardRemove())
+        topup_id = (await asyncio.to_thread(db.create_topup, message.from_user.id, amount))
+        await _send_customgw_invoice(
+            message, gw_row, "wallet_topup", topup_id, message.from_user.id, amount,
+            order_name=f"شارژ کیف پول #{topup_id}",
+            customer_phone=message.contact.phone_number, noun="کیف پول", verb="شارژ می‌شود",
+        )
+
+    @router.message(WalletTopup.waiting_customgw_phone, F.text == "❌ انصراف")
+    async def cancel_customgw_phone_topup(message: Message, state: FSMContext):
+        await state.clear()
+        await message.answer("عملیات لغو شد.", reply_markup=ReplyKeyboardRemove())
+
+    @router.message(WalletTopup.waiting_customgw_phone)
+    async def receive_customgw_phone_invalid_topup(message: Message):
+        await message.answer(
+            "📱 لطفاً با زدن دکمه‌ی «اشتراک‌گذاری شماره موبایل» ادامه بده، یا انصراف بده.",
+            reply_markup=kb.share_phone_kb(),
         )
 
     @router.message(WalletTopup.waiting_receipt, F.photo | F.document)

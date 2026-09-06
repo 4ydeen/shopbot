@@ -52,12 +52,32 @@ def _load_gateway(db, gateway_key: str):
     return row, config
 
 
+def gateway_requires_phone(db, gateway_key: str) -> bool:
+    """آیا این درگاه سفارشی برای ساخت فاکتور به شماره موبایل مشتری نیاز دارد
+    (پلیس‌هولدر {customer_phone})؟ این فقط برای تصمیم‌گیری در بات (نمایش یا
+    عدم‌نمایش مرحله‌ی «اشتراک‌گذاری شماره») استفاده می‌شود؛ اگر درگاه پیدا
+    نشود/غیرفعال باشد False برمی‌گردد (بررسی در دسترس بودن درگاه جای دیگری
+    انجام می‌شود)."""
+    try:
+        _, config = _load_gateway(db, gateway_key)
+    except CustomGatewayPaymentError:
+        return False
+    return bool(config.get("require_customer_phone"))
+
+
 async def create_invoice_for(db, tenant_id: str, tg_id: int, gateway_key: str, kind: str,
-                              ref_id: int, amount_toman: int, order_name: str) -> dict:
+                              ref_id: int, amount_toman: int, order_name: str,
+                              customer_phone: str = None) -> dict:
     """یک فاکتور برای سفارش (kind='order') یا شارژ کیف پول (kind='wallet_topup') با
     درگاه سفارشی gateway_key می‌سازد و آن را در جدول custom_gateway_invoices ثبت می‌کند.
     خروجی: {"invoice_url": ..., "txn_id": ...}
-    در صورت خطا CustomGatewayPaymentError صادر می‌شود."""
+    در صورت خطا CustomGatewayPaymentError صادر می‌شود.
+
+    customer_phone: اگر درگاه در تنظیماتش «نیاز به شماره موبایل مشتری» را فعال
+    کرده باشد (gateway_requires_phone)، شماره‌ای که از کاربر با دکمه‌ی
+    اشتراک‌گذاری شماره گرفته شده اینجا پاس داده می‌شود؛ در غیر این صورت None/خالی.
+    صرف‌نظر از این، آیدی عددی تلگرام کاربر همیشه و خودکار (بدون نیاز به پرسیدن
+    از کاربر) به‌عنوان customer_user_id در دسترس قرار می‌گیرد."""
     if not API_BASE_URL:
         raise CustomGatewayPaymentError("آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده است.")
 
@@ -86,6 +106,11 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, gateway_key: str, k
             currency="IRT", description=order_name, tenant_id=tenant_slug,
             callback_url=f"{API_BASE_URL}/api/pay/custom/{gateway_key}/return?b={tenant_id or ''}&txn={our_ref}",
             webhook_url=f"{API_BASE_URL}/api/webhooks/custom/{gateway_key}?b={tenant_id or ''}",
+            # همیشه در دسترس، بدون نیاز به پرسیدن از کاربر (مستقیم از پروفایل تلگرام):
+            customer_user_id=str(tg_id),
+            # فقط وقتی درگاه require_customer_phone را فعال کرده باشد پر می‌شود؛ در
+            # غیر این صورت رشته‌ی خالی (تا در template‌های بدون این پلیس‌هولدر بی‌اثر باشد):
+            customer_phone=customer_phone or "",
         )
     except payment_engine.PaymentEngineError as e:
         raise CustomGatewayPaymentError(str(e))

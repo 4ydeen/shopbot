@@ -300,6 +300,21 @@ def cancel_kb() -> InlineKeyboardMarkup:
     )
 
 
+def share_phone_kb() -> ReplyKeyboardMarkup:
+    """کیبورد پایین (Reply) با یک دکمه‌ی «اشتراک‌گذاری شماره موبایل» (request_contact)
+    برای درگاه‌های سفارشی که require_customer_phone در تنظیماتشان فعال است؛ چون
+    کاربر باید خودش با زدن این دکمه شماره‌ی حساب تلگرامش را تایید/ارسال کند
+    (تلگرام امکان تایپ دستی به‌جای این دکمه را جعل نمی‌کند)."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 اشتراک‌گذاری شماره موبایل", request_contact=True)],
+            [KeyboardButton(text="❌ انصراف")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
 def custom_config_username_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎲 نام کاربری خودکار", callback_data="custom_config_random_username")],
