@@ -1313,8 +1313,9 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     discount_amount = 0
     if body.discount_code:
         code_row = db.get_discount_code(body.discount_code)
-        if not db.is_discount_code_valid(code_row):
-            raise HTTPException(status_code=400, detail="کد تخفیف نامعتبر است.")
+        invalid_reason = db.get_discount_invalid_reason(code_row, total_price, body.product_id)
+        if invalid_reason:
+            raise HTTPException(status_code=400, detail=invalid_reason)
         discount_amount = db.compute_discount_amount(code_row, total_price)
         discount_code_id = code_row["id"]
 
@@ -4374,13 +4375,23 @@ class DiscountCreate(BaseModel):
     fixed_amount: Optional[int] = None
     max_uses: int = 0
     expires_at: Optional[str] = None
+    min_purchase: Optional[int] = None
+    max_purchase: Optional[int] = None
+    product_id: Optional[int] = None
+    category_id: Optional[int] = None
 
 
 def _discount_to_dict(d):
+    keys = d.keys()
     return {
         "id": d["id"], "code": d["code"], "percent": d["percent"], "fixed_amount": d["fixed_amount"],
         "max_uses": d["max_uses"], "used_count": d["used_count"], "is_active": bool(d["is_active"]),
         "created_at": d["created_at"],
+        "expires_at": d["expires_at"] if "expires_at" in keys else None,
+        "min_purchase": d["min_purchase"] if "min_purchase" in keys else None,
+        "max_purchase": d["max_purchase"] if "max_purchase" in keys else None,
+        "product_id": d["product_id"] if "product_id" in keys else None,
+        "category_id": d["category_id"] if "category_id" in keys else None,
     }
 
 
@@ -4405,6 +4416,8 @@ def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_senior_
     discount_id = db.create_discount_code(
         code, percent=body.percent, fixed_amount=body.fixed_amount,
         max_uses=body.max_uses, expires_at=body.expires_at, source="admin",
+        min_purchase=body.min_purchase, max_purchase=body.max_purchase,
+        product_id=body.product_id, category_id=body.category_id,
     )
     return _discount_to_dict(db.get_discount_code_by_id(discount_id))
 
