@@ -26,6 +26,17 @@ from typing import Optional, List
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles که به مرورگر می‌گه هر بار فایل رو revalidate کنه (ETag/
+    Last-Modified) و بدون سوال‌کردن از سرور کش نکنه. جواب سرور معمولاً با
+    304 برمی‌گرده، پس ترافیک زیاد نمی‌شه، ولی هیچ نسخه‌ی قدیمی هم کش نمی‌مونه."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 from pydantic import BaseModel
 
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, resolve_db_path, API_BASE_URL, RESELLER_DBS_DIR
@@ -3469,7 +3480,7 @@ def api_change_my_password(body: MyPasswordBody, admin=Depends(get_current_admin
 # ------------------------------------------------------------------ static --
 
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+app.mount("/assets", NoCacheStaticFiles(directory=STATIC_DIR), name="assets")
 
 
 @app.get("/sw.js")
@@ -3533,7 +3544,8 @@ def serve_index():
     # کش‌شکن خودکار: هر بار app.js عوض شود mtime آن هم عوض می‌شود، پس
     # مرورگر دیگر نسخه‌ی قدیمیِ کش‌شده را اجرا نمی‌کند و مجبور به دانلود
     # مجدد است — بدون نیاز به دستی زیاد کردن شماره‌ی ورژن در هر دیپلوی.
-    return _bust_asset_cache(html)
+    html = _bust_asset_cache(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/setup", response_class=HTMLResponse)
@@ -3542,5 +3554,6 @@ def serve_setup_page():
     اولیه‌ی پنل نماینده را نشان می‌دهد."""
     with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
         html = f.read()
-    return _bust_asset_cache(html)
+    html = _bust_asset_cache(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
