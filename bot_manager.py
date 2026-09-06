@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -16,9 +17,15 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiohttp import web
 from fsm_storage import SQLiteStorage
 from aiogram.types import MenuButtonWebApp, MenuButtonDefault, WebAppInfo, ErrorEvent
 
+from config import (
+    BOT_MODE, WEBHOOK_BASE_URL, WEBHOOK_SECRET,
+    WEBHOOK_LISTEN_HOST, WEBHOOK_LISTEN_PORT,
+)
 from database import Database
 from handlers_user import create_user_router
 from handlers_admin import create_admin_router
@@ -101,9 +108,64 @@ async def _global_error_handler(event: ErrorEvent) -> bool:
     return True
 
 
+def _webhook_path_for_token(token: str) -> str:
+    """مسیر وب‌هوک از روی هش توکن ساخته می‌شود تا خود توکن داخل URL/لاگ‌های
+    nginx ظاهر نشود."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class WebhookServer:
+    """یک سرور aiohttp مشترک برای دریافت وب‌هوک همه‌ی بات‌ها (اصلی + هر تعداد
+    بات نمایندگی). چون هر بات Dispatcher کاملاً مستقل خودش را دارد (middleware
+    و روترهای بسته‌شده به دیتابیس خودش)، امکان استفاده از یک Dispatcher مشترک
+    برای همه نیست؛ به‌جای ثبت یک مسیر ثابت برای هر بات هم (که چون روتر aiohttp
+    بعد از بالا آمدن سرور فریز می‌شود، اضافه‌کردن مسیر جدید برای یک بات
+    نمایندگی که بعداً اضافه می‌شود امکان‌پذیر نیست)، فقط یک مسیر پویا
+    (/webhook/{token_hash}) یک‌بار در ابتدا ثبت می‌شود و نگاشت هر token_hash
+    به هندلر مربوطه‌اش در یک دیکشنری معمولی نگه داشته می‌شود که در طول اجرا
+    (افزودن/حذف نماینده) آزادانه قابل تغییر است."""
+
+    def __init__(self):
+        self._handlers = {}  # token_hash -> SimpleRequestHandler
+        self._app = web.Application()
+        self._app.router.add_post("/webhook/{token_hash}", self._dispatch)
+        self._runner = None  # web.AppRunner | None
+        self.started = False
+
+    async def start(self, host: str, port: int) -> None:
+        if self.started:
+            return
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, host, port)
+        await site.start()
+        self.started = True
+        logger.info("سرور وب‌هوک روی %s:%s بالا آمد.", host, port)
+
+    async def stop(self) -> None:
+        if self._runner:
+            await self._runner.cleanup()
+        self.started = False
+
+    def register(self, token: str, bot: Bot, dp: Dispatcher) -> None:
+        self._handlers[_webhook_path_for_token(token)] = SimpleRequestHandler(dispatcher=dp, bot=bot)
+
+    def unregister(self, token: str) -> None:
+        self._handlers.pop(_webhook_path_for_token(token), None)
+
+    async def _dispatch(self, request: web.Request) -> web.StreamResponse:
+        if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+            return web.Response(status=401)
+        handler = self._handlers.get(request.match_info.get("token_hash", ""))
+        if handler is None:
+            return web.Response(status=404)
+        return await handler.handle(request)
+
+
 class BotManager:
     def __init__(self):
         self.instances = {}  # token -> {"bot": Bot, "dp": Dispatcher, "task": asyncio.Task, "db_path": str}
+        self.webhook_server = WebhookServer() if BOT_MODE == "webhook" else None
 
     async def _sync_menu_button(self, bot: Bot, db) -> None:
         """دکمه‌ی منو (کنار باکس پیام) را روی مینی‌اپ همین بات ست می‌کند.
@@ -168,15 +230,39 @@ class BotManager:
         # ثانیه دوباره تلاش می‌کرد - و چون این تلاش خودش دوباره به همین API
         # می‌خورد، محدودیت تلگرام هر بار بزرگ‌تر می‌شد؛ از دید کاربر این حالت
         # دقیقاً شبیه «۱۵-۲۰ دقیقه کرش‌کردن پشت سر هم بعد از هر ری‌استارت» است.
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-        except Exception:
-            logger.warning(
-                "delete_webhook برای db_path=%s ناموفق بود؛ راه‌اندازی بات ادامه می‌یابد.",
-                db_path, exc_info=True,
-            )
+        if BOT_MODE == "webhook":
+            if self.webhook_server is None:
+                self.webhook_server = WebhookServer()
+            await self.webhook_server.start(WEBHOOK_LISTEN_HOST, WEBHOOK_LISTEN_PORT)
+            webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{_webhook_path_for_token(token)}"
+            try:
+                await bot.set_webhook(
+                    webhook_url,
+                    secret_token=WEBHOOK_SECRET or None,
+                    drop_pending_updates=True,
+                )
+            except Exception:
+                logger.warning(
+                    "set_webhook برای db_path=%s ناموفق بود؛ راه‌اندازی بات ادامه می‌یابد.",
+                    db_path, exc_info=True,
+                )
+            self.webhook_server.register(token, bot, dp)
+            # جایگزین polling task: چون در حالت webhook تسک polling وجود ندارد،
+            # یک تسک بی‌پایان نگه می‌داریم تا wait_all/stop_bot با همان منطق
+            # فعلی (که یک asyncio.Task برای هر بات انتظار دارد) کار کنند؛ این
+            # تسک هیچ‌وقت خودش تمام/خطا نمی‌شود، فقط با cancel در stop_bot
+            # متوقف می‌شود.
+            task = asyncio.create_task(asyncio.Event().wait())
+        else:
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+            except Exception:
+                logger.warning(
+                    "delete_webhook برای db_path=%s ناموفق بود؛ راه‌اندازی بات ادامه می‌یابد.",
+                    db_path, exc_info=True,
+                )
+            task = asyncio.create_task(dp.start_polling(bot))
         await self._sync_menu_button(bot, db)
-        task = asyncio.create_task(dp.start_polling(bot))
         reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
         backup_task = asyncio.create_task(backup_loop(bot, db, db_path))
         # جلوگیری از فریز کل بات هنگام انقضای کش تنظیمات/ادمین‌ها (رجوع کنید
@@ -227,6 +313,12 @@ class BotManager:
             temp_msg_task.cancel()
             try:
                 await temp_msg_task
+            except Exception:
+                pass
+        if BOT_MODE == "webhook" and self.webhook_server is not None:
+            self.webhook_server.unregister(token)
+            try:
+                await inst["bot"].delete_webhook(drop_pending_updates=False)
             except Exception:
                 pass
         try:

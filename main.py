@@ -12,7 +12,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
-from config import BOT_TOKEN, OWNER_ID, DB_PATH, resolve_db_path
+from config import BOT_TOKEN, OWNER_ID, DB_PATH, BOT_MODE, resolve_db_path
 from database import Database
 from bot_manager import BotManager
 
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
+    logger.info("حالت دریافت آپدیت: %s", BOT_MODE)
     manager = BotManager()
 
     # ۱. بات اصلی
@@ -82,6 +83,8 @@ async def main():
         except Exception:
             pass
         await manager.stop_all()
+        if manager.webhook_server:
+            await manager.webhook_server.stop()
 
 
 if __name__ == "__main__":

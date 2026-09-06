@@ -410,6 +410,16 @@ MSG_EN[service_domains_delete_warn]="⚠️ This removes the nginx/SSL config fo
 MSG_FA[service_domains_delete_warn]="⚠️ این کار تنظیمات nginx/SSL دامنه %s (%s) را حذف می‌کند. تا دامنه جدید تنظیم نکنی، از کار می‌افتد."
 MSG_EN[service_domains_deleted]="✅ Domain config removed."
 MSG_FA[service_domains_deleted]="✅ تنظیمات دامنه حذف شد."
+MSG_EN[current_bot_mode]="Current mode: %s"
+MSG_FA[current_bot_mode]="حالت فعلی: %s"
+MSG_EN[choose_bot_mode]="Choose [1/2]: "
+MSG_FA[choose_bot_mode]="انتخاب [1/2]: "
+MSG_EN[prompt_domain_webhook]="Domain to use for the bot webhook (DNS must point to this server): "
+MSG_FA[prompt_domain_webhook]="دامنه‌ای که برای وب‌هوک بات استفاده می‌کنی (DNS باید روی این سرور باشد): "
+MSG_EN[bot_mode_set_polling]="✅ Mode set to Polling and the bot was restarted."
+MSG_FA[bot_mode_set_polling]="✅ حالت روی Polling تنظیم شد و بات ری‌استارت شد."
+MSG_EN[bot_mode_set_webhook]="✅ Webhook mode is ready: %s"
+MSG_FA[bot_mode_set_webhook]="✅ حالت Webhook آماده شد: %s"
 
 # Main menu / منوی اصلی
 MSG_EN[menu_1]="Full bot install (first time)"
@@ -454,12 +464,14 @@ MSG_EN[menu_20]="Mini App / Admin Panel domains (view + delete)"
 MSG_FA[menu_20]="دامنه‌های مینی‌اپ / پنل مدیریت (نمایش + حذف)"
 MSG_EN[menu_21]="Restore backup from another server (new server migration wizard)"
 MSG_FA[menu_21]="بازیابی بکاپ از سرور دیگر (ویزارد انتقال به سرور جدید)"
+MSG_EN[menu_22]="Bot update mode (Polling / Webhook)"
+MSG_FA[menu_22]="حالت دریافت آپدیت بات (Polling / Webhook)"
 MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_EN[menu_0]="Exit"
 MSG_FA[menu_0]="خروج"
-MSG_EN[enter_choice_prompt]="Enter choice [0-21, L]: "
-MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-21, L]: "
+MSG_EN[enter_choice_prompt]="Enter choice [0-22, L]: "
+MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-22, L]: "
 MSG_EN[invalid_choice]="Invalid option."
 MSG_FA[invalid_choice]="گزینه نامعتبر است."
 MSG_EN[goodbye]="Goodbye 👋"
@@ -770,16 +782,25 @@ edit_env() {
     read -rp "$(t prompt_new_token)" NEW_TOKEN
     read -rp "$(t prompt_new_owner)" NEW_OWNER
 
-    CUR_TOKEN=$(grep BOT_TOKEN "$INSTALL_DIR/.env" | cut -d '=' -f2)
-    CUR_OWNER=$(grep OWNER_ID "$INSTALL_DIR/.env" | cut -d '=' -f2)
+    # قبلاً این تابع کل .env را با فقط BOT_TOKEN/OWNER_ID بازنویسی می‌کرد و در
+    # نتیجه هر کلید دیگری (MINIAPP_URL، ADMIN_PANEL_URL، BOT_MODE/WEBHOOK_*،
+    # کلیدهای درگاه پرداخت و ...) را پاک می‌کرد؛ حالا فقط همین دو کلید در جای
+    # خودشان به‌روزرسانی می‌شوند و بقیه‌ی فایل دست‌نخورده می‌ماند.
+    if [ -n "$NEW_TOKEN" ]; then
+        if grep -q "^BOT_TOKEN=" "$INSTALL_DIR/.env" 2>/dev/null; then
+            sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=$NEW_TOKEN|" "$INSTALL_DIR/.env"
+        else
+            echo "BOT_TOKEN=$NEW_TOKEN" >> "$INSTALL_DIR/.env"
+        fi
+    fi
+    if [ -n "$NEW_OWNER" ]; then
+        if grep -q "^OWNER_ID=" "$INSTALL_DIR/.env" 2>/dev/null; then
+            sed -i "s|^OWNER_ID=.*|OWNER_ID=$NEW_OWNER|" "$INSTALL_DIR/.env"
+        else
+            echo "OWNER_ID=$NEW_OWNER" >> "$INSTALL_DIR/.env"
+        fi
+    fi
 
-    [ -n "$NEW_TOKEN" ] && CUR_TOKEN="$NEW_TOKEN"
-    [ -n "$NEW_OWNER" ] && CUR_OWNER="$NEW_OWNER"
-
-    cat > "$INSTALL_DIR/.env" <<EOF
-BOT_TOKEN=$CUR_TOKEN
-OWNER_ID=$CUR_OWNER
-EOF
     echo -e "${GREEN}$(t saved_restarting)${RESET}"
     sudo systemctl restart "$SERVICE_NAME"
 }
@@ -832,6 +853,104 @@ NGINXOVERRIDE
     if sudo nginx -t > /dev/null 2>&1; then
         sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx 2>/dev/null || true
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Action: switch the bot between Polling and Webhook mode
+# عملیات: تغییر حالت دریافت آپدیت بات بین Polling و Webhook
+# ---------------------------------------------------------------------------
+setup_bot_mode() {
+    CUR_MODE=$(grep "^BOT_MODE=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d '=' -f2)
+    CUR_MODE="${CUR_MODE:-polling}"
+    echo -e "${CYAN}$(t current_bot_mode "$CUR_MODE")${RESET}"
+    echo ""
+    echo "  1) Polling"
+    echo "  2) Webhook"
+    read -rp "$(t choose_bot_mode)" MODE_CHOICE
+
+    if [ "$MODE_CHOICE" = "1" ]; then
+        if grep -q "^BOT_MODE=" "$INSTALL_DIR/.env" 2>/dev/null; then
+            sed -i "s|^BOT_MODE=.*|BOT_MODE=polling|" "$INSTALL_DIR/.env"
+        else
+            echo "BOT_MODE=polling" >> "$INSTALL_DIR/.env"
+        fi
+        sudo systemctl restart "$SERVICE_NAME"
+        echo -e "${GREEN}$(t bot_mode_set_polling)${RESET}"
+        return
+    elif [ "$MODE_CHOICE" != "2" ]; then
+        echo -e "${RED}$(t invalid_choice)${RESET}"
+        return
+    fi
+
+    read -rp "$(t prompt_domain_webhook)" DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}$(t domain_empty)${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}$(t checking_dns)${RESET}"
+    SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
+    DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
+        echo -e "${YELLOW}$(t dns_mismatch_warn "$SERVER_IP" "$DOMAIN_IP")${RESET}"
+        read -rp "$(t continue_prompt)" CONT
+        [ "$CONT" != "yes" ] && return
+    fi
+
+    echo -e "${CYAN}$(t installing_nginx)${RESET}"
+    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+        apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
+    tune_nginx_for_scale
+
+    WEBHOOK_PORT=$(grep "^WEBHOOK_LISTEN_PORT=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d '=' -f2)
+    WEBHOOK_PORT="${WEBHOOK_PORT:-8010}"
+
+    echo -e "${CYAN}$(t configuring_nginx "$DOMAIN")${RESET}"
+    sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:$WEBHOOK_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
+    if ! sudo nginx -t > /dev/null 2>&1; then
+        echo -e "${RED}$(t nginx_error "$(sudo nginx -t 2>&1)")${RESET}"
+        return
+    fi
+    sudo systemctl reload nginx
+
+    echo -e "${CYAN}$(t getting_ssl)${RESET}"
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+        --register-unsafely-without-email --redirect
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}$(t ssl_failed)${RESET}"
+        return
+    fi
+
+    WEBHOOK_SECRET_VAL=$(grep "^WEBHOOK_SECRET=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d '=' -f2)
+    [ -z "$WEBHOOK_SECRET_VAL" ] && WEBHOOK_SECRET_VAL=$(python3 -c "import secrets; print(secrets.token_hex(24))")
+
+    for KV in "BOT_MODE=webhook" "WEBHOOK_BASE_URL=https://$DOMAIN" "WEBHOOK_SECRET=$WEBHOOK_SECRET_VAL" \
+              "WEBHOOK_LISTEN_HOST=127.0.0.1" "WEBHOOK_LISTEN_PORT=$WEBHOOK_PORT"; do
+        KEY="${KV%%=*}"
+        if grep -q "^${KEY}=" "$INSTALL_DIR/.env" 2>/dev/null; then
+            sed -i "s|^${KEY}=.*|${KV}|" "$INSTALL_DIR/.env"
+        else
+            echo "$KV" >> "$INSTALL_DIR/.env"
+        fi
+    done
+
+    sudo systemctl restart "$SERVICE_NAME"
+    echo -e "${GREEN}${BOLD}$(t bot_mode_set_webhook "https://$DOMAIN")${RESET}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1590,6 +1709,7 @@ while true; do
     echo -e "${YELLOW}[20]${RESET} » ${GREEN}$(t menu_20)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${YELLOW}[21]${RESET} » ${GREEN}$(t menu_21)${RESET}"
+    echo -e "${YELLOW}[22]${RESET} » ${GREEN}$(t menu_22)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${MAGENTA}[L]${RESET} » ${GREEN}$(t menu_lang)${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}$(t menu_0)${RESET}"
@@ -1619,6 +1739,7 @@ while true; do
         19) remove_panel_proxy; pause ;;
         20) list_service_domains; pause ;;
         21) restore_backup_cli; pause ;;
+        22) setup_bot_mode; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;

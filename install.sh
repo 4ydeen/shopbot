@@ -108,6 +108,63 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
 BOT_TOKEN=$BOT_TOKEN_INPUT
 OWNER_ID=$OWNER_ID_INPUT
 EOF
+
+    echo ""
+    echo "بات چطور آپدیت‌های تلگرام را دریافت کند؟"
+    echo "  1) Polling  (پیش‌فرض - ساده‌تر، نیاز به دامنه/SSL ندارد)"
+    echo "  2) Webhook  (نیاز به یک دامنه که DNS آن روی IP همین سرور تنظیم شده)"
+    read -rp "انتخاب [1]: " BOT_MODE_CHOICE
+    BOT_MODE_CHOICE="${BOT_MODE_CHOICE:-1}"
+
+    if [ "$BOT_MODE_CHOICE" = "2" ]; then
+        read -rp "دامنه‌ای که برای وب‌هوک بات استفاده می‌کنی (مثلاً bot.example.com): " WEBHOOK_DOMAIN
+        if [ -z "$WEBHOOK_DOMAIN" ]; then
+            echo "⚠️ دامنه وارد نشد؛ بات با Polling راه‌اندازی می‌شود (بعداً از منوی manage.sh می‌توانی وب‌هوک را فعال کنی)."
+        else
+            WEBHOOK_PORT=8010
+            echo "📦 نصب nginx و certbot..."
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+                apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
+
+            echo "🌐 تنظیم nginx برای $WEBHOOK_DOMAIN..."
+            sudo bash -c "cat > /etc/nginx/sites-available/${WEBHOOK_DOMAIN}.conf" <<NGXEOF
+server {
+    listen 80;
+    server_name $WEBHOOK_DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:$WEBHOOK_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGXEOF
+            sudo ln -sf "/etc/nginx/sites-available/${WEBHOOK_DOMAIN}.conf" "/etc/nginx/sites-enabled/${WEBHOOK_DOMAIN}.conf"
+
+            if ! sudo nginx -t > /dev/null 2>&1; then
+                echo "⛔️ کانفیگ nginx خطا دارد؛ بات با Polling راه‌اندازی می‌شود."
+            else
+                sudo systemctl reload nginx
+                echo "🔐 دریافت گواهی SSL (Let's Encrypt)..."
+                if sudo certbot --nginx -d "$WEBHOOK_DOMAIN" --non-interactive --agree-tos \
+                    --register-unsafely-without-email --redirect; then
+                    WEBHOOK_SECRET_VAL=$(python3 -c "import secrets; print(secrets.token_hex(24))")
+                    cat >> "$INSTALL_DIR/.env" <<EOF
+BOT_MODE=webhook
+WEBHOOK_BASE_URL=https://$WEBHOOK_DOMAIN
+WEBHOOK_SECRET=$WEBHOOK_SECRET_VAL
+WEBHOOK_LISTEN_HOST=127.0.0.1
+WEBHOOK_LISTEN_PORT=$WEBHOOK_PORT
+EOF
+                    echo "✅ حالت Webhook تنظیم شد: https://$WEBHOOK_DOMAIN"
+                else
+                    echo "⛔️ دریافت SSL ناموفق بود؛ بات با Polling راه‌اندازی می‌شود (بعداً از منوی manage.sh دوباره امتحان کن)."
+                fi
+            fi
+        fi
+    fi
     echo "✅ فایل .env ساخته شد."
 else
     echo "✅ فایل .env از قبل موجود است، دست‌نخورده باقی می‌ماند."

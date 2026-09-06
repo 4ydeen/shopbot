@@ -48,6 +48,32 @@ def resolve_db_path(path: str) -> str:
         return path
     return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
 
+# حالت دریافت آپدیت‌های تلگرام: "polling" (پیش‌فرض) یا "webhook"
+# توجه: تلگرام این دو را هم‌زمان روی یک توکن قبول نمی‌کند (ست‌کردن وب‌هوک
+# باعث خطا در getUpdates می‌شود و برعکس)، پس این یک انتخاب سراسری برای همه‌ی
+# بات‌ها (اصلی + نماینده‌ها) است، نه اینکه هر دو با هم فعال باشند.
+BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()
+if BOT_MODE not in ("polling", "webhook"):
+    BOT_MODE = "polling"
+
+# آدرس عمومی HTTPS (دامنه‌ای که nginx با SSL معتبر روی آن گوش می‌دهد) که
+# تلگرام آپدیت‌ها را به آن پوش می‌کند - فقط در حالت webhook لازم است
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+# توکن مخفی اختیاری تلگرام (هدر X-Telegram-Bot-Api-Secret-Token) برای اطمینان
+# از اینکه درخواست واقعاً از تلگرام آمده، نه یک درخواست جعلی به همان مسیر
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+# آدرس/پورت داخلی (لوکال) که سرور aiohttp وب‌هوک روی آن گوش می‌دهد؛ nginx
+# روی دامنه‌ی بالا این پورت را proxy می‌کند
+WEBHOOK_LISTEN_HOST = os.getenv("WEBHOOK_LISTEN_HOST", "127.0.0.1")
+WEBHOOK_LISTEN_PORT = int(os.getenv("WEBHOOK_LISTEN_PORT", "8010"))
+
+if BOT_MODE == "webhook" and not WEBHOOK_BASE_URL:
+    raise RuntimeError(
+        "BOT_MODE=webhook تنظیم شده ولی WEBHOOK_BASE_URL در .env خالی است. "
+        "آدرس HTTPS دامنه‌ای که وب‌هوک باید به آن برسد را داخل .env قرار بده "
+        "(یا از منوی manage.sh گزینه‌ی تنظیم حالت بات را دوباره اجرا کن)."
+    )
+
 # حداکثر تعداد کانفیگ تست مجاز برای هر کاربر
 MAX_TEST_PER_USER = 1
 
