@@ -5661,11 +5661,12 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
         از این عدد کمتر باشد، آن روش برای کاربر نمایش داده نمی‌شود (۰ یعنی بدون محدودیت).
         در بات و مینی‌اپ هر دو یکسان اعمال می‌شود.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>روش پرداخت</th><th>حداقل مبلغ (تومان)</th><th></th></tr></thead>
+        <thead><tr><th>روش پرداخت</th><th>حداقل مبلغ (تومان)</th><th></th><th>پوش نوتیف ادمین</th></tr></thead>
         <tbody>${builtin.map(m => `<tr>
           <td>${esc(m.label)}</td>
           <td><input class="input" data-min-amount="${esc(m.key)}" type="number" min="0" value="${m.min_amount || 0}" style="max-width:160px"></td>
           <td><button class="btn btn-sm" data-save-min="${esc(m.key)}">ذخیره</button></td>
+          <td><span class="switch" data-push-key="${esc(m.key)}" data-on="${m.push_enabled ? '1' : '0'}" title="پوش نوتیف ادمین برای این روش پرداخت"><i></i></span></td>
         </tr>`).join('')}</tbody>
       </table></div>
     </div>
@@ -5680,12 +5681,13 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
         <code>{amount}</code>, <code>{order_id}</code>, <code>{callback_url}</code>, <code>{webhook_url}</code> و
         هر فیلد اعتبارنامه (مثلاً <code>{api_key}</code>) استفاده کن.</div>
       ${(gateways || []).length ? `<div class="table-wrap"><table>
-        <thead><tr><th>نام</th><th>کلید</th><th>حداقل مبلغ</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>نام</th><th>کلید</th><th>حداقل مبلغ</th><th>وضعیت</th><th>پوش نوتیف ادمین</th><th>عملیات</th></tr></thead>
         <tbody>${gateways.map(gw => `<tr>
           <td>${esc(gw.name)}</td>
           <td class="mono">${esc(gw.key)}</td>
           <td>${gw.min_amount ? fmt(gw.min_amount) + ' ت' : '—'}</td>
           <td>${gw.enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
+          <td><span class="switch" data-push-key="custom:${esc(gw.key)}" data-on="${(methods || []).find(m => m.key === `custom:${gw.key}`)?.push_enabled ? '1' : '0'}" title="پوش نوتیف ادمین برای این درگاه"><i></i></span></td>
           <td><button class="btn btn-sm" data-edit="${gw.id}">ویرایش</button></td>
         </tr>`).join('')}</tbody>
       </table></div>` : '<div class="card-sub">هنوز درگاهی اضافه نشده.</div>'}
@@ -5749,6 +5751,19 @@ function bindPaymentExtrasEvents(root, { gateways, c2cCards, c2cWebhook }) {
       await apiPost(`/payment-methods/${encodeURIComponent(key)}/min-amount`, { min_amount: value });
       toast('ذخیره شد.');
     } catch (e) { handleErr(e); }
+  }));
+
+  $$('[data-push-key]', root).forEach(sw => sw.addEventListener('click', async () => {
+    const key = sw.dataset.pushKey;
+    const nextOn = sw.dataset.on !== '1';
+    sw.dataset.on = nextOn ? '1' : '0'; // خوش‌بینانه: فوری تغییر بده، اگر خطا خورد برگردون
+    try {
+      await apiPost(`/payment-methods/${encodeURIComponent(key)}/push`, { enabled: nextOn });
+      toast(nextOn ? 'پوش این روش فعال شد.' : 'پوش این روش خاموش شد.');
+    } catch (e) {
+      sw.dataset.on = nextOn ? '0' : '1';
+      handleErr(e);
+    }
   }));
 
   $('#gw-add', root).addEventListener('click', () => _gwOpenForm(null));
