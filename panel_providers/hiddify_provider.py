@@ -23,6 +23,7 @@ Hiddify وصل می‌شود؛ endpoint ها و نام فیلدهای create/del
   بماند، به‌عنوان آخرین راه‌حل از همان آدرس API استفاده می‌شود.
 """
 import uuid as uuid_lib
+import asyncio
 import aiohttp
 
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -61,8 +62,8 @@ class HiddifyProvider(BasePanelProvider):
                     text = await resp.text()
                     raise PanelError(f"خطا در دریافت لیست کاربران (کد {resp.status}): {text[:300]}")
                 data = await resp.json()
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         users = data if isinstance(data, list) else data.get("users", [])
         for u in users:
@@ -97,8 +98,8 @@ class HiddifyProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در ساخت کاربر روی پنل (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         sub_url = f"{self._sub_base_url()}/{new_uuid}/"
         return PanelUserResult(username=username, subscription_url=sub_url, raw=payload)
@@ -116,8 +117,8 @@ class HiddifyProvider(BasePanelProvider):
                     timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     return resp.status < 400
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def get_user_usage(self, username: str) -> dict:
         async with aiohttp.ClientSession() as session:
@@ -169,8 +170,8 @@ class HiddifyProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در بروزرسانی کاربر روی پنل (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         sub_url = f"{self._sub_base_url()}/{user['uuid']}/"
         return PanelUserResult(username=username, subscription_url=sub_url, raw=payload)
@@ -190,8 +191,8 @@ class HiddifyProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در تغییر وضعیت کاربر (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def rename_user(self, username: str, new_username: str) -> None:
         """روی هیدیفای «name» فقط یک برچسب نمایشی است (شناسه‌ی واقعی uuid
@@ -210,8 +211,8 @@ class HiddifyProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در تغییر نام کاربر (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def revoke_credentials(self, username: str) -> PanelUserResult:
         """روی هیدیفای خودِ UUID هم شناسه‌ی کاربر و هم لینک اشتراک است، پس
@@ -237,8 +238,8 @@ class HiddifyProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در قطع دسترسی/تولید لینک جدید (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         sub_url = f"{self._sub_base_url()}/{new_uuid}/"
         return PanelUserResult(username=username, subscription_url=sub_url, raw=payload)

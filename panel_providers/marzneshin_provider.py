@@ -22,6 +22,7 @@ proxy)، از همان ستون group_ids دیتابیس برای ذخیره‌�
 import time
 import json
 import datetime
+import asyncio
 import aiohttp
 
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -50,8 +51,8 @@ class MarzneshinProvider(BasePanelProvider):
                 if not token:
                     raise PanelError("پاسخ پنل شامل توکن نبود.")
                 return token
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def fetch_template_from_user(self, sample_username: str) -> dict:
         """service_ids کاربر نمونه‌ی موجود روی پنل را می‌خواند و به‌عنوان قالب
@@ -71,8 +72,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت کاربر نمونه (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         service_ids = data.get("service_ids")
         if not service_ids:
@@ -114,8 +115,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در ساخت کاربر روی پنل (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
@@ -132,8 +133,8 @@ class MarzneshinProvider(BasePanelProvider):
                     timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     return resp.status < 400
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def get_user_usage(self, username: str) -> dict:
         async with aiohttp.ClientSession() as session:
@@ -148,8 +149,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         return {
             "used_bytes": data.get("used_traffic", 0) or 0,
             "data_limit_bytes": data.get("data_limit", 0) or 0,
@@ -171,8 +172,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
@@ -201,8 +202,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در قطع دسترسی/تولید لینک جدید (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
@@ -231,8 +232,8 @@ class MarzneshinProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در تغییر وضعیت کاربر (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def rename_user(self, username: str, new_username: str) -> str:
         """مرزنشین هم endpoint رسمی برای تغییر username ندارد؛ کاربر با
@@ -252,8 +253,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     current = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             create_payload = {
                 "username": new_username,
@@ -278,8 +279,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در ساخت کاربر با نام جدید (کد {resp.status}): {text[:300]}")
                     new_data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             try:
                 async with session.delete(
@@ -311,8 +312,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     current = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             now_dt = datetime.datetime.now()
             current_expire_str = current.get("expire_date")
@@ -339,8 +340,8 @@ class MarzneshinProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در بروزرسانی کاربر روی پنل (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             if reset_usage:
                 try:

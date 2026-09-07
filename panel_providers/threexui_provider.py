@@ -66,6 +66,7 @@ import json
 import secrets
 import time
 import uuid
+import asyncio
 import aiohttp
 
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -110,8 +111,8 @@ class ThreeXUIProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت لیست inbound (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         if data.get("success") is False:
             raise PanelError(data.get("msg") or "دریافت لیست inbound ناموفق بود.")
@@ -180,8 +181,8 @@ class ThreeXUIProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در ساخت کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
             if data.get("success") is False:
                 msg = data.get("msg") or ""
                 if "duplicate" in msg.lower() or "exist" in msg.lower() or "already in use" in msg.lower():
@@ -200,8 +201,8 @@ class ThreeXUIProvider(BasePanelProvider):
                     if resp.status == 404:
                         return False
                     return resp.status < 400
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def get_user_usage(self, username: str) -> dict:
         async with self._session() as session:
@@ -213,8 +214,8 @@ class ThreeXUIProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         obj = data.get("obj") or {}
         used = (obj.get("up") or 0) + (obj.get("down") or 0)
@@ -240,8 +241,8 @@ class ThreeXUIProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت لیست inbound (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         if data.get("success") is False:
             raise PanelError(data.get("msg") or "دریافت اطلاعات کاربر ناموفق بود.")
         for ib in (data.get("obj") or []):
@@ -277,8 +278,8 @@ class ThreeXUIProvider(BasePanelProvider):
                     text = await resp.text()
                     raise PanelError(f"خطا در دریافت لیست inbound (کد {resp.status}): {text[:300]}")
                 data = await resp.json()
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         if data.get("success") is False:
             raise PanelError(data.get("msg") or "دریافت اطلاعات کاربر ناموفق بود.")
         matches = []
@@ -313,8 +314,8 @@ class ThreeXUIProvider(BasePanelProvider):
                 if data.get("success") is False:
                     raise PanelError(f"{action_label} ناموفق بود (inbound {inbound_id}): {data.get('msg') or ''}")
                 return data
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل (inbound {inbound_id}): {e}") from e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise PanelError(f"خطا در اتصال به پنل (inbound {inbound_id}): {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
                            reset_usage: bool = False) -> PanelUserResult:

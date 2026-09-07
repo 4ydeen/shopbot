@@ -19,6 +19,7 @@ inbounds/proxies است، نه group_ids/proxy_settings واقعی) - نیازی
 """
 import time
 import json
+import asyncio
 import aiohttp
 
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -54,8 +55,8 @@ class MarzbanProvider(BasePanelProvider):
                 if not token:
                     raise PanelError("پاسخ پنل شامل توکن نبود.")
                 return token
-        except aiohttp.ClientError as e:
-            raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     def _clean_proxies(self, proxies: dict) -> dict:
         cleaned = {}
@@ -86,8 +87,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت کاربر نمونه (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         if "inbounds" not in data or "proxies" not in data:
             raise PanelError("پاسخ پنل شامل inbounds/proxies نبود؛ از یک کاربر دیگر امتحان کن.")
@@ -129,8 +130,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در ساخت کاربر روی پنل (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
@@ -147,8 +148,8 @@ class MarzbanProvider(BasePanelProvider):
                     timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     return resp.status < 400
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def get_user_usage(self, username: str) -> dict:
         async with aiohttp.ClientSession() as session:
@@ -163,8 +164,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         return {
             "used_bytes": data.get("used_traffic", 0) or 0,
             "data_limit_bytes": data.get("data_limit", 0) or 0,
@@ -186,8 +187,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
@@ -211,8 +212,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در قطع دسترسی/تولید لینک جدید (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
         sub_url = data.get("subscription_url") or ""
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
@@ -241,8 +242,8 @@ class MarzbanProvider(BasePanelProvider):
                     if resp.status >= 400:
                         text = await resp.text()
                         raise PanelError(f"خطا در تغییر وضعیت کاربر (کد {resp.status}): {text[:300]}")
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
                            reset_usage: bool = False) -> PanelUserResult:
@@ -260,8 +261,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در دریافت اطلاعات کاربر (کد {resp.status}): {text[:300]}")
                     current = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             now_ts = int(time.time())
             current_expire = current.get("expire")
@@ -279,8 +280,8 @@ class MarzbanProvider(BasePanelProvider):
                         text = await resp.text()
                         raise PanelError(f"خطا در بروزرسانی کاربر روی پنل (کد {resp.status}): {text[:300]}")
                     data = await resp.json()
-            except aiohttp.ClientError as e:
-                raise PanelError(f"خطا در اتصال به پنل: {e}") from e
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             if reset_usage:
                 try:
