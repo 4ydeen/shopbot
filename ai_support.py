@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import config
 from sub_info import fetch_sub_info
 from jalali import to_jalali_str
+from panel_providers import get_provider, PanelError
 
 _log = logging.getLogger("ai_support")
 
@@ -42,6 +43,7 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 ۲. تو هیچ اختیار مالی/اجرایی نداری: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی یا کانفیگ بسازی. اگر کاربر همچین چیزی خواست، مودبانه توضیح بده که این کار را باید پشتیبانی انسانی انجام بدهد و ابزار escalate_to_human را صدا بزن.
 ۳. اگر کاربر صراحتاً خواست با انسان صحبت کند، ناراحت/عصبانی بود، یا موضوع شکایت/اختلاف مالی بود، بلافاصله (بدون معطلی و بدون اصرار برای ادامه‌ی گفتگو با تو) escalate_to_human را صدا بزن.
 ۴. اگر سوال درباره‌ی وضعیت شخصیِ خودِ کاربر است (سرویسش، حجم باقی‌مانده، انقضا، موجودی کیف پول، سفارش‌ها)، همیشه اول ابزار مربوطه را صدا بزن؛ از حافظه یا حدس جواب نده.
+۴-۱. برای اینکه سرویس «فعال» یا «غیرفعال» است، فقط و فقط به فیلد panel_status نگاه کن (اگر موجود بود)؛ داشتنِ حجم باقی‌مانده یا نرسیدن تاریخ انقضا به این معنی نیست که سرویس روشن است - ممکن است دستی یا به هر دلیلی روی پنل خاموش شده باشد.
 ۵. کوتاه، دوستانه و محاوره‌ای فارسی بنویس؛ از ایموجی مناسب (نه زیاد) استفاده کن. از پاراگراف‌های طولانی خودداری کن.
 ۶. اگر بعد از تلاش نتوانستی مشکل را حل کنی، صادقانه بگو و escalate_to_human را صدا بزن؛ کاربر را سردرگم نگه نداری.
 
@@ -176,6 +178,24 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
                 entry["data_available"] = False
         else:
             entry["data_available"] = False
+
+        # توجه: هدر subscription-userinfo (بالا) فقط حجم/انقضا را می‌دهد و در
+        # خیلی از پنل‌ها (از جمله 3x-ui) حتی برای کاربر غیرفعال‌شده هم برمی‌گردد؛
+        # پس برای وضعیت واقعیِ روشن/خاموش بودن باید مستقیماً از خودِ پنل (همان
+        # API ادمین که ساخت/تمدید کانفیگ هم با آن انجام می‌شود) بپرسیم.
+        try:
+            server = await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])
+            if server:
+                provider = get_provider(server)
+                usage = await provider.get_user_usage(cc["username"])
+                entry["panel_status"] = (
+                    "فعال" if usage.get("status") == "active" else "غیرفعال"
+                )
+        except PanelError:
+            _log.exception("خطا هنگام خواندن وضعیت واقعی از پنل برای کانفیگ شخصی کاربر %s.", user_tg_id)
+        except Exception:
+            _log.exception("خطای غیرمنتظره هنگام خواندن وضعیت پنل برای کاربر %s.", user_tg_id)
+
         services.append(entry)
 
     return {
