@@ -36,6 +36,7 @@ from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
 import crypto_payment
 import abangateway_payment
+import noapay_payment
 import custom_gateway_payment
 import card_to_card_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
@@ -885,6 +886,43 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             )
         await call.message.answer(text)
 
+    @router.callback_query(F.data.startswith("check_noapay:"))
+    async def cb_check_noapay(call: CallbackQuery, bot: Bot):
+        try:
+            invoice_db_id = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            await call.answer("داده نامعتبر.", show_alert=True)
+            return
+        invoice_row = (await asyncio.to_thread(db.get_noapay_invoice, invoice_db_id))
+        if not invoice_row or invoice_row["user_id"] != call.from_user.id:
+            await call.answer("فاکتور یافت نشد.", show_alert=True)
+            return
+
+        await call.answer("در حال بررسی وضعیت پرداخت...")
+        result = await noapay_payment.try_verify_and_finalize(db, invoice_row)
+
+        if result == "not_paid_yet":
+            await call.message.answer("⏳ هنوز واریزی برای این فاکتور تایید نشده. کمی صبر کن و دوباره بررسی کن.")
+            return
+        if result in ("expired", "rejected"):
+            await call.message.answer("❌ اعتبار این فاکتور تمام شده یا رد شده. لطفاً دوباره از منو اقدام کن.")
+            return
+        if result == "already_delivered":
+            await call.message.answer("✅ این پرداخت قبلاً تایید و تحویل داده شده است.")
+            return
+        if result.startswith("error:"):
+            await call.message.answer(f"⚠️ خطا در بررسی وضعیت: {result[6:]}")
+            return
+
+        # result == "verified_now"
+        if invoice_row["kind"] == "wallet_topup":
+            text = await noapay_payment.finalize_paid_topup(db, invoice_row["ref_id"])
+        else:
+            text = await noapay_payment.finalize_paid_order(
+                db, bot, invoice_row["ref_id"], notify_admins_fn=_notify_admins_of_order
+            )
+        await call.message.answer(text)
+
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
         _, product_id, quantity = call.data.split(":")
@@ -1061,6 +1099,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     amount=remaining_amount,
                     db=db,
                     allowed_methods=allowed_methods,
+                    noapay_enabled=noapay_payment.noapay_payment_available(db),
                 ),
             )
             await call.answer()
@@ -1208,6 +1247,41 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
                 [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_aban:{invoice_row['id']}")],
+            ]),
+        )
+
+    @router.callback_query(F.data == "pay_noapay", BuyFlow.waiting_receipt)
+    async def cb_pay_noapay_order(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
+        if not order or order["status"] != "pending":
+            await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        err = await _order_payment_method_error(order, "noapay")
+        if err:
+            await call.answer(err, show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        product = (await asyncio.to_thread(db.get_product, order["product_id"]))
+        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
+        try:
+            result = await noapay_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order_id, order["final_price"],
+                order_name=f"سفارش #{order_id} - {product['name'] if product else ''}",
+            )
+        except noapay_payment.NoapayPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        invoice_row = (await asyncio.to_thread(db.get_noapay_invoice_by_token, result["invoice_token"]))
+        await call.message.answer(
+            "⭐ فاکتور پرداخت (NoapayBot) ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
+            "⏳ اعتبار این فاکتور محدود است.\n"
+            "معمولاً به‌محض واریز، سفارش خودکار تحویل داده می‌شود؛ اگر چند دقیقه طول کشید، "
+            "دکمه‌ی «بررسی وضعیت پرداخت» را بزن.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
+                [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_noapay:{invoice_row['id']}")],
             ]),
         )
 
@@ -1621,6 +1695,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
                     amount=remaining_amount,
                     db=db,
+                    noapay_enabled=noapay_payment.noapay_payment_available(db),
                 ),
             )
         except Exception:
@@ -1738,6 +1813,35 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
                 [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_aban:{invoice_row['id']}")],
+            ]),
+        )
+
+    @router.callback_query(F.data == "pay_noapay", CustomConfigFlow.waiting_receipt)
+    async def cb_pay_noapay_custom_config(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
+        if not order or order["status"] != "pending":
+            await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
+        try:
+            result = await noapay_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order_id, order["final_price"],
+                order_name=f"کانفیگ شخصی #{order_id} - {order['custom_username']}",
+            )
+        except noapay_payment.NoapayPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        invoice_row = (await asyncio.to_thread(db.get_noapay_invoice_by_token, result["invoice_token"]))
+        await call.message.answer(
+            "⭐ فاکتور پرداخت (NoapayBot) ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
+            "معمولاً به‌محض واریز، کانفیگ خودکار ساخته می‌شود؛ اگر چند دقیقه طول کشید، "
+            "دکمه‌ی «بررسی وضعیت پرداخت» را بزن.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
+                [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_noapay:{invoice_row['id']}")],
             ]),
         )
 
@@ -2948,6 +3052,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
                     amount=remaining_amount,
                     db=db,
+                    noapay_enabled=noapay_payment.noapay_payment_available(db),
                 ),
             )
         except Exception:
@@ -3182,6 +3287,35 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
                 [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_aban:{invoice_row['id']}")],
+            ]),
+        )
+
+    @router.callback_query(F.data == "pay_noapay", RenewalFlow.waiting_receipt)
+    async def cb_pay_noapay_renewal(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
+        if not order or order["status"] != "pending":
+            await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
+        try:
+            result = await noapay_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "order", order_id, order["final_price"],
+                order_name=f"تمدید سرویس #{order_id}",
+            )
+        except noapay_payment.NoapayPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        invoice_row = (await asyncio.to_thread(db.get_noapay_invoice_by_token, result["invoice_token"]))
+        await call.message.answer(
+            "⭐ فاکتور پرداخت (NoapayBot) ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
+            "معمولاً به‌محض واریز، سرویس خودکار تمدید می‌شود؛ اگر چند دقیقه طول کشید، "
+            "دکمه‌ی «بررسی وضعیت پرداخت» را بزن.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
+                [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_noapay:{invoice_row['id']}")],
             ]),
         )
 
@@ -3420,6 +3554,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
                 amount=amount,
                 db=db,
+                noapay_enabled=noapay_payment.noapay_payment_available(db),
             ),
         )
 
@@ -3503,6 +3638,35 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
                 [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_aban:{invoice_row['id']}")],
+            ]),
+        )
+
+    @router.callback_query(F.data == "pay_noapay", WalletTopup.waiting_receipt)
+    async def cb_pay_noapay_topup(call: CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        amount = data.get("topup_amount")
+        if not amount:
+            await call.answer("درخواست معتبر یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال ساخت فاکتور...")
+        topup_id = (await asyncio.to_thread(db.create_topup, call.from_user.id, amount))
+        tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
+        try:
+            result = await noapay_payment.create_invoice_for(
+                db, tenant_id, call.from_user.id, "wallet_topup", topup_id, amount,
+                order_name=f"شارژ کیف پول #{topup_id}",
+            )
+        except noapay_payment.NoapayPaymentError as e:
+            await call.message.answer(f"⚠️ {e}")
+            return
+        invoice_row = (await asyncio.to_thread(db.get_noapay_invoice_by_token, result["invoice_token"]))
+        await call.message.answer(
+            "⭐ فاکتور پرداخت (NoapayBot) ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.\n"
+            "معمولاً به‌محض واریز، کیف پول خودکار شارژ می‌شود؛ اگر چند دقیقه طول کشید، "
+            "دکمه‌ی «بررسی وضعیت پرداخت» را بزن.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 رفتن به صفحه‌ی پرداخت", url=result["payment_url"])],
+                [InlineKeyboardButton(text="🔄 بررسی وضعیت پرداخت", callback_data=f"check_noapay:{invoice_row['id']}")],
             ]),
         )
 

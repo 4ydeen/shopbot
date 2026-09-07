@@ -36,6 +36,7 @@ from backup import (
 )
 import crypto_payment
 import abangateway_payment
+import noapay_payment
 import ai_support
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
@@ -58,6 +59,7 @@ from states import (
     AdminSetCard,
     AdminSetPlisio,
     AdminSetAbanGateway,
+    AdminSetNoapay,
     AdminC2CCard,
     AdminC2CSettings,
     AdminBroadcast,
@@ -2085,6 +2087,260 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "برای غیرفعال‌کردن، دوباره وارد همین بخش شو و «حذف» را بفرست.",
             reply_markup=kb.admin_panel_kb(db, is_main_bot),
         )
+
+    # -------------------------------------------------------------------
+    # کارت‌به‌کارت با تایید خودکار (پیامک بانک) — همان چیزی که در پنل وب
+    # مستقل و مینی‌اپ هست، این‌جا هم برای مدیریت از داخل بات در دسترس است.
+    # -------------------------------------------------------------------
+
+    # -------------------------------------------------------------------
+    # پرداخت‌های NoapayBot (خرید استارز تلگرام، تایید خودکار)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_noapay_payments")
+    async def cb_admin_noapay_payments(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        (await asyncio.to_thread(db.expire_stale_noapay_invoices))
+        (await asyncio.to_thread(db.purge_old_noapay_invoices, days=7))
+        invoices = (await asyncio.to_thread(db.get_noapay_invoices, 50))
+        if not invoices:
+            await call.answer("هیچ پرداخت NoapayBot ای ثبت نشده است.", show_alert=True)
+            return
+        await replace_admin_view(
+            call,
+            "⭐ پرداخت‌های NoapayBot (استارز تلگرام)\n\nاین پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
+            reply_markup=kb.noapay_invoices_kb(invoices),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("view_noapay_invoice:"))
+    async def cb_view_noapay_invoice(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoice_id = callback_id(call.data, "view_noapay_invoice")
+        if invoice_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        invoice = (await asyncio.to_thread(db.get_noapay_invoice, invoice_id))
+        if not invoice:
+            await call.answer("فاکتور یافت نشد.", show_alert=True)
+            return
+
+        status_text = {
+            "new": "🟡 جدید", "pending": "🟠 در انتظار", "opened": "🟠 باز شده",
+            "paid": "🟠 رسید ارسال‌شده", "confirmed": "🟢 تاییدشده", "completed": "🟢 تکمیل‌شده",
+            "expired": "🔴 منقضی‌شده", "rejected": "🔴 ردشده",
+        }.get(invoice["status"], invoice["status"] or "---")
+        kind_text = {"order": "🧾 سفارش", "wallet_topup": "👛 شارژ کیف پول"}.get(invoice["kind"], invoice["kind"])
+
+        text = (
+            f"⭐ فاکتور NoapayBot #{invoice['id']}\n"
+            f"{kind_text}: #{invoice['ref_id']}\n"
+            f"👤 کاربر: {invoice['user_id']}\n"
+            f"💰 مبلغ سفارش: {invoice['amount_toman']:,} تومان\n"
+            f"⭐ تعداد استارز: {invoice['stars_count']}\n"
+        )
+        if invoice["quoted_total_toman"]:
+            text += f"💱 مبلغ اعلام‌شده توسط NoapayBot: {invoice['quoted_total_toman']:,} تومان\n"
+        text += (
+            f"📌 وضعیت: {status_text}\n"
+            f"🕐 ایجاد: {invoice['created_at'] or '---'}"
+        )
+        rows = []
+        if invoice["payment_url"] and invoice["status"] not in ("completed", "expired", "rejected"):
+            rows.append([InlineKeyboardButton(text="🔗 باز کردن فاکتور", url=invoice["payment_url"])])
+        if invoice["status"] not in ("completed", "expired", "rejected"):
+            rows.append([InlineKeyboardButton(text="🔄 بررسی وضعیت", callback_data=f"check_noapay_invoice:{invoice['id']}")])
+            rows.append([InlineKeyboardButton(text="❌ لغو و حذف فاکتور", callback_data=f"cancel_noapay_invoice:{invoice['id']}")])
+        rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پرداخت‌های NoapayBot", callback_data="adm_noapay_payments")])
+        await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("check_noapay_invoice:"))
+    async def cb_check_noapay_invoice(call: CallbackQuery, bot: Bot):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoice_id = callback_id(call.data, "check_noapay_invoice")
+        if invoice_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        invoice = (await asyncio.to_thread(db.get_noapay_invoice, invoice_id))
+        if not invoice:
+            await call.answer("فاکتور یافت نشد.", show_alert=True)
+            return
+        await call.answer("در حال بررسی...")
+        result = await noapay_payment.try_verify_and_finalize(db, invoice)
+        if result == "verified_now":
+            if invoice["kind"] == "wallet_topup":
+                text = await noapay_payment.finalize_paid_topup(db, invoice["ref_id"])
+            else:
+                text = await noapay_payment.finalize_paid_order(db, bot, invoice["ref_id"])
+            await call.message.answer(text)
+        elif result == "not_paid_yet":
+            await call.message.answer("⏳ هنوز واریزی برای این فاکتور تایید نشده.")
+        elif result == "already_delivered":
+            await call.message.answer("✅ این پرداخت قبلاً تایید و تحویل داده شده است.")
+        elif result in ("expired", "rejected"):
+            await call.message.answer("❌ اعتبار این فاکتور تمام شده یا رد شده است.")
+        elif result.startswith("error:"):
+            await call.message.answer(f"⚠️ خطا در بررسی وضعیت: {result[6:]}")
+
+    @router.callback_query(F.data.startswith("cancel_noapay_invoice:"))
+    async def cb_cancel_noapay_invoice(call: CallbackQuery):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        invoice_id = callback_id(call.data, "cancel_noapay_invoice")
+        if invoice_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+            return
+        invoice = (await asyncio.to_thread(db.get_noapay_invoice, invoice_id))
+        if not invoice:
+            await call.answer("فاکتور یافت نشد یا قبلاً حذف شده.", show_alert=True)
+        else:
+            (await asyncio.to_thread(db.cancel_and_delete_noapay_invoice, invoice_id))
+            await call.answer("✅ فاکتور لغو و حذف شد.")
+
+        (await asyncio.to_thread(db.expire_stale_noapay_invoices))
+        (await asyncio.to_thread(db.purge_old_noapay_invoices, days=7))
+        invoices = (await asyncio.to_thread(db.get_noapay_invoices, 50))
+        if not invoices:
+            await replace_admin_view(call, "⭐ پرداخت‌های NoapayBot\n\nهیچ پرداخت NoapayBot ای ثبت نشده است.",
+                                      reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                          [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")]
+                                      ]))
+            return
+        await replace_admin_view(
+            call,
+            "⭐ پرداخت‌های NoapayBot (استارز تلگرام)\n\nاین پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
+            reply_markup=kb.noapay_invoices_kb(invoices),
+        )
+
+    # -------------------------------------------------------------------
+    # تنظیم درگاه پرداخت NoapayBot (خرید استارز تلگرام)
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_set_noapay")
+    async def cb_admin_set_noapay(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await replace_admin_view(
+            call,
+            "⭐ تنظیم درگاه NoapayBot (خرید استارز تلگرام به‌عنوان روش پرداخت)\n\n"
+            "کلید API و رمز وب‌هوک را از دستور /apikey داخل ربات NoapayBot بگیر.\n"
+            "این درگاه بر اساس «تعداد استارز» کار می‌کند، نه مبلغ تومانی مستقیم؛ "
+            "چون نرخ لحظه‌ای ثابت نیست، باید یک نرخ تقریبی (تومان به‌ازای هر استارز) هم تنظیم کنی "
+            "تا مبلغ سفارش/شارژ به تعداد استارز تبدیل شود.",
+            reply_markup=kb.noapay_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_noapay_toggle")
+    async def cb_admin_noapay_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        enabled = (await asyncio.to_thread(db.get_setting, "noapay_payment_enabled", "0")) == "1"
+        if not enabled and not noapay_payment.noapay_payment_available(db):
+            await call.answer(
+                "⚠️ برای فعال‌کردن، اول باید کلید API و نرخ تبدیل را تنظیم کنی.", show_alert=True
+            )
+            return
+        new_value = "0" if enabled else "1"
+        (await asyncio.to_thread(db.set_setting, "noapay_payment_enabled", new_value))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "noapay_toggle", f"وضعیت درگاه NoapayBot: {new_value}"))
+        await safe_edit(call, call.message.text, reply_markup=kb.noapay_settings_kb(db))
+        await call.answer("✅ به‌روزرسانی شد.")
+
+    @router.callback_query(F.data == "adm_noapay_set_key")
+    async def cb_admin_noapay_set_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "noapay_api_key", ""))
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        await state.set_state(AdminSetNoapay.waiting_key)
+        await safe_edit(
+            call,
+            f"🔑 کلید API را ارسال کن (از دستور /apikey داخل ربات NoapayBot).\n"
+            f"وضعیت فعلی: {masked}\n\n"
+            f"برای پاک‌کردن، عبارت «حذف» را بفرست.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminSetNoapay.waiting_key)
+    async def process_set_noapay_key(message: Message, state: FSMContext):
+        text = message.text.strip()
+        await state.clear()
+        if text in ("حذف", "/حذف", "-"):
+            (await asyncio.to_thread(db.set_setting, "noapay_api_key", ""))
+            (await asyncio.to_thread(db.set_setting, "noapay_payment_enabled", "0"))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "noapay_key_change", "کلید API NoapayBot حذف شد."))
+            await message.answer("✅ کلید API NoapayBot حذف شد و درگاه غیرفعال شد.", reply_markup=kb.noapay_settings_kb(db))
+            return
+        (await asyncio.to_thread(db.set_setting, "noapay_api_key", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "noapay_key_change", "کلید API NoapayBot تغییر کرد."))
+        await message.answer(
+            "✅ کلید API NoapayBot ذخیره شد.\nحالا رمز وب‌هوک و نرخ تبدیل استارز را هم تنظیم کن تا درگاه فعال شود.",
+            reply_markup=kb.noapay_settings_kb(db),
+        )
+
+    @router.callback_query(F.data == "adm_noapay_set_secret")
+    async def cb_admin_noapay_set_secret(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "noapay_webhook_secret", ""))
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        await state.set_state(AdminSetNoapay.waiting_secret)
+        await safe_edit(
+            call,
+            f"🔏 رمز وب‌هوک (webhook secret) را ارسال کن؛ همراه کلید API از دستور /apikey داخل ربات NoapayBot می‌گیری.\n"
+            f"این رمز برای تایید امضای HMAC وب‌هوک‌های ورودی استفاده می‌شود و بدونش پرداخت‌ها آنی تایید نمی‌شوند.\n"
+            f"وضعیت فعلی: {masked}\n\n"
+            f"برای پاک‌کردن، عبارت «حذف» را بفرست.",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminSetNoapay.waiting_secret)
+    async def process_set_noapay_secret(message: Message, state: FSMContext):
+        text = message.text.strip()
+        await state.clear()
+        if text in ("حذف", "/حذف", "-"):
+            (await asyncio.to_thread(db.set_setting, "noapay_webhook_secret", ""))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "noapay_key_change", "رمز وب‌هوک NoapayBot حذف شد."))
+            await message.answer("✅ رمز وب‌هوک حذف شد.", reply_markup=kb.noapay_settings_kb(db))
+            return
+        (await asyncio.to_thread(db.set_setting, "noapay_webhook_secret", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "noapay_key_change", "رمز وب‌هوک NoapayBot تغییر کرد."))
+        await message.answer("✅ رمز وب‌هوک ذخیره شد.", reply_markup=kb.noapay_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_noapay_set_rate")
+    async def cb_admin_noapay_set_rate(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "noapay_rate_toman_per_star", "0"))
+        await state.set_state(AdminSetNoapay.waiting_rate)
+        await safe_edit(
+            call,
+            f"💱 نرخ تقریبی «تومان به‌ازای هر استارز» را به‌صورت عدد بفرست (مثلاً 5000).\n"
+            f"از روی این نرخ، مبلغ سفارش/شارژ کیف‌پول کاربر به تعداد استارز تبدیل می‌شود؛ "
+            f"مبلغی که خودِ NoapayBot در لحظه اعلام می‌کند ممکن است کمی با این نرخ فرق داشته باشد، "
+            f"ولی مبلغی که از کیف‌پول/سفارش کاربر کم می‌شود همیشه دقیقاً همان مبلغ اصلی خواهد بود.\n"
+            f"نرخ فعلی: {int(current or 0):,} تومان",
+            reply_markup=kb.admin_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminSetNoapay.waiting_rate)
+    async def process_set_noapay_rate(message: Message, state: FSMContext):
+        text = message.text.strip().replace(",", "")
+        await state.clear()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ یک عدد بزرگ‌تر از صفر بفرست.", reply_markup=kb.noapay_settings_kb(db))
+            return
+        (await asyncio.to_thread(db.set_setting, "noapay_rate_toman_per_star", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "noapay_key_change", f"نرخ استارز NoapayBot: {text} تومان"))
+        await message.answer(f"✅ نرخ روی {int(text):,} تومان برای هر استارز تنظیم شد.", reply_markup=kb.noapay_settings_kb(db))
 
     # -------------------------------------------------------------------
     # کارت‌به‌کارت با تایید خودکار (پیامک بانک) — همان چیزی که در پنل وب

@@ -127,6 +127,13 @@ class AdminSetAbanGateway(StatesGroup):
     waiting_key = State()
 
 
+
+class AdminSetNoapay(StatesGroup):
+    waiting_key = State()
+    waiting_secret = State()
+    waiting_rate = State()
+
+
 class AdminC2CCard(StatesGroup):
     waiting_number = State()
     waiting_holder = State()

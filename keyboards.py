@@ -545,7 +545,7 @@ def reseller_panel_kb() -> InlineKeyboardMarkup:
 def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
                        custom_gateways: list = None, card_to_card_enabled: bool = True,
                        amount: int = None, db=None, allowed_methods=None,
-                       card_auto_enabled: bool = False) -> InlineKeyboardMarkup:
+                       card_auto_enabled: bool = False, noapay_enabled: bool = False) -> InlineKeyboardMarkup:
     """کیبورد مرحله‌ی انتخاب روش پرداخت: کاربر ابتدا این لیست را می‌بیند و روش پرداخت را
     انتخاب می‌کند (به‌جای اینکه مستقیم شماره کارت نمایش داده شود). اگر درگاه کریپتو/آبان
     گیت وی/درگاه‌های سفارشی/کارت‌به‌کارت خودکار فعال باشند، دکمه‌ی مربوطه هم نمایش داده
@@ -573,6 +573,8 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
         rows.append([InlineKeyboardButton(text="💳 کارت‌به‌کارت (تایید خودکار پیامکی)", callback_data="pay_card_auto")])
     if abangateway_enabled and _ok("abangateway"):
         rows.append([InlineKeyboardButton(text="💳 پرداخت خودکار کارت‌به‌کارت (تایید آنی)", callback_data="pay_abangateway")])
+    if noapay_enabled and _ok("noapay"):
+        rows.append([InlineKeyboardButton(text="⭐ NoapayBot - استارز تلگرام (تایید آنی)", callback_data="pay_noapay")])
     if crypto_enabled and _ok("crypto"):
         rows.append([InlineKeyboardButton(text="🪙 پرداخت با ارز دیجیتال (تایید آنی)", callback_data="pay_crypto")])
     for gw in (custom_gateways or []):
@@ -868,6 +870,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_pending_topups", "👛 درخواست‌های شارژ کیف پول", "adm_pending_topups"),
     ("adm_crypto_payments", "🪙 پرداخت‌های کریپتو", "adm_crypto_payments"),
     ("adm_abangateway_payments", "💳 پرداخت‌های آبان گیت وی", "adm_abangateway_payments"),
+    ("adm_noapay_payments", "⭐ پرداخت‌های NoapayBot", "adm_noapay_payments"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
@@ -887,6 +890,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_card_autodelete", "⏱ حذف خودکار پیام شماره کارت", "adm_card_autodelete"),
     ("adm_set_plisio", "🪙 تنظیم درگاه کریپتو (Plisio)", "adm_set_plisio"),
     ("adm_set_abangateway", "💳 تنظیم درگاه آبان گیت وی", "adm_set_abangateway"),
+    ("adm_set_noapay", "⭐ تنظیم درگاه NoapayBot", "adm_set_noapay"),
     ("adm_card_auto", "📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "adm_card_auto"),
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
@@ -919,6 +923,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_pending_topups",
         "adm_crypto_payments",
         "adm_abangateway_payments",
+        "adm_noapay_payments",
         "adm_reseller_requests_menu",
     ]),
     ("products", "📦 محصولات و کانفیگ", [
@@ -949,6 +954,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_card_autodelete",
         "adm_set_plisio",
         "adm_set_abangateway",
+        "adm_set_noapay",
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
@@ -1874,6 +1880,59 @@ def abangateway_invoices_kb(invoices) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def noapay_invoices_kb(invoices) -> InlineKeyboardMarkup:
+    rows = []
+    status_text = {
+        "new": "🟡 جدید", "pending": "🟠 در انتظار", "opened": "🟠 باز شده",
+        "paid": "🟠 رسید ارسال‌شده", "confirmed": "🟢 تاییدشده", "completed": "🟢 تکمیل‌شده",
+        "expired": "🔴 منقضی‌شده", "rejected": "🔴 ردشده",
+    }
+    kind_text = {"order": "سفارش", "wallet_topup": "شارژ کیف پول"}
+    for inv in invoices:
+        st = status_text.get(inv["status"], inv["status"] or "---")
+        kind = kind_text.get(inv["kind"], inv["kind"])
+        row = [
+            InlineKeyboardButton(
+                text=f"{st} | {kind} #{inv['ref_id']} | {inv['amount_toman']:,} تومان ({inv['stars_count']}⭐)",
+                callback_data=f"view_noapay_invoice:{inv['id']}",
+            )
+        ]
+        if inv["status"] not in ("completed", "expired", "rejected"):
+            row.append(InlineKeyboardButton(text="🔄 بررسی", callback_data=f"check_noapay_invoice:{inv['id']}"))
+            row.append(InlineKeyboardButton(text="❌ لغو", callback_data=f"cancel_noapay_invoice:{inv['id']}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_noapay_payments")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def noapay_settings_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات درگاه NoapayBot: وضعیت، کلید API، رمز وب‌هوک، نرخ تبدیل."""
+    enabled = db.get_setting("noapay_payment_enabled", "0") == "1"
+    api_key = db.get_setting("noapay_api_key", "")
+    secret = db.get_setting("noapay_webhook_secret", "")
+    rate = db.get_setting("noapay_rate_toman_per_star", "0")
+    toggle_text = "🔴 غیرفعال کردن" if enabled else "🟢 فعال کردن"
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_noapay_toggle")],
+        [InlineKeyboardButton(
+            text=f"🔑 کلید API: {'✅ تنظیم شده' if api_key else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_noapay_set_key",
+        )],
+        [InlineKeyboardButton(
+            text=f"🔏 رمز وب‌هوک: {'✅ تنظیم شده' if secret else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_noapay_set_secret",
+        )],
+        [InlineKeyboardButton(
+            text=f"💱 نرخ هر استارز: {int(rate or 0):,} تومان (تغییر)",
+            callback_data="adm_noapay_set_rate",
+        )],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def pending_topups_kb(topups) -> InlineKeyboardMarkup:
     rows = []
     for t in topups:
@@ -2121,6 +2180,7 @@ MIN_AMOUNT_SETTINGS_ITEMS = [
     ("min_amount_wallet_topup", "👛 حداقل مبلغ شارژ کیف پول"),
     ("min_amount_card", "💳 حداقل مبلغ کارت‌به‌کارت (دستی)"),
     ("min_amount_abangateway", "💳 حداقل مبلغ آبان گیت وی"),
+    ("min_amount_noapay", "⭐ حداقل مبلغ NoapayBot"),
     ("min_amount_crypto", "🪙 حداقل مبلغ پرداخت کریپتو"),
 ]
 

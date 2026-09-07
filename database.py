@@ -196,6 +196,11 @@ DEFAULT_SETTINGS = {
     # پرداخت کارت‌به‌کارت خودکار (آبان گیت وی)
     "abangateway_payment_enabled": "0",
     "abangateway_api_key": "",  # کلید API آبان گیت وی؛ از داخل بات (دکمه‌ی «تنظیم درگاه آبان گیت وی») قابل تنظیم است
+    # پرداخت با خرید استارز تلگرام (NoapayBot/StarBot)
+    "noapay_payment_enabled": "0",
+    "noapay_api_key": "",            # کلید API NoapayBot؛ از داخل بات (دکمه‌ی «تنظیم درگاه NoapayBot») قابل تنظیم است
+    "noapay_webhook_secret": "",     # رمز HMAC وب‌هوک NoapayBot (X-Starbot-Signature)
+    "noapay_rate_toman_per_star": "0",  # نرخ تقریبی تومان به‌ازای هر استارز؛ ۰ یعنی هنوز تنظیم نشده
     "btn_wheel_style": "success",
     # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
     "renewal_reminder_enabled": "1",
@@ -232,6 +237,7 @@ DEFAULT_SETTINGS = {
     "min_amount_wallet_topup": "1000",  # حداقل مبلغ شارژ کیف پول
     "min_amount_card": "0",             # حداقل مبلغ برای پرداخت کارت‌به‌کارت دستی
     "min_amount_abangateway": "0",      # حداقل مبلغ برای آبان گیت وی
+    "min_amount_noapay": "0",           # حداقل مبلغ برای NoapayBot
     "min_amount_crypto": "0",           # حداقل مبلغ برای پرداخت کریپتو
     "min_amount_card_auto": "0",        # حداقل مبلغ برای کارت‌به‌کارت خودکار
     "card_to_card_auto_enabled": "0",
@@ -248,6 +254,7 @@ BUILTIN_PAYMENT_METHODS = [
     {"key": "wallet", "label": "👛 کیف پول", "enable_setting": None},
     {"key": "card", "label": "💳 کارت‌به‌کارت (ارسال رسید)", "enable_setting": "card_to_card_enabled"},
     {"key": "abangateway", "label": "💳 آبان گیت وی (تایید آنی)", "enable_setting": "abangateway_payment_enabled"},
+    {"key": "noapay", "label": "⭐ NoapayBot - استارز تلگرام (تایید آنی)", "enable_setting": "noapay_payment_enabled"},
     {"key": "crypto", "label": "🪙 ارز دیجیتال (تایید آنی)", "enable_setting": "crypto_payment_enabled"},
     {"key": "card_auto", "label": "💳 کارت‌به‌کارت (تایید خودکار پیامکی)", "enable_setting": "card_to_card_auto_enabled"},
 ]
@@ -738,6 +745,24 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_abangateway_invoices_invoice_id ON abangateway_invoices(invoice_id);
                 CREATE INDEX IF NOT EXISTS idx_abangateway_invoices_ref ON abangateway_invoices(kind, ref_id);
+                CREATE TABLE IF NOT EXISTS noapay_invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_token TEXT UNIQUE NOT NULL,
+                    kind TEXT NOT NULL,
+                    ref_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    amount_toman INTEGER NOT NULL,
+                    stars_count INTEGER NOT NULL,
+                    quoted_total_toman INTEGER,
+                    payment_url TEXT,
+                    status TEXT DEFAULT 'new',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_noapay_invoices_token ON noapay_invoices(invoice_token);
+                CREATE INDEX IF NOT EXISTS idx_noapay_invoices_ref ON noapay_invoices(kind, ref_id);
+
 
                 -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
                 -- ===== درگاه‌های پرداخت سفارشی/پویا (تعریف‌شده توسط ادمین، بدون کد) =====
@@ -992,7 +1017,7 @@ class Database:
         "test_config_plans", "orders", "discount_codes", "wallet_topups",
         "crypto_invoices", "support_messages", "support_conversations",
         "admin_presence", "tickets", "ticket_messages", "admin_logs",
-        "abangateway_invoices", "custom_gateways", "custom_gateway_invoices",
+        "abangateway_invoices", "noapay_invoices", "custom_gateways", "custom_gateway_invoices",
         "card_to_card_cards", "card_to_card_invoices", "panel_servers",
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
@@ -3471,6 +3496,9 @@ class Database:
             aban = conn.execute(
                 "SELECT COUNT(*) c, COALESCE(SUM(amount_toman),0) s FROM abangateway_invoices WHERE status IN ('paid','completed')"
             ).fetchone()
+            noapay = conn.execute(
+                "SELECT COUNT(*) c, COALESCE(SUM(amount_toman),0) s FROM noapay_invoices WHERE status='completed'"
+            ).fetchone()
             custom_rows = conn.execute(
                 "SELECT cg.name AS name, COUNT(*) c, COALESCE(SUM(cgi.amount_toman),0) s "
                 "FROM custom_gateway_invoices cgi JOIN custom_gateways cg ON cg.id = cgi.gateway_id "
@@ -3479,6 +3507,7 @@ class Database:
         result = [
             {"gateway": "crypto", "label": "کریپتو (Plisio)", "count": crypto["c"], "amount_toman": crypto["s"]},
             {"gateway": "abangateway", "label": "آبان گیت‌وی", "count": aban["c"], "amount_toman": aban["s"]},
+            {"gateway": "noapay", "label": "NoapayBot (استارز)", "count": noapay["c"], "amount_toman": noapay["s"]},
         ]
         for row in custom_rows:
             result.append({
@@ -3588,6 +3617,84 @@ class Database:
             conn.execute(
                 "DELETE FROM abangateway_invoices WHERE status IN "
                 "('completed','expired','cancelled','error') "
+                "AND COALESCE(updated_at, created_at) < ?",
+                (cutoff,),
+            )
+
+    # -----------------------------------------------------------------------
+    # فاکتورهای پرداخت NoapayBot (خرید استارز تلگرام)
+    # -----------------------------------------------------------------------
+
+    def create_noapay_invoice(self, invoice_token: str, kind: str, ref_id: int, user_id: int,
+                               amount_toman: int, stars_count: int, quoted_total_toman: int = None,
+                               payment_url: str = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO noapay_invoices (invoice_token, kind, ref_id, user_id, amount_toman, "
+                "stars_count, quoted_total_toman, payment_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+                (invoice_token, kind, ref_id, user_id, amount_toman, stars_count, quoted_total_toman, payment_url),
+            )
+            return cur.lastrowid
+
+    def get_noapay_invoice_by_token(self, invoice_token: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM noapay_invoices WHERE invoice_token=?", (invoice_token,)
+            ).fetchone()
+
+    def get_noapay_invoice(self, id_: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM noapay_invoices WHERE id=?", (id_,)).fetchone()
+
+    def update_noapay_invoice_status(self, invoice_token: str, status: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE noapay_invoices SET status=?, updated_at=? WHERE invoice_token=?",
+                (status, datetime.utcnow().isoformat(), invoice_token),
+            )
+
+    def get_pending_noapay_invoice_for_ref(self, kind: str, ref_id: int):
+        """آخرین فاکتور فعال (new/pending/opened/paid/confirmed) ثبت‌شده برای یک سفارش
+        یا شارژ کیف پول خاص را برمی‌گرداند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM noapay_invoices WHERE kind=? AND ref_id=? "
+                "AND status IN ('new','pending','opened','paid','confirmed') "
+                "ORDER BY id DESC LIMIT 1",
+                (kind, ref_id),
+            ).fetchone()
+
+    def get_noapay_invoices(self, limit: int = 50):
+        """فهرست پرداخت‌های NoapayBot برای پنل مدیریت؛ شامل پرداخت‌های فعال و تاریخچه."""
+        limit = max(1, min(int(limit or 50), 200))
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM noapay_invoices ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+
+    def expire_stale_noapay_invoices(self):
+        """فاکتورهایی که هنوز در جریان مانده‌اند ولی بیش از ۶۰ دقیقه (اعتبار فاکتور NoapayBot)
+        از ایجادشان گذشته را 'expired' علامت می‌زند."""
+        cutoff = (datetime.utcnow() - timedelta(minutes=65)).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE noapay_invoices SET status='expired', updated_at=? "
+                "WHERE status IN ('new','pending','opened') AND created_at < ?",
+                (datetime.utcnow().isoformat(), cutoff),
+            )
+
+    def cancel_and_delete_noapay_invoice(self, id_: int):
+        """لغو دستی توسط ادمین: فاکتور بلافاصله از دیتابیس حذف می‌شود."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM noapay_invoices WHERE id=?", (id_,))
+
+    def purge_old_noapay_invoices(self, days: int = 7):
+        """فاکتورهای نهایی‌شده‌ی NoapayBot که بیش از N روز از آخرین به‌روزرسانی‌شان گذشته را حذف می‌کند."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM noapay_invoices WHERE status IN "
+                "('completed','expired','rejected') "
                 "AND COALESCE(updated_at, created_at) < ?",
                 (cutoff,),
             )
@@ -3717,6 +3824,10 @@ class Database:
                 "SELECT 1 FROM abangateway_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
             ).fetchone():
                 return "abangateway"
+            if conn.execute(
+                "SELECT 1 FROM noapay_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
+            ).fetchone():
+                return "noapay"
             row = conn.execute(
                 "SELECT cg.gateway_key FROM custom_gateway_invoices cgi "
                 "JOIN custom_gateways cg ON cg.id = cgi.gateway_id "

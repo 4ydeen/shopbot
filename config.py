@@ -100,6 +100,10 @@ PLISIO_API_KEY = os.getenv("PLISIO_API_KEY", "")
 # می‌تواند کلید خودش را از داخل پنل مدیریت بات تنظیم کند - دکمه‌ی «تنظیم درگاه آبان گیت وی»)
 ABANGATEWAY_API_KEY = os.getenv("ABANGATEWAY_API_KEY", "")
 
+# کلید API و رمز وب‌هوک درگاه NoapayBot/StarBot
+NOAPAY_API_KEY = os.getenv("NOAPAY_API_KEY", "")
+NOAPAY_WEBHOOK_SECRET = os.getenv("NOAPAY_WEBHOOK_SECRET", "")
+
 # کلید API دستیار پشتیبانی هوش مصنوعی (Google Gemini - رایگان، از aistudio.google.com
 # بگیر). اگر خالی باشد، دکمه‌ی «دستیار هوشمند» در بخش ارتباط با پشتیبانی اصلاً
 # نمایش داده نمی‌شود (نه خطا می‌دهد و نه بات را متوقف می‌کند).
