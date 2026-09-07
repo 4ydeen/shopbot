@@ -792,31 +792,45 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
     )
     order = db.get_order(order_id)
 
-    if order["final_price"] <= 0:
-        try:
-            provider = get_provider(server)
-            result = await provider.create_user(username, body.volume_gb, settings["duration_days"])
-        except Exception as e:
-            db.reject_order(order_id)
-            if wallet_used:
-                db.add_wallet_credit(tg_id, wallet_used)
-            raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ روی پنل: {e}")
-        db.approve_custom_config_order(order_id)
-        db.add_custom_config(
-            tg_id, server["id"], result.username, body.volume_gb, settings["duration_days"],
-            result.subscription_url, order_id=order_id, source="custom_config",
-        )
-        try:
-            db.reward_referrer_if_first_purchase(tg_id, price)
-        except Exception:
-            pass
-        return {"status": "approved", "order_id": order_id, "link": result.subscription_url}
+    try:
+        if order["final_price"] <= 0:
+            try:
+                provider = get_provider(server)
+                result = await provider.create_user(username, body.volume_gb, settings["duration_days"])
+            except Exception as e:
+                # reject_order خودش order["wallet_used"] را برمی‌گرداند؛ برگرداندن
+                # دستی اضافه‌ی قبلی حذف شد چون باعث بازگشت دوبرابری اعتبار می‌شد.
+                db.reject_order(order_id)
+                raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ روی پنل: {e}")
+            db.approve_custom_config_order(order_id)
+            db.add_custom_config(
+                tg_id, server["id"], result.username, body.volume_gb, settings["duration_days"],
+                result.subscription_url, order_id=order_id, source="custom_config",
+            )
+            try:
+                db.reward_referrer_if_first_purchase(tg_id, price)
+            except Exception:
+                pass
+            return {"status": "approved", "order_id": order_id, "link": result.subscription_url}
 
-    return {
-        "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
-        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-        **_payment_flags(db, order["final_price"], None),
-    }
+        return {
+            "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
+            "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+            **_payment_flags(db, order["final_price"], None),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        # هر خطای غیرمنتظره‌ی دیگری (نه فقط خطای پنل که بالا مدیریت شده) نباید
+        # باعث بشه مبلغ کسرشده از کیف پول برای همیشه گیر بیفته؛ reject_order
+        # فقط روی سفارش‌های هنوز pending اثر می‌کند، پس فراخوانی آن این‌جا امن است.
+        logging.getLogger("miniapp").exception(
+            "خطای غیرمنتظره در ساخت کانفیگ شخصی (سفارش #%s) برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+            order_id, tg_id,
+        )
+        db.reject_order(order_id)
+        raise HTTPException(status_code=500, detail="خطای غیرمنتظره‌ای رخ داد. مبلغ کسرشده (در صورت وجود) به کیف پول شما بازگردانده شد.")
+
 
 
 @app.get("/api/catalog")
@@ -1347,58 +1361,72 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     )
     order = db.get_order(order_id)
 
-    if order["final_price"] <= 0:
-        if product["is_auto_provision"]:
-            try:
-                if product["provision_server_id"]:
-                    prov_results = await provision_direct(db, product, quantity, user_id=tg_id, order_id=order_id)
-                else:
-                    prov_results = await provision_auto_config(db, product, quantity, user_id=tg_id, order_id=order_id)
-            except (ProvisionError, DirectProvisionError) as e:
+    try:
+        if order["final_price"] <= 0:
+            if product["is_auto_provision"]:
+                try:
+                    if product["provision_server_id"]:
+                        prov_results = await provision_direct(db, product, quantity, user_id=tg_id, order_id=order_id)
+                    else:
+                        prov_results = await provision_auto_config(db, product, quantity, user_id=tg_id, order_id=order_id)
+                except (ProvisionError, DirectProvisionError) as e:
+                    db.reject_order(order_id)
+                    raise HTTPException(status_code=409, detail=str(e))
+                db.approve_order_auto(order_id)
+                db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
+                links = [r["subscription_url"] for r in prov_results]
+                return {
+                    "status": "approved", "order_id": order_id,
+                    "link": links[0], "links": links,
+                    "expires_at": None,
+                }
+
+            results = db.take_unused_configs(body.product_id, tg_id, quantity)
+            if not results:
                 db.reject_order(order_id)
-                raise HTTPException(status_code=409, detail=str(e))
-            db.approve_order_auto(order_id)
+                raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
+            db.approve_order(order_id, [r["id"] for r in results])
+
+            async def _send_admin_msg(admin_id, text):
+                async with aiohttp.ClientSession() as session:
+                    await session.post(
+                        f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                        json={"chat_id": admin_id, "text": text},
+                    )
+
+            await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
+
             db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
-            links = [r["subscription_url"] for r in prov_results]
+            order = db.get_order(order_id)
+            configs = db.get_order_configs(order_id)
+            links = [c["link"] for c in configs] if configs else [db.get_config_by_id(order["config_id"])["link"]]
             return {
                 "status": "approved", "order_id": order_id,
                 "link": links[0], "links": links,
-                "expires_at": None,
+                "expires_at": configs[0]["expires_at"] if configs else None,
             }
 
-        results = db.take_unused_configs(body.product_id, tg_id, quantity)
-        if not results:
-            db.reject_order(order_id)
-            raise HTTPException(status_code=409, detail="موجودی هم‌زمان تمام شد؛ مبلغ بازگردانده شد.")
-        db.approve_order(order_id, [r["id"] for r in results])
-
-        async def _send_admin_msg(admin_id, text):
-            async with aiohttp.ClientSession() as session:
-                await session.post(
-                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
-                    json={"chat_id": admin_id, "text": text},
-                )
-
-        await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
-
-        db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
-        order = db.get_order(order_id)
-        configs = db.get_order_configs(order_id)
-        links = [c["link"] for c in configs] if configs else [db.get_config_by_id(order["config_id"])["link"]]
+        # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
+        flags = _payment_flags(db, order["final_price"], body.product_id)
         return {
-            "status": "approved", "order_id": order_id,
-            "link": links[0], "links": links,
-            "expires_at": configs[0]["expires_at"] if configs else None,
+            "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
+            "quantity": quantity,
+            "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+            **flags,
         }
+    except HTTPException:
+        raise
+    except Exception:
+        # هر خطای غیرمنتظره‌ی دیگری نباید باعث بشه مبلغ کسرشده از کیف پول برای
+        # همیشه گیر بیفته؛ reject_order فقط روی سفارش‌های هنوز pending اثر
+        # می‌کند، پس فراخوانی آن این‌جا امن است.
+        logging.getLogger("miniapp").exception(
+            "خطای غیرمنتظره در ثبت سفارش #%s برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+            order_id, tg_id,
+        )
+        db.reject_order(order_id)
+        raise HTTPException(status_code=500, detail="خطای غیرمنتظره‌ای رخ داد. مبلغ کسرشده (در صورت وجود) به کیف پول شما بازگردانده شد.")
 
-    # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
-    flags = _payment_flags(db, order["final_price"], body.product_id)
-    return {
-        "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
-        "quantity": quantity,
-        "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-        **flags,
-    }
 
 
 # ---------------------------------------------------------------------------
