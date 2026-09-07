@@ -54,6 +54,13 @@ class AdminAIFaqAdd(StatesGroup):
 class AdminSetGeminiKey(StatesGroup):
     waiting_key = State()
 
+class AdminSetGroqKey(StatesGroup):
+    waiting_key = State()
+
+
+class AdminSetOpenRouterKey(StatesGroup):
+    waiting_key = State()
+
 
 class AdminAddCategory(StatesGroup):
     waiting_name = State()

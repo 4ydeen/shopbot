@@ -72,6 +72,8 @@ from states import (
     AdminSetSupportContact,
     AdminAIFaqAdd,
     AdminSetGeminiKey,
+    AdminSetGroqKey,
+    AdminSetOpenRouterKey,
     AdminReferralPercent,
     AdminReferralCommissionMax,
     AdminReferralFreeConfigThreshold,
@@ -6530,14 +6532,18 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     async def _show_ai_faq_menu(call: CallbackQuery):
         items = await asyncio.to_thread(db.get_ai_faq_items)
-        source = ai_support.resolve_gemini_key_source(db)
-        key_note = {
-            "db": "✅ کلید API از همین پنل بات تنظیم شده.",
-            "env": "⚠️ کلید فقط از فایل .env سرور خوانده می‌شود؛ برای سادگی پیشنهاد می‌شود همینجا دوباره ثبتش کنی.",
-            "none": "❌ هنوز کلید API تنظیم نشده؛ دستیار هوشمند غیرفعال می‌ماند.",
-        }[source]
-        current_model = ai_support.resolve_gemini_model(db)
-        text = f"🤖 مدیریت دستیار هوشمند پشتیبانی\n\n{key_note}\n\n🧠 مدل فعلی: {current_model}\n\n"
+        provider = ai_support.resolve_provider_mode(db)
+        statuses = []
+        for name, label in (("gemini", "Gemini"), ("groq", "Groq"), ("openrouter", "OpenRouter")):
+            statuses.append(f"{'🟢' if ai_support.resolve_provider_keys(db, name) else '⚪️'} {label}")
+        text = (
+            "🤖 مدیریت دستیار هوشمند پشتیبانی\n\n"
+            f"🔀 مسیر: {ai_support.PROVIDER_LABELS[provider]}\n"
+            f"{' | '.join(statuses)}\n\n"
+            f"🧠 Gemini: {ai_support.resolve_gemini_model(db)}\n"
+            f"🚀 Groq: {ai_support.resolve_groq_model(db)}\n"
+            f"🌐 OpenRouter: {ai_support.resolve_openrouter_model(db)}\n\n"
+        )
         if items:
             text += "سوالات متداولی که به دستیار آموزش داده شده (برای حذف، روی 🗑 بزن):"
         else:
@@ -6560,92 +6566,97 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await _show_ai_faq_menu(call)
         await call.answer()
 
+    @router.callback_query(F.data == "adm_ai_set_provider")
+    async def cb_admin_ai_set_provider(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await replace_admin_view(call, "🔀 مسیر انتخاب مدل\n\n«خودکار» بهترین حالت است: به‌ترتیب Gemini → Groq → OpenRouter را امتحان می‌کند و با خطای سهمیه/اختلال به بعدی می‌رود.", reply_markup=kb.ai_provider_choice_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ai_provider_pick:"))
+    async def cb_admin_ai_provider_pick(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        mode = call.data.split(":", 1)[1]
+        if mode not in ai_support.PROVIDER_LABELS:
+            return await call.answer("❌ مسیر نامعتبر", show_alert=True)
+        await asyncio.to_thread(db.set_setting, "ai_provider", mode)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_provider_change", f"مسیر Agent: {mode}")
+        await _show_ai_faq_menu(call)
+        await call.answer("✅ ذخیره شد")
+
     @router.callback_query(F.data == "adm_ai_set_model")
     async def cb_admin_ai_set_model(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        await replace_admin_view(
-            call,
-            "🧠 انتخاب مدل دستیار هوشمند\n\n"
-            "اگر با محدودیت سهمیه‌ی رایگان روزانه مواجه شدی، «Flash-Lite» را انتخاب کن؛ "
-            "معمولاً سهمیه‌ی رایگان روزانه‌ی بیشتری نسبت به Flash دارد (اعداد دقیق و زنده "
-            "را در aistudio.google.com بخش Usage ببین). تغییر فوری است و نیازی به "
-            "ری‌استارت سرور ندارد.",
-            reply_markup=kb.ai_model_choice_kb(db),
-        )
+        await replace_admin_view(call, "🧠 انتخاب مدل\n\nبرای ۵۰۰ پیام روزانه، مدل‌های سریع را انتخاب کن. در حالت خودکار اگر Provider فعلی 429/5xx بدهد، Agent به Provider بعدی می‌رود. توضیح هر مدل کنار دکمه آمده است.", reply_markup=kb.ai_model_choice_kb(db))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_ai_model_pick:"))
     async def cb_admin_ai_model_pick(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        model = call.data.split(":", 1)[1]
-        valid_ids = {m for m, _ in ai_support.MODEL_CHOICES}
-        if model not in valid_ids:
-            return await call.answer("❌ مدل نامعتبر.", show_alert=True)
-        (await asyncio.to_thread(db.set_setting, "gemini_model", model))
-        (await asyncio.to_thread(
-            db.log_admin_action, call.from_user.id, "gemini_model_change", f"مدل دستیار هوشمند به {model} تغییر کرد."
-        ))
-        await replace_admin_view(
-            call,
-            f"✅ مدل دستیار هوشمند روی «{model}» تنظیم شد (فوری، بدون نیاز به ری‌استارت).",
-            reply_markup=kb.ai_model_choice_kb(db),
-        )
-        await call.answer("✅ ذخیره شد.")
+        parts = call.data.split(":", 2)
+        if len(parts) != 3:
+            return await call.answer("❌ مدل نامعتبر", show_alert=True)
+        provider, model = parts[1], parts[2]
+        valid = {(p, m) for p, m, _ in ai_support.MODEL_CHOICES}
+        if (provider, model) not in valid:
+            return await call.answer("❌ مدل نامعتبر", show_alert=True)
+        key = {"gemini":"gemini_model", "groq":"groq_model", "openrouter":"openrouter_model"}[provider]
+        await asyncio.to_thread(db.set_setting, key, model)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_model_change", f"{provider}: {model}")
+        await replace_admin_view(call, f"✅ مدل {provider} روی «{model}» تنظیم شد.", reply_markup=kb.ai_model_choice_kb(db))
+        await call.answer("✅ ذخیره شد")
+
+    async def _show_ai_key_prompt(call, state, provider, state_cls, setting_key, title, source_env):
+        current_keys = ai_support._split_keys(db.get_setting(setting_key, ""))
+        masked = "\n".join(f"  {i+1}. ...{k[-4:]}" for i, k in enumerate(current_keys)) if current_keys else "❌ تنظیم نشده"
+        await state.set_state(state_cls.waiting_key)
+        await replace_admin_view(call, f"{title}\n\nکلید یا چند کلید را بفرست؛ هر کلید در یک خط. در صورت 429 کلید بعدی امتحان می‌شود.\n\nکلیدهای فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {source_env}", reply_markup=kb.admin_back_kb("adm_ai_support_settings"))
+        await call.answer()
 
     @router.callback_query(F.data == "adm_ai_set_key")
     async def cb_admin_ai_set_key(call: CallbackQuery, state: FSMContext):
-        if not full_admin_only(call.from_user.id):
-            return await deny_support(call)
-        current_keys = ai_support._split_keys(db.get_setting("gemini_api_key", ""))
-        if current_keys:
-            masked = "\n".join(f"  {i+1}. ...{k[-4:]}" for i, k in enumerate(current_keys))
-        else:
-            masked = "❌ تنظیم نشده"
-        await state.set_state(AdminSetGeminiKey.waiting_key)
-        await replace_admin_view(
-            call,
-            f"🔑 کلید(های) API دستیار هوشمند (Gemini) را ارسال کن.\n"
-            f"رایگان از aistudio.google.com (بدون نیاز به کارت بانکی) قابل دریافت است.\n\n"
-            f"برای افزایش سهمیه می‌توانی چند کلید (از چند اکانت/پروژه‌ی گوگل جدا) بفرستی؛ "
-            f"هر کلید را در یک خط جدا (یا با کاما) بنویس. وقتی سهمیه‌ی یک کلید تمام شود، "
-            f"بات خودکار سراغ کلید بعدی می‌رود.\n\n"
-            f"وضعیت فعلی:\n{masked}\n\n"
-            f"برای حذف، عبارت «حذف» را بفرست.",
-            reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
-        )
-        await call.answer()
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_key_prompt(call, state, "gemini", AdminSetGeminiKey, "gemini_api_key", "🔑 کلیدهای Gemini", "GEMINI_API_KEY")
 
-    @router.message(AdminSetGeminiKey.waiting_key)
-    async def process_set_gemini_key(message: Message, state: FSMContext):
+    @router.callback_query(F.data == "adm_ai_set_groq_key")
+    async def cb_admin_ai_set_groq_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_key_prompt(call, state, "groq", AdminSetGroqKey, "groq_api_key", "🔑 کلیدهای Groq", "GROQ_API_KEY")
+
+    @router.callback_query(F.data == "adm_ai_set_openrouter_key")
+    async def cb_admin_ai_set_openrouter_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_key_prompt(call, state, "openrouter", AdminSetOpenRouterKey, "openrouter_api_key", "🔑 کلیدهای OpenRouter", "OPENROUTER_API_KEY")
+
+    async def _save_ai_key(message: Message, state: FSMContext, setting_key: str, action: str):
         text = (message.text or "").strip()
         await state.clear()
         if text in ("حذف", "/حذف", "-"):
-            (await asyncio.to_thread(db.set_setting, "gemini_api_key", ""))
-            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید(های) API دستیار هوشمند حذف شد."))
-            items = await asyncio.to_thread(db.get_ai_faq_items)
-            await message.answer(
-                "✅ کلید API حذف شد؛ دستیار هوشمند تا تنظیم دوباره‌ی کلید غیرفعال می‌ماند.",
-                reply_markup=kb.ai_faq_admin_kb(db, items),
-            )
+            await asyncio.to_thread(db.set_setting, setting_key, "")
+            await asyncio.to_thread(db.log_admin_action, message.from_user.id, action, "کلیدها حذف شدند.")
+            await message.answer("✅ کلیدها حذف شدند.", reply_markup=kb.ai_faq_admin_kb(db, await asyncio.to_thread(db.get_ai_faq_items)))
             return
         keys = ai_support._split_keys(text)
-        (await asyncio.to_thread(db.set_setting, "gemini_api_key", "\n".join(keys)))
-        (await asyncio.to_thread(
-            db.log_admin_action, message.from_user.id, "gemini_key_change",
-            f"کلید(های) API دستیار هوشمند تغییر کرد ({len(keys)} کلید).",
-        ))
-        # پیام کاربر حاوی کلید API است؛ به‌محض ذخیره حذفش می‌کنیم تا در تاریخچه‌ی چت باقی نماند.
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        items = await asyncio.to_thread(db.get_ai_faq_items)
-        await message.answer(
-            f"✅ {len(keys)} کلید ذخیره شد و دستیار هوشمند از همین الان فعال است (بدون نیاز به ری‌استارت سرور).",
-            reply_markup=kb.ai_faq_admin_kb(db, items),
-        )
+        await asyncio.to_thread(db.set_setting, setting_key, "\n".join(keys))
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, action, f"{len(keys)} کلید ذخیره شد.")
+        try: await message.delete()
+        except Exception: pass
+        await message.answer(f"✅ {len(keys)} کلید ذخیره شد.", reply_markup=kb.ai_faq_admin_kb(db, await asyncio.to_thread(db.get_ai_faq_items)))
+
+    @router.message(AdminSetGeminiKey.waiting_key)
+    async def process_set_gemini_key(message: Message, state: FSMContext):
+        await _save_ai_key(message, state, "gemini_api_key", "gemini_key_change")
+
+    @router.message(AdminSetGroqKey.waiting_key)
+    async def process_set_groq_key(message: Message, state: FSMContext):
+        await _save_ai_key(message, state, "groq_api_key", "groq_key_change")
+
+    @router.message(AdminSetOpenRouterKey.waiting_key)
+    async def process_set_openrouter_key(message: Message, state: FSMContext):
+        await _save_ai_key(message, state, "openrouter_api_key", "openrouter_key_change")
 
     @router.callback_query(F.data == "adm_ai_faq_add")
     async def cb_admin_ai_faq_add(call: CallbackQuery, state: FSMContext):

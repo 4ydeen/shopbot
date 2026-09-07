@@ -701,38 +701,54 @@ def contact_menu_kb(db) -> InlineKeyboardMarkup:
 
 
 def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
-    """لیست سوالات متداولِ دستیار هوشمند برای پنل ادمین: هر آیتم یک ردیف با
-    دکمه‌ی حذف، به‌علاوه‌ی روشن/خاموش‌کردن کل دستیار، تنظیم کلید API و افزودن
-    سوال جدید."""
+    """پنل کامل Agent چند-Provider برای ادمین."""
+    import ai_support
     ai_enabled = db.get_setting("ai_support_enabled", "1") == "1"
+    provider = ai_support.resolve_provider_mode(db)
     rows = [
-        [InlineKeyboardButton(
-            text=f"دستیار هوشمند: {'🟢 فعال' if ai_enabled else '🔴 غیرفعال'} (برای تغییر بزن)",
-            callback_data="adm_ai_toggle",
-        )],
-        [InlineKeyboardButton(text="🔑 تنظیم کلید API (Gemini)", callback_data="adm_ai_set_key")],
-        [InlineKeyboardButton(text="🧠 انتخاب مدل (برای سهمیه‌ی رایگان بیشتر)", callback_data="adm_ai_set_model")],
+        [InlineKeyboardButton(text=f"دستیار هوشمند: {'🟢 فعال' if ai_enabled else '🔴 غیرفعال'}", callback_data="adm_ai_toggle")],
+        [InlineKeyboardButton(text=f"🔀 مسیر مدل: {ai_support.PROVIDER_LABELS[provider]}", callback_data="adm_ai_set_provider")],
+        [InlineKeyboardButton(text="🔑 کلید Gemini", callback_data="adm_ai_set_key")],
+        [InlineKeyboardButton(text="🔑 کلید Groq", callback_data="adm_ai_set_groq_key")],
+        [InlineKeyboardButton(text="🔑 کلید OpenRouter", callback_data="adm_ai_set_openrouter_key")],
+        [InlineKeyboardButton(text="🧠 انتخاب مدل", callback_data="adm_ai_set_model")],
     ]
     for it in items:
         q = it["question"]
         short_q = q if len(q) <= 40 else q[:37] + "..."
-        rows.append([
-            InlineKeyboardButton(text=f"❓ {short_q}", callback_data="noop"),
-            InlineKeyboardButton(text="🗑", callback_data=f"adm_ai_faq_del:{it['id']}"),
-        ])
+        rows.append([InlineKeyboardButton(text=f"❓ {short_q}", callback_data="noop"), InlineKeyboardButton(text="🗑", callback_data=f"adm_ai_faq_del:{it['id']}")])
     rows.append([InlineKeyboardButton(text="➕ افزودن سوال جدید", callback_data="adm_ai_faq_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data="adm_back_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
-    """لیست مدل‌های قابل‌انتخاب برای دستیار هوشمند، با علامت‌زدن مدل فعلی."""
+def ai_provider_choice_kb(db) -> InlineKeyboardMarkup:
     import ai_support
-    current = ai_support.resolve_gemini_model(db)
+    current = ai_support.resolve_provider_mode(db)
     rows = []
-    for model_id, label in ai_support.MODEL_CHOICES:
-        mark = "✅ " if model_id == current else ""
-        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_model_pick:{model_id}")])
+    for provider, label in ai_support.PROVIDER_LABELS.items():
+        mark = "✅ " if provider == current else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_provider_pick:{provider}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_ai_support_settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
+    import ai_support
+    current = {
+        "gemini": ai_support.resolve_gemini_model(db),
+        "groq": ai_support.resolve_groq_model(db),
+        "openrouter": ai_support.resolve_openrouter_model(db),
+    }
+    rows = []
+    last_provider = None
+    for provider, model_id, label in ai_support.MODEL_CHOICES:
+        if provider != last_provider:
+            title = {"gemini":"🔷 Gemini", "groq":"🚀 Groq", "openrouter":"🌐 OpenRouter"}[provider]
+            rows.append([InlineKeyboardButton(text=title, callback_data="noop")])
+            last_provider = provider
+        mark = "✅ " if model_id == current[provider] else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_model_pick:{provider}:{model_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_ai_support_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

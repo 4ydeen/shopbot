@@ -105,6 +105,10 @@ ABANGATEWAY_API_KEY = os.getenv("ABANGATEWAY_API_KEY", "")
 # نمایش داده نمی‌شود (نه خطا می‌دهد و نه بات را متوقف می‌کند).
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+
 # نام مدل Gemini مورد استفاده برای دستیار پشتیبانی. اگر بعداً مدل جدیدتری آمد یا
 # این مدل منسوخ شد، فقط همین مقدار را در .env تغییر بده، نیازی به تغییر کد نیست.
 #
@@ -115,7 +119,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # (فعلاً یعنی Gemini 3.6/3.7/3.8 Flash، بسته به این‌که گوگل چه‌موقع سوییچ کند).
 # اگر می‌خواهی نسخه‌ی مشخصی پین شود (برای پایداری رفتار مدل)، این مقدار را در
 # .env با AI_SUPPORT_MODEL=gemini-3.6-flash (یا نسخه‌ی دلخواه) override کن.
-AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-flash-latest")
+AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-2.5-flash-lite")
 
 # کلید امضای نشست (session) پنل مدیریت وب مستقل - فقط توسط admin_panel/server.py
 # استفاده می‌شود. اگر ست نشود، هر ری‌استارت پروسه همه‌ی نشست‌های وب‌ادمین‌ها را

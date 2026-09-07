@@ -186,6 +186,12 @@ DEFAULT_SETTINGS = {
     "crypto_payment_enabled": "0",
     "plisio_api_key": "",  # کلید API درگاه Plisio؛ از داخل بات (دکمه‌ی «تنظیم درگاه کریپتو») قابل تنظیم است
     "gemini_api_key": "",  # کلید API دستیار هوشمند (Gemini)؛ از داخل بات (دستیار هوشمند → تنظیم کلید API) قابل تنظیم است
+    "groq_api_key": "",
+    "openrouter_api_key": "",
+    "ai_provider": "auto",
+    "gemini_model": "gemini-2.5-flash-lite",
+    "groq_model": "openai/gpt-oss-20b",
+    "openrouter_model": "openrouter/free",
     "usd_to_toman_rate": "0",  # نرخ تبدیل هر ۱ دلار به تومان؛ توسط ادمین دستی تنظیم می‌شود
     # پرداخت کارت‌به‌کارت خودکار (آبان گیت وی)
     "abangateway_payment_enabled": "0",

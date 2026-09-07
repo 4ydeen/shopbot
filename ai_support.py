@@ -28,7 +28,10 @@
 
 import asyncio
 import logging
+import json
 from datetime import datetime, timezone
+
+import aiohttp
 
 import config
 from sub_info import fetch_sub_info
@@ -50,18 +53,102 @@ _MAX_TOOL_ROUNDS = 3
 # فقط جهت مقایسه‌ی نسبی مدل‌ها هستند - برای عدد دقیق و زنده به aistudio.google.com
 # بخش Usage نگاه کن). ترتیب: از سریع‌ترین/بیشترین سهمیه‌ی رایگان تا باکیفیت‌ترین.
 MODEL_CHOICES = [
-    ("gemini-flash-lite-latest", "⚡ Flash-Lite (بیشترین سهمیه‌ی رایگان روزانه، مناسب حجم بالا)"),
-    ("gemini-flash-latest", "🔷 Flash (پیش‌فرض، تعادل سرعت/کیفیت)"),
-    ("gemini-pro-latest", "🎯 Pro (کیفیت بالاتر، سهمیه‌ی رایگان بسیار کمتر)"),
+    ("gemini", "gemini-2.5-flash-lite", "⚡ Gemini Flash-Lite — سریع و اقتصادی برای حجم بالا"),
+    ("gemini", "gemini-2.5-flash", "🔷 Gemini Flash — تعادل کیفیت و سرعت"),
+    ("gemini", "gemini-2.5-pro", "🎯 Gemini Pro — استدلال قوی‌تر؛ سهمیه/هزینه بیشتر"),
+    ("groq", "openai/gpt-oss-20b", "🚀 Groq GPT-OSS 20B — بسیار سریع، مناسب چت روزمره"),
+    ("groq", "openai/gpt-oss-120b", "🧠 Groq GPT-OSS 120B — کیفیت بالاتر برای Agent"),
+    ("groq", "qwen/qwen3.6-27b", "🛠 Groq Qwen 3.6 27B — ابزار و reasoning قوی"),
+    ("openrouter", "openrouter/free", "🆓 OpenRouter Free — روتر مدل‌های رایگان؛ مدل پشت آن ممکن است تغییر کند"),
 ]
+
+PROVIDER_LABELS = {
+    "auto": "🤖 خودکار (Gemini → Groq → OpenRouter)",
+    "gemini": "🔷 فقط Gemini",
+    "groq": "🚀 فقط Groq",
+    "openrouter": "🌐 فقط OpenRouter",
+}
+
+
+def _setting(db, key, default=""):
+    return (db.get_setting(key, default) or "").strip()
+
+
+def resolve_provider_mode(db) -> str:
+    mode = _setting(db, "ai_provider", "auto")
+    return mode if mode in PROVIDER_LABELS else "auto"
 
 
 def resolve_gemini_model(db) -> str:
-    """نام مدل Gemini مورد استفاده را برمی‌گرداند. اولویت با مقداری است که ادمین
-    از داخل پنل بات انتخاب کرده (فوری، بدون نیاز به ری‌استارت سرور)؛ اگر
-    تنظیم نشده بود، مقدار AI_SUPPORT_MODEL از .env استفاده می‌شود."""
-    model = (db.get_setting("gemini_model", "") or "").strip()
-    return model or config.AI_SUPPORT_MODEL
+    return _setting(db, "gemini_model", "gemini-2.5-flash-lite") or getattr(config, "AI_SUPPORT_MODEL", "gemini-2.5-flash-lite")
+
+
+def resolve_groq_model(db) -> str:
+    return _setting(db, "groq_model", "openai/gpt-oss-20b")
+
+
+def resolve_openrouter_model(db) -> str:
+    return _setting(db, "openrouter_model", "openrouter/free")
+
+
+def _split_keys(raw: str) -> list:
+    if not raw:
+        return []
+    parts = raw.replace(",", "\n").splitlines()
+    seen, keys = set(), []
+    for p in parts:
+        k = p.strip()
+        if k and k not in seen:
+            seen.add(k)
+            keys.append(k)
+    return keys
+
+
+def resolve_gemini_keys(db) -> list:
+    keys = _split_keys(_setting(db, "gemini_api_key"))
+    return keys or _split_keys(getattr(config, "GEMINI_API_KEY", ""))
+
+
+def resolve_groq_keys(db) -> list:
+    keys = _split_keys(_setting(db, "groq_api_key"))
+    return keys or _split_keys(getattr(config, "GROQ_API_KEY", ""))
+
+
+def resolve_openrouter_keys(db) -> list:
+    keys = _split_keys(_setting(db, "openrouter_api_key"))
+    return keys or _split_keys(getattr(config, "OPENROUTER_API_KEY", ""))
+
+
+def resolve_gemini_key(db) -> str:
+    keys = resolve_gemini_keys(db)
+    return keys[0] if keys else ""
+
+
+def resolve_gemini_key_source(db) -> str:
+    if _setting(db, "gemini_api_key"):
+        return "db"
+    if getattr(config, "GEMINI_API_KEY", ""):
+        return "env"
+    return "none"
+
+
+def resolve_provider_keys(db, provider: str) -> list:
+    return {
+        "gemini": resolve_gemini_keys,
+        "groq": resolve_groq_keys,
+        "openrouter": resolve_openrouter_keys,
+    }.get(provider, lambda _db: [])(db)
+
+
+def configured_providers(db) -> list:
+    return [p for p in ("gemini", "groq", "openrouter") if resolve_provider_keys(db, p)]
+
+
+def is_configured(db) -> bool:
+    mode = resolve_provider_mode(db)
+    if mode == "auto":
+        return bool(configured_providers(db))
+    return bool(resolve_provider_keys(db, mode))
 
 _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌زبان یک فروشگاه فروش اشتراک VPN (V2Ray/کانفیگ) هستی.
 
@@ -344,25 +431,20 @@ async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
 
 
 def _build_client(api_key: str):
-    # ایمپورت تنبل (lazy) تا اگر کتابخانه‌ی google-genai نصب نبود، بقیه‌ی بات
-    # (که ربطی به دستیار هوشمند ندارد) بدون خطا بالا بیاید.
     from google import genai
     return genai.Client(api_key=api_key)
 
 
-def _is_quota_error(exc: Exception) -> bool:
-    """آیا خطا مربوط به تمام‌شدن سهمیه/rate-limit است (429 RESOURCE_EXHAUSTED)؟
-    در این صورت باید کلید بعدی امتحان شود، نه اینکه کل درخواست شکست بخورد."""
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 429:
+def _is_retryable(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status in (408, 409, 429, 500, 502, 503, 504):
         return True
-    text = str(exc)
-    return "429" in text or "RESOURCE_EXHAUSTED" in text
+    text = str(exc).upper()
+    return any(x in text for x in ("429", "RESOURCE_EXHAUSTED", "RATE LIMIT", "TIMEOUT", "503", "502"))
 
 
 def _history_to_contents(history, user_message: str):
     from google.genai import types
-
     contents = []
     for row in history:
         role = "model" if row["role"] == "model" else "user"
@@ -371,120 +453,152 @@ def _history_to_contents(history, user_message: str):
     return contents
 
 
-async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> dict:
-    """یک نوبت کامل گفتگو با دستیار را اجرا می‌کند (شامل چند دور tool-calling
-    در صورت نیاز خودِ مدل).
+def _openai_tools():
+    return [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}} for t in _TOOLS]
 
-    history: خروجی db.get_ai_conversation(user_id) - لیستی از ردیف‌های
-        sqlite3.Row با کلیدهای role ('user'/'model') و message.
-    خروجی: {"reply": متن نهایی برای نمایش به کاربر, "escalate": bool}
-    """
-    if not is_configured(db):
-        return {
-            "reply": "دستیار هوشمند در حال حاضر تنظیم نشده. پیامت مستقیم برای پشتیبانی ارسال می‌شود.",
-            "escalate": True,
-        }
 
-    try:
-        from google.genai import types
-    except ImportError:
-        _log.error("کتابخانه‌ی google-genai نصب نیست؛ pip install google-genai را روی سرور اجرا کن.")
-        return {
-            "reply": "دستیار هوشمند موقتاً در دسترس نیست. پیامت مستقیم برای پشتیبانی ارسال می‌شود.",
-            "escalate": True,
-        }
+def _history_to_openai(history, user_message: str, system_prompt: str):
+    messages = [{"role": "system", "content": system_prompt}]
+    for row in history:
+        messages.append({"role": "assistant" if row["role"] == "model" else "user", "content": row["message"]})
+    messages.append({"role": "user", "content": user_message})
+    return messages
 
-    faq = await asyncio.to_thread(db.build_ai_faq_text)
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(faq=faq)
 
+async def _openai_chat(provider: str, api_key: str, model: str, messages: list):
+    url = "https://api.groq.com/openai/v1/chat/completions" if provider == "groq" else "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://telegram.org/"
+        headers["X-Title"] = "ShopVPN AI Support"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": _openai_tools(),
+        "tool_choice": "auto",
+        "temperature": 0.2,
+    }
+    timeout = aiohttp.ClientTimeout(total=75)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            body = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(f"{provider} HTTP {resp.status}: {body[:600]}")
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"{provider} پاسخ JSON نامعتبر داد") from exc
+
+
+async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, system_prompt: str):
+    from google.genai import types
+    api_keys = resolve_gemini_keys(db)
+    if not api_keys:
+        raise RuntimeError("Gemini API key تنظیم نشده")
     contents = _history_to_contents(history, user_message)
     tool = types.Tool(function_declarations=_TOOLS)
     gen_config = types.GenerateContentConfig(system_instruction=system_prompt, tools=[tool])
+    model_name = resolve_gemini_model(db)
+    last_exc = None
+    for api_key in api_keys:
+        client = _build_client(api_key)
+        try:
+            escalate, ui_action = False, None
+            for _ in range(_MAX_TOOL_ROUNDS):
+                response = await asyncio.to_thread(client.models.generate_content, model=model_name, contents=contents, config=gen_config)
+                candidate = response.candidates[0]
+                parts = candidate.content.parts or []
+                calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
+                if not calls:
+                    text = "".join(p.text for p in parts if getattr(p, "text", None)).strip()
+                    return {"reply": text, "escalate": escalate, "ui_action": ui_action}
+                contents.append(candidate.content)
+                for fc in calls:
+                    if fc.name == "escalate_to_human":
+                        escalate = True
+                    result = await _run_tool(db, user_tg_id, fc.name, dict(fc.args or {}))
+                    if fc.name == "show_purchase_options" and result.get("ok"):
+                        ui_action = {"type": "show_product", "product_id": result["product_id"]}
+                    contents.append(types.Content(role="user", parts=[types.Part.from_function_response(name=fc.name, response=result)]))
+                if escalate:
+                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
+            return {"reply": "متوجه شدم؛ برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action}
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable(exc):
+                raise
+            _log.warning("Gemini key failed; rotating key/provider: %s", exc)
+    raise last_exc or RuntimeError("Gemini failed")
 
-    api_keys = resolve_gemini_keys(db)
-    if not api_keys:
-        return {
-            "reply": "دستیار هوشمند در حال حاضر تنظیم نشده. پیامت مستقیم برای پشتیبانی ارسال می‌شود.",
-            "escalate": True,
-        }
 
-    key_index = 0
-    client = _build_client(api_keys[key_index])
-    escalate = False
-    reply_text = ""
-    ui_action = None
+async def _run_openai_compatible(db, user_tg_id: int, history: list, user_message: str, system_prompt: str, provider: str):
+    keys = resolve_provider_keys(db, provider)
+    if not keys:
+        raise RuntimeError(f"{provider} API key تنظیم نشده")
+    model = resolve_groq_model(db) if provider == "groq" else resolve_openrouter_model(db)
+    base_messages = _history_to_openai(history, user_message, system_prompt)
+    last_exc = None
+    for api_key in keys:
+        messages = list(base_messages)
+        try:
+            ui_action = None
+            for _ in range(_MAX_TOOL_ROUNDS):
+                data = await _openai_chat(provider, api_key, model, messages)
+                choice = (data.get("choices") or [{}])[0]
+                msg = choice.get("message") or {}
+                tool_calls = msg.get("tool_calls") or []
+                content = msg.get("content") or ""
+                if not tool_calls:
+                    return {"reply": content.strip(), "escalate": False, "ui_action": ui_action}
+                assistant_msg = {"role": "assistant", "content": content, "tool_calls": tool_calls}
+                messages.append(assistant_msg)
+                escalate = False
+                for tc in tool_calls:
+                    fn = tc.get("function") or {}
+                    name = fn.get("name", "")
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    if name == "escalate_to_human":
+                        escalate = True
+                    result = await _run_tool(db, user_tg_id, name, args)
+                    if name == "show_purchase_options" and result.get("ok"):
+                        ui_action = {"type": "show_product", "product_id": result["product_id"]}
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result, ensure_ascii=False)})
+                if escalate:
+                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
+            return {"reply": "برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action}
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable(exc):
+                raise
+            _log.warning("%s key failed; rotating key: %s", provider, exc)
+    raise last_exc or RuntimeError(f"{provider} failed")
 
-    async def _generate_with_rotation(**kwargs):
-        """generate_content را با کلید فعلی صدا می‌زند؛ اگر خطای سهمیه (429)
-        بود، به‌ترتیب کلیدهای بعدی را امتحان می‌کند تا یکی جواب بدهد یا همه
-        تمام شوند."""
-        nonlocal client, key_index
-        last_exc = None
-        for attempt in range(len(api_keys)):
-            try:
-                return await asyncio.to_thread(client.models.generate_content, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                if not _is_quota_error(exc):
-                    raise
-                last_exc = exc
-                _log.warning(
-                    "کلید Gemini شماره %s سهمیه‌اش تمام شد؛ رفتن سراغ کلید بعدی (در صورت وجود).",
-                    key_index + 1,
-                )
-                key_index += 1
-                if key_index >= len(api_keys):
-                    raise
-                client = _build_client(api_keys[key_index])
-        raise last_exc
 
-    try:
-        model_name = resolve_gemini_model(db)
-        for _ in range(_MAX_TOOL_ROUNDS):
-            response = await _generate_with_rotation(
-                model=model_name,
-                contents=contents,
-                config=gen_config,
-            )
-            candidate = response.candidates[0]
-            parts = candidate.content.parts or []
-            function_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
+async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> dict:
+    """Agent چند-Provider: Gemini، Groq و OpenRouter با چرخش کلید و fallback."""
+    if not is_configured(db):
+        return {"reply": "دستیار هوشمند در حال حاضر تنظیم نشده. پیامت مستقیم برای پشتیبانی ارسال می‌شود.", "escalate": True}
+    faq = await asyncio.to_thread(db.build_ai_faq_text)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(faq=faq)
+    mode = resolve_provider_mode(db)
+    providers = configured_providers(db) if mode == "auto" else [mode]
+    last_exc = None
+    for provider in providers:
+        try:
+            if provider == "gemini":
+                result = await _run_gemini(db, user_tg_id, history, user_message, system_prompt)
+            else:
+                result = await _run_openai_compatible(db, user_tg_id, history, user_message, system_prompt, provider)
+            if result.get("reply"):
+                return result
+            raise RuntimeError(f"{provider} پاسخ خالی داد")
+        except Exception as exc:
+            last_exc = exc
+            _log.exception("AI provider %s failed; trying fallback if configured.", provider)
+            continue
+    _log.error("All AI providers failed: %s", last_exc)
+    return {"reply": "در حال حاضر سرویس هوش مصنوعی در دسترس نیست؛ پیامت رو برای پشتیبانی انسانی می‌فرستم.", "escalate": True}
 
-            if not function_calls:
-                reply_text = "".join(p.text for p in parts if getattr(p, "text", None)).strip()
-                break
-
-            # نوبت مدل (شامل درخواست ابزار) را به تاریخچه اضافه کن، بعد
-            # نتیجه‌ی هر ابزار را به‌عنوان پاسخ برگردان تا مدل دور بعد را
-            # با اطلاعات واقعی ادامه بدهد.
-            contents.append(candidate.content)
-            for fc in function_calls:
-                if fc.name == "escalate_to_human":
-                    escalate = True
-                result = await _run_tool(db, user_tg_id, fc.name, dict(fc.args or {}))
-                if fc.name == "show_purchase_options" and result.get("ok"):
-                    ui_action = {"type": "show_product", "product_id": result["product_id"]}
-                contents.append(
-                    types.Content(
-                        role="user",
-                        parts=[types.Part.from_function_response(name=fc.name, response=result)],
-                    )
-                )
-            if escalate:
-                # نیازی نیست بعد از escalate دوباره از مدل جواب بخواهیم؛ متن
-                # مناسب برای این حالت پایین‌تر یکسان تنظیم می‌شود.
-                break
-        else:
-            reply_text = ""
-    except Exception:
-        _log.exception("خطا در ارتباط با Gemini API برای کاربر %s.", user_tg_id)
-        return {
-            "reply": "در ارتباط با دستیار هوشمند مشکلی پیش اومد. پیامت رو برای پشتیبانی انسانی ارسال می‌کنم.",
-            "escalate": True,
-        }
-
-    if escalate and not reply_text:
-        reply_text = "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏"
-    if not reply_text:
-        reply_text = "متوجه نشدم؛ می‌تونی طور دیگه‌ای توضیح بدی؟"
-
-    return {"reply": reply_text, "escalate": escalate, "ui_action": ui_action}
