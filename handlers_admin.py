@@ -6532,17 +6532,47 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     async def _show_ai_faq_menu(call: CallbackQuery):
         items = await asyncio.to_thread(db.get_ai_faq_items)
-        provider = ai_support.resolve_provider_mode(db)
+        # این بخش عمداً در برابر تنظیمات ناقص/قدیمی DB مقاوم است؛ اگر یکی از
+        # تنظیمات جدید در دیتابیس وجود نداشته باشد، باز شدن منوی مدیر نباید کرش کند.
+        try:
+            provider = ai_support.resolve_provider_mode(db)
+        except Exception:
+            provider = "auto"
+        try:
+            provider_label = ai_support.PROVIDER_LABELS.get(provider, ai_support.PROVIDER_LABELS.get("auto", "🤖 خودکار"))
+        except Exception:
+            provider_label = "🤖 خودکار"
         statuses = []
         for name, label in (("gemini", "Gemini"), ("groq", "Groq"), ("openrouter", "OpenRouter")):
-            statuses.append(f"{'🟢' if ai_support.resolve_provider_keys(db, name) else '⚪️'} {label}")
+            try:
+                configured = bool(ai_support.resolve_provider_keys(db, name))
+            except Exception:
+                configured = False
+            statuses.append(f"{'🟢' if configured else '⚪️'} {label}")
+        try:
+            gemini_model = ai_support.resolve_gemini_model(db)
+        except Exception:
+            gemini_model = "gemini-2.5-flash-lite"
+        try:
+            groq_model = ai_support.resolve_groq_model(db)
+        except Exception:
+            groq_model = "openai/gpt-oss-20b"
+        try:
+            openrouter_model = ai_support.resolve_openrouter_model(db)
+        except Exception:
+            openrouter_model = "openrouter/free"
         text = (
             "🤖 مدیریت دستیار هوشمند پشتیبانی\n\n"
-            f"🔀 مسیر: {ai_support.PROVIDER_LABELS[provider]}\n"
+            f"🔀 مسیر: {provider_label}\n"
             f"{' | '.join(statuses)}\n\n"
-            f"🧠 Gemini: {ai_support.resolve_gemini_model(db)}\n"
-            f"🚀 Groq: {ai_support.resolve_groq_model(db)}\n"
-            f"🌐 OpenRouter: {ai_support.resolve_openrouter_model(db)}\n\n"
+            f"🧠 Gemini: {gemini_model}\n"
+            f"🚀 Groq: {groq_model}\n"
+            f"🌐 OpenRouter: {openrouter_model}\n\n"
+            "📖 راهنمای مدیر\n"
+            "🔷 Gemini: https://aistudio.google.com/ — ورود و ساخت API Key\n"
+            "🚀 Groq: https://console.groq.com/ — ورود و ساخت API Key\n"
+            "🌐 OpenRouter: https://openrouter.ai/ — ورود و ساخت API Key\n\n"
+            "💡 پیشنهاد: مسیر «خودکار» را بگذار تا در صورت خطای سهمیه/اختلال، Agent بعدی را امتحان کند.\n\n"
         )
         if items:
             text += "سوالات متداولی که به دستیار آموزش داده شده (برای حذف، روی 🗑 بزن):"
@@ -6613,7 +6643,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         current_keys = ai_support._split_keys(db.get_setting(setting_key, ""))
         masked = "\n".join(f"  {i+1}. ...{k[-4:]}" for i, k in enumerate(current_keys)) if current_keys else "❌ تنظیم نشده"
         await state.set_state(state_cls.waiting_key)
-        await replace_admin_view(call, f"{title}\n\nکلید یا چند کلید را بفرست؛ هر کلید در یک خط. در صورت 429 کلید بعدی امتحان می‌شود.\n\nکلیدهای فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {source_env}", reply_markup=kb.admin_back_kb("adm_ai_support_settings"))
+        links = {
+            "GEMINI_API_KEY": "https://aistudio.google.com/",
+            "GROQ_API_KEY": "https://console.groq.com/",
+            "OPENROUTER_API_KEY": "https://openrouter.ai/",
+        }
+        link = links.get(source_env, "")
+        guide = f"\n🔗 راهنما/ثبت‌نام: {link}" if link else ""
+        await replace_admin_view(
+            call,
+            f"{title}\n\nکلید یا چند کلید را بفرست؛ هر کلید در یک خط. در صورت 429 کلید بعدی امتحان می‌شود."
+            f"{guide}\n\nکلیدهای فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {source_env}",
+            reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
+        )
         await call.answer()
 
     @router.callback_query(F.data == "adm_ai_set_key")
