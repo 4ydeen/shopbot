@@ -2404,17 +2404,21 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 expire_line = "نامحدود"
                 days_left_line = "نامحدود"
 
-            text = (
-                f"📋 مشخصات این لحظه سرویس:\n\n"
-                f"⚡️ وضعیت: {status_line}\n"
-                f"🎫 نام کانفیگ: {config_name}\n"
-                f"⬆️ آپلود: {_fmt_bytes(upload)}\n"
-                f"⬇️ دانلود: {_fmt_bytes(download)}\n"
-                f"🔋 حجم کل: {total_line}\n"
-                f"🪫 حجم باقی‌مانده: {remaining_line}\n"
-                f"📅 تاریخ اتمام: {expire_line}\n"
-                f"⏳ روز باقی‌مانده: {days_left_line}"
-            )
+            purchase_line = to_jalali_str(cc["created_at"], with_time=True) if cc["created_at"] else "نامشخص"
+            text = "📋 مشخصات این لحظه سرویس:"
+            fields = [
+                ("⚡️ وضعیت", status_line),
+                ("🎫 نام کانفیگ", config_name),
+                ("⬆️ آپلود", _fmt_bytes(upload)),
+                ("⬇️ دانلود", _fmt_bytes(download)),
+                ("🔋 حجم کل", total_line),
+                ("🪫 حجم باقی‌مانده", remaining_line),
+                ("🗓 تاریخ خرید", purchase_line),
+                ("📅 تاریخ اتمام", expire_line),
+                ("⏳ روز باقی‌مانده", days_left_line),
+            ]
+            await _safe_edit(call.message, text, reply_markup=kb.service_inquiry_card_kb(cb_id, fields))
+            return
         await _safe_edit(call.message, text, reply_markup=kb.service_inquiry_kb(cb_id))
 
     @router.callback_query(F.data.startswith("mo_links:"))
