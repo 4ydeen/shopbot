@@ -14,15 +14,25 @@
 
 import base64
 import binascii
+import html as html_lib
+import logging
+import re
 from datetime import datetime, timezone
 
 import aiohttp
 
 from jalali import to_jalali_str
 
+_log = logging.getLogger("sub_info")
+
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 _CONFIG_SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria://", "hysteria2://", "hy2://", "tuic://")
+
+# بعضی پنل‌ها به‌جای متن خامِ base64، یک صفحه‌ی HTML («Subscription Information»)
+# برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند نه ابتدای خط؛ این regex (عیناً
+# مثل geo_scan._CONFIG_URI_RE) برای استخراج از وسط چنین متنی استفاده می‌شود.
+_CONFIG_URI_RE = re.compile(r"(?:vmess|vless|trojan|hysteria2|hy2|hysteria|tuic|ssr|ss)://[^\s\"'<>]+")
 
 
 def _session() -> aiohttp.ClientSession:
@@ -67,14 +77,31 @@ async def fetch_individual_links(sub_url: str) -> list:
         async with _session() as session:
             async with session.get(sub_url, headers={"User-Agent": "v2rayNG/1.8.29"}) as resp:
                 if resp.status != 200:
+                    _log.warning("fetch_individual_links: HTTP %s برای %s", resp.status, sub_url)
                     return []
                 raw = await resp.text()
     except Exception:
+        _log.exception("fetch_individual_links: درخواست به %s ناموفق بود", sub_url)
         return []
+
+    _log.info("fetch_individual_links: %d بایت خام دریافت شد از %s؛ نمونه: %r", len(raw), sub_url, raw[:200])
 
     decoded = _b64_decode(raw.strip())
     lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
-    return [ln for ln in lines if ln.startswith(_CONFIG_SCHEMES)]
+    out = [ln for ln in lines if ln.startswith(_CONFIG_SCHEMES)]
+    if out:
+        return out
+
+    # هیچ خطی مستقیماً با یکی از schemeها شروع نشد؛ احتمالاً پنل به‌جای متن
+    # خام، یک صفحه‌ی HTML برگردانده که لینک‌ها وسط تگ‌ها هستند. با regex از
+    # هر جای متن (حتی وسط HTML) استخراج می‌کنیم.
+    out = [html_lib.unescape(m.group(0)) for m in _CONFIG_URI_RE.finditer(decoded)]
+    if not out:
+        _log.warning(
+            "fetch_individual_links: هیچ کانفیگی از %s استخراج نشد؛ نمونه‌ی دیکدشده: %r",
+            sub_url, decoded[:200],
+        )
+    return out
 
 
 async def fetch_sub_info(link: str) -> dict:
