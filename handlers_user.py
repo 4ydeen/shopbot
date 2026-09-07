@@ -4308,6 +4308,32 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await _ai_finalize_wallet_purchase(
                 message, bot, ui_action.get("product_id"), ui_action.get("quantity", 1)
             )
+        elif ui_action and ui_action.get("type") == "finalize_wallet_renewal":
+            # مثل finalize_wallet_purchase بالا: فقط وقتی به این‌جا می‌رسیم که
+            # مدل از کاربر تاییدِ صریح گرفته و ابزار renew_service_with_wallet
+            # هم موجودی کافی کیف پول را تایید کرده؛ اجرای واقعی با همان تابع
+            # _process_renewal_order پایین‌تر (همان مسیر دکمه‌های تمدید در
+            # «سرویس‌های من») انجام می‌شود - دفاع در عمق، دوباره از صفر بررسی.
+            await _ai_finalize_wallet_renewal(
+                message, bot, state, ui_action.get("service_id"), ui_action.get("mode"),
+                ui_action.get("amount"), ui_action.get("product_id"),
+            )
+        elif ui_action and ui_action.get("type") == "toggle_auto_renew":
+            await _ai_toggle_auto_renew(message, ui_action.get("service_id"), ui_action.get("enabled"))
+        elif ui_action and ui_action.get("type") == "send_service_qr":
+            await _ai_send_service_qr(message, bot, ui_action.get("service_id"))
+        elif ui_action and ui_action.get("type") == "send_individual_configs":
+            await _ai_send_individual_configs(message, bot, ui_action.get("service_id"))
+        elif ui_action and ui_action.get("type") == "toggle_service_enabled":
+            await _ai_toggle_service_enabled(message, ui_action.get("service_id"), ui_action.get("enabled"))
+        elif ui_action and ui_action.get("type") == "rename_service":
+            await _ai_rename_service(message, ui_action.get("service_id"), ui_action.get("new_name"))
+        elif ui_action and ui_action.get("type") == "regenerate_service_access":
+            await _ai_regenerate_service_access(message, ui_action.get("service_id"))
+        elif ui_action and ui_action.get("type") == "transfer_service":
+            await _ai_transfer_service(message, bot, ui_action.get("service_id"), ui_action.get("target_telegram_id"))
+        elif ui_action and ui_action.get("type") == "delete_service":
+            await _ai_delete_service(message, ui_action.get("service_id"))
 
     async def _ai_finalize_wallet_purchase(message: Message, bot: Bot, product_id, quantity: int) -> None:
         user_id = message.from_user.id
@@ -4406,6 +4432,298 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "⛔️ یه خطای غیرمنتظره پیش اومد؛ مبلغ کسرشده به کیف پولت به‌طور کامل برگشت. "
                 "لطفاً دوباره امتحان کن یا با پشتیبانی تماس بگیر."
             )
+
+    async def _ai_finalize_wallet_renewal(
+        message: Message, bot: Bot, state: FSMContext, service_id, mode: str, amount, product_id,
+    ) -> None:
+        """اجرای واقعیِ «تمدید سرویس با کیف پول» که دستیار هوشمند پیشنهاد داده.
+        همه‌چیز از صفر دوباره بررسی می‌شود (دفاع در عمق) و اجرای نهایی دقیقاً با
+        همان تابع _process_renewal_order بالا انجام می‌شود - همان تابعی که
+        دکمه‌های واقعیِ تمدید در «سرویس‌های من» هم استفاده می‌کنند."""
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] not in ("config", "custom"):
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        if item["kind"] == "config" and mode != "time":
+            await message.answer("⛔️ برای این کانفیگ فقط «تمدید زمان» ممکن است.")
+            return
+
+        target_id = item["custom"]["id"] if item["kind"] == "custom" else item["config"]["id"]
+
+        if mode == "full":
+            product = await asyncio.to_thread(db.get_product, product_id)
+            if not product or not product["is_active"] or not product["is_auto_provision"]:
+                await message.answer("⛔️ این پلن دیگر برای تمدید در دسترس نیست.")
+                return
+            add_volume = product["auto_provision_volume_gb"] or 0
+            add_days = product["duration_days"] or 0
+            price = product["price"]
+            summary_label = product["name"]
+        else:
+            rate_key = "renewal_price_per_gb" if mode == "volume" else "renewal_price_per_day"
+            rate = int((await asyncio.to_thread(db.get_setting, rate_key, "0")) or "0")
+            try:
+                amount = max(1, int(amount or 0))
+            except (TypeError, ValueError):
+                amount = 0
+            if rate <= 0 or amount <= 0:
+                await message.answer("⛔️ قیمت‌گذاری این بخش هنوز توسط ادمین تنظیم نشده یا مقدار نامعتبر است.")
+                return
+            add_volume = amount if mode == "volume" else 0
+            add_days = amount if mode == "time" else 0
+            price = amount * rate
+            unit_label = "گیگابایت" if mode == "volume" else "روز"
+            summary_label = f"{amount:,} {unit_label}"
+
+        wallet_credit = await asyncio.to_thread(db.get_wallet_credit, user_id)
+        if wallet_credit < price:
+            await message.answer(
+                "👛 موجودی کیف پول برای تکمیل خودکار این تمدید کافی نیست؛ "
+                "از منوی «سرویس‌های من» می‌تونی با روش دیگری تکمیلش کنی."
+            )
+            return
+
+        async def edit_fn(t, **kw):
+            await message.answer(t, **kw)
+
+        async def send_fn(t, **kw):
+            await message.answer(t, **kw)
+
+        await _process_renewal_order(
+            user_id, service_id, mode, item["kind"], target_id,
+            add_volume, add_days, price, summary_label, state, edit_fn, send_fn,
+        )
+
+    async def _ai_toggle_auto_renew(message: Message, service_id, enabled) -> None:
+        """اجرای واقعیِ روشن/خاموش‌کردنِ تمدید خودکار - دفاع در عمق: دوباره از
+        صفر بررسی می‌شود، دقیقاً مثل دکمه‌ی واقعیِ svc_autorenew."""
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] != "custom":
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        cc = item["custom"]
+        if (cc["duration_days"] or 0) <= 0:
+            await message.answer("این کانفیگ نامحدود است و نیازی به تمدید خودکار ندارد.")
+            return
+        enabled = bool(enabled)
+        (await asyncio.to_thread(db.set_custom_config_auto_renew, cc["id"], user_id, enabled))
+        (await asyncio.to_thread(
+            db.add_custom_config_history, cc["id"], "auto_renew_toggle", "فعال شد" if enabled else "غیرفعال شد",
+        ))
+        await message.answer("✅ تمدید خودکار فعال شد." if enabled else "✅ تمدید خودکار غیرفعال شد.")
+        await _refresh_service_card(message, user_id, service_id)
+
+    async def _ai_send_service_qr(message: Message, bot: Bot, service_id) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item:
+            await message.answer("⛔️ این سرویس دیگر یافت نشد.")
+            return
+        link = _item_sub_link(item)
+        if not link:
+            await message.answer("⛔️ لینکی برای ساخت کیوآر پیدا نشد.")
+            return
+        photo = BufferedInputFile(build_qr_bytes(link), filename="config_qr.png")
+        await bot.send_photo(user_id, photo, caption="⬜ کیوآر کانفیگ شما")
+
+    async def _ai_send_individual_configs(message: Message, bot: Bot, service_id) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item:
+            await message.answer("⛔️ این سرویس دیگر یافت نشد.")
+            return
+        link = _item_sub_link(item)
+        if not link.startswith(("http://", "https://")):
+            await message.answer("⛔️ کانفیگ تکی‌ای برای این سرویس موجود نیست.")
+            return
+        try:
+            links = await fetch_individual_links(link)
+        except Exception:
+            links = []
+        if not links:
+            await message.answer("⛔️ در حال حاضر کانفیگ تکی‌ای یافت نشد.")
+            return
+        text = f"📋 کانفیگ‌های تکی این سرویس ({len(links)} عدد):\n\n" + "\n".join(f"`{c}`" for c in links)
+        if len(text) > 4000:
+            text = text[:3950] + "\n\n… (فهرست کوتاه شد؛ تعداد کانفیگ‌ها زیاد است)"
+        await message.answer(text, parse_mode="Markdown")
+
+    async def _ai_toggle_service_enabled(message: Message, service_id, enabled) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] != "custom":
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        cc = item["custom"]
+        new_enabled = bool(enabled)
+        server = (await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])) if cc["panel_server_id"] else None
+        if not server or not server["is_active"]:
+            await message.answer("⛔️ سرور پنل مربوط به این سرویس یافت نشد یا غیرفعال است.")
+            return
+        try:
+            provider = get_provider(server)
+            await provider.set_enabled(cc["username"], new_enabled)
+        except PanelError as e:
+            await message.answer(f"⛔️ ناموفق بود: {e}")
+            return
+        (await asyncio.to_thread(db.set_custom_config_enabled, cc["id"], user_id, new_enabled))
+        (await asyncio.to_thread(
+            db.add_custom_config_history, cc["id"], "toggle", "فعال شد" if new_enabled else "غیرفعال شد",
+        ))
+        await message.answer("✅ وضعیت بروزرسانی شد.")
+        await _refresh_service_card(message, user_id, service_id)
+
+    async def _ai_rename_service(message: Message, service_id, new_suffix) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] != "custom":
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        suffix = (new_suffix or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", suffix):
+            await message.answer("❌ نام نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر.")
+            return
+        cc = item["custom"]
+        prefix = (await asyncio.to_thread(db.get_custom_config_prefix))
+        current_label = cc["display_name"] or cc["username"]
+        new_label = f"{prefix}-{suffix}" if (prefix and current_label.startswith(prefix + "-")) else suffix
+        if new_label == current_label:
+            await message.answer("این نام همان نام فعلی است.")
+            return
+        if (await asyncio.to_thread(db.is_custom_username_taken, new_label)):
+            await message.answer("❌ این نام قبلاً استفاده شده. نام دیگری بفرست.")
+            return
+        server = (await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])) if cc["panel_server_id"] else None
+        panel_username = None
+        note = "(فقط نام نمایشی داخل بات تغییر کرد؛ لینک/کانفیگ فعلی روی پنل بدون تغییر کار می‌کند)"
+        if server and server["is_active"]:
+            try:
+                provider = get_provider(server)
+                await provider.rename_user(cc["username"], new_label)
+                panel_username = new_label
+                note = "(روی خودِ پنل هم اعمال شد)"
+            except PanelError:
+                pass
+        (await asyncio.to_thread(db.rename_custom_config, cc["id"], user_id, new_label, panel_username))
+        (await asyncio.to_thread(
+            db.add_custom_config_history, cc["id"], "rename", f"{current_label} ← {new_label} {note}",
+        ))
+        await _refresh_service_card(message, user_id, service_id, f"✅ نام کانفیگ به «{new_label}» تغییر کرد. {note}")
+
+    async def _ai_regenerate_service_access(message: Message, service_id) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] != "custom":
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        cc = item["custom"]
+        server = (await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])) if cc["panel_server_id"] else None
+        if not server or not server["is_active"]:
+            await message.answer("⛔️ سرور پنل مربوط به این سرویس یافت نشد یا غیرفعال است.")
+            return
+        try:
+            provider = get_provider(server)
+            result = await provider.revoke_credentials(cc["username"])
+        except PanelError as e:
+            await message.answer(f"⛔️ قطع دسترسی ناموفق بود: {e}")
+            return
+        if result.subscription_url:
+            (await asyncio.to_thread(db.update_custom_config_subscription_url, cc["id"], result.subscription_url))
+        (await asyncio.to_thread(db.add_custom_config_history, cc["id"], "cut_access", "دسترسی قطع و لینک جدید صادر شد"))
+        await _refresh_service_card(message, user_id, service_id, "✅ دسترسی قبلی قطع شد و لینک جدید صادر شد.")
+
+    async def _ai_transfer_service(message: Message, bot: Bot, service_id, target_telegram_id) -> None:
+        user_id = message.from_user.id
+        item = _find_my_orders_item(user_id, service_id)
+        if not item or item["kind"] != "custom":
+            await message.answer("⛔️ این سرویس دیگر یافت نشد (شاید قبلاً حذف/منتقل شده).")
+            return
+        if _is_test_item(item):
+            await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
+            return
+        cc = item["custom"]
+        try:
+            target_telegram_id = int(target_telegram_id)
+        except (TypeError, ValueError):
+            await message.answer("⛔️ آی‌دی مقصد نامعتبر است.")
+            return
+        target_user = await asyncio.to_thread(db.get_user, target_telegram_id)
+        if not target_user:
+            await message.answer("⛔️ آن کاربر بات را استارت نکرده یا آی‌دی نادرست است.")
+            return
+        ok = (await asyncio.to_thread(db.transfer_custom_config, cc["id"], user_id, target_telegram_id))
+        if not ok:
+            await message.answer("⛔️ انتقال ناموفق بود.")
+            return
+        (await asyncio.to_thread(
+            db.add_custom_config_history, cc["id"], "transfer", f"از {user_id} به {target_telegram_id}",
+        ))
+        await message.answer("✅ کانفیگ منتقل شد.")
+        try:
+            await bot.send_message(
+                target_telegram_id,
+                f"📦 یک کانفیگ («{cc['display_name'] or cc['username']}») از طرف کاربر دیگری به حساب شما منتقل شد.\n"
+                "برای مشاهده، حساب کاربری ← سرویس‌ها و سفارش‌های من را ببینید.",
+            )
+        except Exception:
+            pass
+
+    async def _ai_delete_service(message: Message, service_id) -> None:
+        user_id = message.from_user.id
+        if not service_id or len(str(service_id)) < 2:
+            await message.answer("⛔️ این سرویس دیگر یافت نشد.")
+            return
+        kind_char, raw_id = str(service_id)[0], str(service_id)[1:]
+        try:
+            item_id = int(raw_id)
+        except ValueError:
+            await message.answer("⛔️ درخواست نامعتبر.")
+            return
+
+        if kind_char == "c":
+            removed = (await asyncio.to_thread(db.delete_owned_config, item_id, user_id))
+            if not removed:
+                await message.answer("⛔️ این کانفیگ یافت نشد (شاید قبلاً حذف شده).")
+                return
+            await message.answer("✅ کانفیگ برای همیشه حذف شد.")
+        elif kind_char == "x":
+            all_cc = await asyncio.to_thread(db.get_custom_configs_for_user, user_id)
+            cc_row = next((c for c in all_cc if c["id"] == item_id), None)
+            if not cc_row:
+                await message.answer("⛔️ این کانفیگ یافت نشد (شاید قبلاً حذف شده).")
+                return
+            if cc_row["panel_server_id"]:
+                server = await asyncio.to_thread(db.get_panel_server, cc_row["panel_server_id"])
+                if server:
+                    try:
+                        provider = get_provider(server)
+                        await provider.delete_user(cc_row["username"])
+                    except Exception:
+                        logging.getLogger("handlers_user").exception(
+                            "حذف کاربر «%s» از پنل سرور #%s (توسط دستیار هوشمند) ناموفق بود؛ در هر صورت از لیست کاربر حذف می‌شود.",
+                            cc_row["username"], cc_row["panel_server_id"],
+                        )
+            (await asyncio.to_thread(db.delete_owned_custom_config, item_id, user_id))
+            await message.answer("✅ کانفیگ برای همیشه حذف شد.")
+        else:
+            await message.answer("⛔️ درخواست نامعتبر.")
 
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 

@@ -167,6 +167,19 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 ۱۱. برای «چطور زیرمجموعه بگیرم/لینک دعوتم چیه» ابزار get_referral_info را صدا بزن؛ اگر ok=true بود فقط بگو «الان اطلاعاتش رو می‌فرستم» چون پیام واقعی (لینک واقعی و آمار واقعی) بلافاصله توسط سیستم ارسال می‌شود.
 ۱۲. برای بررسی یک کد تخفیف، check_discount_code را صدا بزن و فقط بر همان جواب تکیه کن؛ هرگز درصد یا اعتبار کد را حدس نزن.
 ۱۳. اگر کاربر گفت خرید X را با کیف پولش نهایی کن (یا از قبل روشن بود که فقط کیف پول کافی است)، اول با list_products محصول و قیمت را دقیق بگو و صراحتاً بپرس آیا تایید می‌کند مبلغ از کیف پولش کسر شود؛ فقط بعد از اینکه کاربر در یک پیامِ جداگانه به‌روشنی تایید کرد (مثلاً «بله»، «تایید کن»، «باشه بخر»)، ابزار request_purchase_with_wallet را صدا بزن. هرگز این ابزار را در همان دوری که کاربر فقط تمایلش را گفته (بدون تاییدِ صریحِ بعدی) صدا نزن. اگر ok=true برگشت، بگو «باشه، الان براتون نهایی می‌کنم 🛒» چون تحویل/کسر واقعی بلافاصله توسط سیستم (دقیقاً با همان مسیر امنِ خرید واقعی) انجام می‌شود؛ اگر reason=insufficient_wallet بود، صادقانه بگو موجودی کافی نیست و با show_purchase_options کارت خرید واقعی را برایش باز کن تا از روش دیگری پرداخت کند.
+۱۴. برای «چه کشورهایی/لوکیشن‌هایی دارید» یا سوال درباره‌ی سرورهای قابل‌انتخاب برای ساخت کانفیگ شخصی، ابزار get_server_countries را صدا بزن؛ هرگز اسم کشور/سرور را از حدس یا حافظه نگو.
+۱۵. برای «هزینه‌ی تمدید سرویسم چقدره» - بدون اینکه کاربر خواسته باشد همین الان تمدید انجام شود - اول با check_account_status شناسه‌ی service_id سرویس موردنظر را پیدا کن (اگر کاربر چند سرویس دارد و مشخص نبود کدام، از خودش بپرس)، سپس calculate_renewal_cost را با mode مناسب («full» با یک product_id از list_products، یا «volume»/«time» با amount عددی که کاربر گفته) صدا بزن و فقط بر همان قیمت واقعی تکیه کن؛ هرگز نرخ تمدید را حدس نزن.
+۱۶. اگر کاربر صراحتاً و در یک پیامِ جداگانه خواست همان تمدید با کیف پول نهایی/پرداخت شود (دقیقاً مثل قانون ۱۳، اول قیمت را از calculate_renewal_cost بگو و منتظر تاییدِ صریحِ بعدی بمان)، ابزار renew_service_with_wallet را با همان service_id/mode/amount/product_id صدا بزن. اگر ok=true برگشت، بگو «باشه، الان تمدیدش می‌کنم 🔄» چون تمدید واقعی بلافاصله توسط سیستم (دقیقاً با همان مسیر امنِ تمدید واقعی) انجام می‌شود؛ اگر reason=insufficient_wallet بود، صادقانه بگو موجودی کافی نیست تا کاربر از منوی «سرویس‌های من» با روش دیگری پرداخت کند.
+۱۷. برای روشن/خاموش کردن «تمدید خودکار» یک سرویسِ ساخته‌شده (custom)، ابزار set_service_auto_renew را با همان service_id (از check_account_status) صدا بزن؛ اگر ok=true برگشت فقط بگو انجامش می‌دی، چون تغییرِ واقعی بلافاصله توسط سیستم اعمال می‌شود.
+۱۸. برای «تاریخچه‌ی این سرویس چیه»، ابزار get_service_history را صدا بزن (فقط سرویس‌های custom).
+۱۹. برای «کیوآرش رو بفرست»، ابزار request_service_qr را صدا بزن؛ اگر ok=true بود فقط بگو الان می‌فرستم، چون تصویر واقعی بلافاصله توسط سیستم ارسال می‌شود.
+۲۰. برای «کانفیگ‌های تکی‌اش رو بفرست»، ابزار request_individual_configs را صدا بزن؛ اگر ok=true بود فقط بگو الان می‌فرستم، چون لیست واقعی بلافاصله توسط سیستم ارسال می‌شود.
+۲۱. برای «فعال/غیرفعالش کن»، ابزار request_toggle_service_enabled را با service_id و enabled مناسب صدا بزن (فقط سرویس‌های custom)؛ اگر ok=true بود فقط بگو انجامش می‌دی، چون تغییرِ واقعی روی پنل بلافاصله توسط سیستم اعمال می‌شود.
+۲۲. برای «اسمش رو عوض کن»، اول نامِ جدید را دقیقاً از کاربر بگیر، بعد request_rename_service را با service_id و new_name صدا بزن (فقط سرویس‌های custom)؛ اگر invalid_format یا name_taken برگشت، دلیل را ساده به کاربر بگو و نامِ دیگری بخواه.
+۲۳. برای «دسترسی فعلی رو قطع کن و لینک جدید بده» (قطع دسترسی/صدور مجدد)، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده که لینکِ فعلی از کار می‌افتد و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_regenerate_service_access را صدا بزن (فقط سرویس‌های custom).
+۲۴. برای «این سرویس رو به فلان آی‌دی منتقل کن»، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_transfer_service را با service_id و target_telegram_id صدا بزن (فقط سرویس‌های custom)؛ اگر target_user_not_found برگشت، بگو آن کاربر باید اول بات را استارت کند.
+۲۵. برای «این سرویس/کانفیگ رو کامل حذف کن»، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده که برای همیشه پاک می‌شود و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_delete_service را صدا بزن.
+۲۶. برای همه‌ی ابزارهایی که در بالا «فقط سرویس‌های custom» گفته شد، اگر service_id مربوط به یک کانفیگِ خریداری‌شده از پلن (kind=config) بود و ابزار reason=not_a_custom_service برگرداند، صادقانه بگو این قابلیت فقط برای کانفیگ‌های ساخته‌شده در دسترس است.
 
 دانش پایه (تنظیم‌شده توسط ادمین فروشگاه):
 {faq}
@@ -179,7 +192,10 @@ _TOOLS = [
             "وضعیت واقعی حساب کاربر را برمی‌گرداند: موجودی کیف پول، لیست "
             "سرویس‌های فعال با حجم/انقضای زنده، و سفارش‌های در انتظار بررسی. "
             "برای هر سوالی درباره‌ی «چرا وصل نمیشم»، «حجمم چقدر مونده»، "
-            "«کی تموم میشه»، «موجودی کیف پولم چقدره» این ابزار را صدا بزن."
+            "«کی تموم میشه»، «موجودی کیف پولم چقدره» این ابزار را صدا بزن. هر "
+            "سرویس یک service_id دارد که برای محاسبه/انجام تمدید (calculate_renewal_cost، "
+            "renew_service_with_wallet) و روشن/خاموش‌کردن تمدید خودکار "
+            "(set_service_auto_renew) لازم است."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -299,6 +315,207 @@ _TOOLS = [
                 "quantity": {"type": "integer", "description": "تعداد؛ اگر نگفت 1 بگذار."},
             },
             "required": ["product_id"],
+        },
+    },
+    {
+        "name": "get_server_countries",
+        "description": (
+            "لیست واقعیِ سرورها/کشورهای فعالی که برای ساخت کانفیگ شخصی قابل "
+            "انتخاب هستند را برمی‌گرداند (نام سرور و بازه‌ی حجم/قیمت هر کدام). "
+            "برای سوال «چه کشورهایی دارید»/«لوکیشن‌هاتون کجاست» صدا بزن؛ هرگز "
+            "اسم کشور یا سرور را از حدس یا حافظه نگو."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "calculate_renewal_cost",
+        "description": (
+            "هزینه‌ی واقعیِ تمدید یک سرویسِ فعال کاربر را محاسبه می‌کند - بدون "
+            "اینکه چیزی کسر یا تمدید کند. اول service_id را از خروجی "
+            "check_account_status بردار. mode یکی از full/volume/time است: "
+            "«full» یعنی جایگزینی با یکی از پلن‌های آماده (product_id از "
+            "list_products لازم است)، «volume» یعنی افزودن حجم به گیگابایت و "
+            "«time» یعنی افزودن روز (هر دو با amount عددی که کاربر گفته). "
+            "برای کانفیگ‌های خریداری‌شده از پلن (نه ساخته‌شده‌ی شخصی) فقط "
+            "mode=time ممکن است. هرگز نرخ یا هزینه‌ی تمدید را حدس نزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس، دقیقاً همان service_id در خروجی check_account_status."},
+                "mode": {"type": "string", "enum": ["full", "volume", "time"], "description": "نوع تمدید."},
+                "amount": {"type": "integer", "description": "برای mode=volume تعداد گیگابایت، برای mode=time تعداد روز؛ برای full لازم نیست."},
+                "product_id": {"type": "integer", "description": "فقط برای mode=full: شناسه‌ی پلن از list_products."},
+            },
+            "required": ["service_id", "mode"],
+        },
+    },
+    {
+        "name": "renew_service_with_wallet",
+        "description": (
+            "فقط زمانی صدا بزن که کاربر صراحتاً و در یک پیامِ جداگانه تمدید را "
+            "تایید کرده باشد - درست مثل request_purchase_with_wallet (اول قیمت "
+            "را با calculate_renewal_cost بگو و منتظر تاییدِ صریح در پیام بعدی "
+            "بمان). این ابزار خودش هم چیزی کسر نمی‌کند - فقط بررسی می‌کند که آیا "
+            "موجودی کیف پول کاربر کل مبلغ را می‌پوشاند. اگر بله، بلافاصله بعد از "
+            "این پیام، تمدیدِ واقعی (دقیقاً با همان کد و همان محدودیت‌های مسیر "
+            "دکمه‌ی تمدید در «سرویس‌های من») به‌صورت خودکار انجام می‌شود. اگر "
+            "موجودی کافی نبود، صادقانه بگو و کاربر را به منوی «سرویس‌های من» "
+            "برای پرداخت با روش دیگر راهنمایی کن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس، همان service_id در check_account_status."},
+                "mode": {"type": "string", "enum": ["full", "volume", "time"], "description": "نوع تمدید."},
+                "amount": {"type": "integer", "description": "برای mode=volume یا time؛ برای full لازم نیست."},
+                "product_id": {"type": "integer", "description": "فقط برای mode=full."},
+            },
+            "required": ["service_id", "mode"],
+        },
+    },
+    {
+        "name": "set_service_auto_renew",
+        "description": (
+            "درخواست روشن/خاموش‌کردن «تمدید خودکار» یک سرویسِ ساخته‌شده (custom) "
+            "را بررسی می‌کند (آیا سرویس واقعاً مالِ کاربر است و نامحدود نیست). "
+            "خودش چیزی تغییر نمی‌دهد؛ فقط اگر ok=true برگردد، بلافاصله بعد از "
+            "این پیام، تغییر واقعی توسط سیستم اعمال می‌شود. فقط وقتی کاربر "
+            "صراحتاً همین درخواست را داده صدا بزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس، همان service_id در check_account_status (فقط سرویس‌های custom)."},
+                "enabled": {"type": "boolean", "description": "true برای روشن‌کردن، false برای خاموش‌کردنِ تمدید خودکار."},
+            },
+            "required": ["service_id", "enabled"],
+        },
+    },
+    {
+        "name": "get_service_history",
+        "description": (
+            "تاریخچه‌ی واقعیِ رویدادهای یک سرویسِ ساخته‌شده (custom) را می‌خواند "
+            "(خرید، تمدید، فعال/غیرفعال، تغییر نام، انتقال، قطع دسترسی). برای "
+            "سوال «چه اتفاقاتی برای این سرویس افتاده» صدا بزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس (فقط سرویس‌های custom)."},
+            },
+            "required": ["service_id"],
+        },
+    },
+    {
+        "name": "request_service_qr",
+        "description": (
+            "بررسی می‌کند سرویس لینکی برای ساخت کیوآر دارد یا نه؛ خودش کیوآر "
+            "نمی‌سازد. اگر ok=true برگردد، بلافاصله بعد از این پیام، سیستم "
+            "همان تصویر کیوآرِ واقعی را برای کاربر می‌فرستد."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"service_id": {"type": "string", "description": "شناسه‌ی سرویس."}},
+            "required": ["service_id"],
+        },
+    },
+    {
+        "name": "request_individual_configs",
+        "description": (
+            "بررسی می‌کند سرویس لینکِ اشتراکِ چندکانفیگی دارد یا نه؛ خودش "
+            "کانفیگ‌ها را نمی‌خواند. اگر ok=true برگردد، بلافاصله بعد از این "
+            "پیام، سیستم فهرست واقعیِ کانفیگ‌های تکیِ همین سرویس را می‌فرستد."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"service_id": {"type": "string", "description": "شناسه‌ی سرویس."}},
+            "required": ["service_id"],
+        },
+    },
+    {
+        "name": "request_toggle_service_enabled",
+        "description": (
+            "بررسیِ درخواستِ فعال/غیرفعال‌کردنِ یک سرویسِ ساخته‌شده (custom) روی "
+            "پنل. خودش چیزی تغییر نمی‌دهد؛ اگر ok=true برگردد، بلافاصله بعد از "
+            "این پیام، سیستم وضعیت را روی خودِ پنل هم اعمال می‌کند. فقط وقتی "
+            "کاربر صراحتاً همین درخواست را داده صدا بزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس (فقط سرویس‌های custom)."},
+                "enabled": {"type": "boolean", "description": "true برای فعال‌کردن، false برای غیرفعال‌کردن."},
+            },
+            "required": ["service_id", "enabled"],
+        },
+    },
+    {
+        "name": "request_rename_service",
+        "description": (
+            "بررسیِ درخواستِ تغییرِ نامِ نمایشیِ یک سرویسِ ساخته‌شده (custom) - نامِ "
+            "جدید باید فقط حروف انگلیسی/عدد/آندرلاین و بین ۳ تا ۲۰ کاراکتر باشد "
+            "و از قبل توسط کس دیگری استفاده نشده باشد. خودش چیزی تغییر نمی‌دهد؛ "
+            "اگر ok=true برگردد، بلافاصله بعد از این پیام تغییر واقعی اعمال "
+            "می‌شود. فقط وقتی کاربر صراحتاً نامِ جدید را گفته صدا بزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس (فقط سرویس‌های custom)."},
+                "new_name": {"type": "string", "description": "نام جدیدی که کاربر خواسته."},
+            },
+            "required": ["service_id", "new_name"],
+        },
+    },
+    {
+        "name": "request_regenerate_service_access",
+        "description": (
+            "بررسیِ درخواستِ «قطع دسترسیِ لینک فعلی و صدور لینک جدید با همان حجم/"
+            "زمانِ باقی‌مانده» برای یک سرویسِ ساخته‌شده (custom). این عملیات "
+            "غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر هشدار دادی و "
+            "او در یک پیامِ جداگانه تایید کرد (مثل قانونِ تاییدِ خرید/تمدید با "
+            "کیف‌پول) صدا بزن. خودش چیزی تغییر نمی‌دهد؛ اگر ok=true برگردد، "
+            "بلافاصله بعد از این پیام لینکِ قبلی باطل و لینکِ جدید صادر می‌شود."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"service_id": {"type": "string", "description": "شناسه‌ی سرویس (فقط سرویس‌های custom)."}},
+            "required": ["service_id"],
+        },
+    },
+    {
+        "name": "request_transfer_service",
+        "description": (
+            "بررسیِ درخواستِ انتقالِ یک سرویسِ ساخته‌شده (custom) به آی‌دیِ عددیِ "
+            "تلگرامِ کاربرِ دیگر (که باید قبلاً بات را استارت کرده باشد). این "
+            "عملیات غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر "
+            "هشدار دادی و او در یک پیامِ جداگانه تایید کرد صدا بزن. خودش چیزی "
+            "منتقل نمی‌کند؛ اگر ok=true برگردد، بلافاصله بعد از این پیام انتقالِ "
+            "واقعی انجام می‌شود."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "description": "شناسه‌ی سرویس (فقط سرویس‌های custom)."},
+                "target_telegram_id": {"type": "integer", "description": "آی‌دی عددیِ تلگرامِ کاربر مقصد."},
+            },
+            "required": ["service_id", "target_telegram_id"],
+        },
+    },
+    {
+        "name": "request_delete_service",
+        "description": (
+            "بررسیِ درخواستِ حذفِ کاملِ یک سرویس (config یا custom). این عملیات "
+            "غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر هشدار دادی "
+            "و او در یک پیامِ جداگانه تایید کرد صدا بزن. خودش چیزی حذف نمی‌کند؛ "
+            "اگر ok=true برگردد، بلافاصله بعد از این پیام حذفِ واقعی انجام "
+            "می‌شود."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"service_id": {"type": "string", "description": "شناسه‌ی سرویس."}},
+            "required": ["service_id"],
         },
     },
     {
@@ -424,15 +641,17 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
         except Exception:
             _log.exception("خطا هنگام خواندن sub_info برای کاربر %s در ابزار AI.", user_tg_id)
             info = {}
-        entry = {"order_id": o["id"]}
+        entry = {"order_id": o["id"], "service_id": f"c{cfg['id']}"}
         entry.update(_summarize_sub_info(info))
         services.append(entry)
 
     for cc in custom_configs:
         sub_url = cc["subscription_url"]
         entry = {
+            "service_id": f"x{cc['id']}",
             "name": cc["display_name"] or cc["username"],
             "enabled": bool(cc["enabled"]) if "enabled" in cc.keys() else True,
+            "auto_renew": bool(cc["auto_renew"]) if "auto_renew" in cc.keys() else False,
         }
         if sub_url:
             try:
@@ -654,6 +873,319 @@ async def _tool_request_purchase_with_wallet(db, user_tg_id: int, args: dict) ->
     return {"ok": True, "product_id": product_id, "quantity": quantity, "price_toman": total_price}
 
 
+async def _tool_get_server_countries(db) -> dict:
+    def _read():
+        servers = db.get_panel_servers(active_only=True)
+        servers = [s for s in servers if ("used_for_custom_config" not in s.keys()) or s["used_for_custom_config"]]
+        products = db.get_custom_config_products(active_only=True)
+        return servers, products
+
+    servers, products = await asyncio.to_thread(_read)
+    if not servers:
+        return {"countries": [], "note": "در حال حاضر سروری برای ساخت کانفیگ شخصی تعریف نشده."}
+
+    by_server = {}
+    for p in products:
+        by_server.setdefault(p["panel_server_id"], []).append(p)
+
+    countries = []
+    for s in servers:
+        plans = by_server.get(s["id"], [])
+        countries.append({
+            "name": s["name"],
+            "plans": [
+                {
+                    "product_name": p["name"],
+                    "min_gb": p["min_gb"],
+                    "max_gb": p["max_gb"],
+                }
+                for p in plans
+            ],
+        })
+    return {"countries": countries}
+
+
+async def _resolve_service_target(db, user_tg_id: int, service_id: str):
+    """service_id را (دقیقاً همان cb_id که در منوی «سرویس‌های من» هم استفاده
+    می‌شود: c<config_id> یا x<custom_config_id>) به رکورد واقعیِ متعلق به همین
+    کاربر تبدیل می‌کند. اگر معتبر نبود یا مالِ کاربر دیگری بود None برمی‌گرداند."""
+    if not service_id or not isinstance(service_id, str) or len(service_id) < 2:
+        return None
+    kind_char, raw_id = service_id[0], service_id[1:]
+    try:
+        target_id = int(raw_id)
+    except ValueError:
+        return None
+
+    def _read():
+        if kind_char == "c":
+            cfg = db.get_config_by_id(target_id)
+            if not cfg or (("is_disabled" in cfg.keys()) and cfg["is_disabled"]):
+                return None
+            order = next(
+                (o for o in db.get_user_orders(user_tg_id)
+                 if o["config_id"] == target_id and o["status"] == "approved"),
+                None,
+            )
+            if not order:
+                return None
+            return {"kind": "config", "config": cfg}
+        if kind_char == "x":
+            cc = db.get_custom_config_owned(target_id, user_tg_id)
+            if not cc:
+                return None
+            return {"kind": "custom", "custom": cc}
+        return None
+
+    return await asyncio.to_thread(_read)
+
+
+def _renewal_rate_and_price(db, mode: str, amount) -> tuple:
+    """نرخ ثابتِ تنظیم‌شده توسط ادمین و قیمتِ نهایی را برای mode=volume/time
+    برمی‌گرداند؛ اگر نرخ تنظیم نشده یا amount نامعتبر بود None برمی‌گرداند."""
+    try:
+        amount = int(amount)
+    except (TypeError, ValueError):
+        return None
+    if amount <= 0:
+        return None
+    rate_key = "renewal_price_per_gb" if mode == "volume" else "renewal_price_per_day"
+    rate = int((db.get_setting(rate_key, "0") or "0") or "0")
+    if rate <= 0:
+        return None
+    return amount, amount * rate
+
+
+async def _prepare_renewal(db, user_tg_id: int, args: dict) -> dict:
+    """منطق مشترکِ محاسبه/بررسیِ تمدید برای calculate_renewal_cost و
+    renew_service_with_wallet - فقط می‌خواند، هیچ‌چیزی کسر یا تمدید نمی‌کند."""
+    service_id = args.get("service_id")
+    mode = args.get("mode")
+    if mode not in ("full", "volume", "time"):
+        return {"ok": False, "reason": "invalid_mode"}
+
+    target = await _resolve_service_target(db, user_tg_id, service_id)
+    if not target:
+        return {"ok": False, "reason": "service_not_found"}
+
+    def _is_test():
+        return target["kind"] == "custom" and target["custom"]["source"] == "test"
+
+    if await asyncio.to_thread(_is_test):
+        return {"ok": False, "reason": "test_service_not_renewable"}
+    if target["kind"] == "config" and mode != "time":
+        return {"ok": False, "reason": "only_time_mode_for_plan_configs"}
+
+    if mode == "full":
+        try:
+            product_id = int(args.get("product_id"))
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "invalid_product_id"}
+
+        def _read_product():
+            p = db.get_product(product_id)
+            return p if p and p["is_active"] and p["is_auto_provision"] else None
+
+        product = await asyncio.to_thread(_read_product)
+        if not product:
+            return {"ok": False, "reason": "product_not_found"}
+        price = product["price"]
+        summary_label = product["name"]
+    else:
+        result = await asyncio.to_thread(_renewal_rate_and_price, db, mode, args.get("amount"))
+        if not result:
+            return {"ok": False, "reason": "rate_not_configured_or_invalid_amount"}
+        amount, price = result
+        unit_label = "گیگابایت" if mode == "volume" else "روز"
+        summary_label = f"{amount:,} {unit_label}"
+
+    wallet_credit = await asyncio.to_thread(db.get_wallet_credit, user_tg_id)
+    return {
+        "ok": True,
+        "service_id": service_id,
+        "mode": mode,
+        "amount": args.get("amount"),
+        "product_id": args.get("product_id"),
+        "price_toman": price,
+        "summary": summary_label,
+        "wallet_balance_toman": wallet_credit,
+        "wallet_covers_full_amount": wallet_credit >= price,
+    }
+
+
+async def _tool_calculate_renewal_cost(db, user_tg_id: int, args: dict) -> dict:
+    return await _prepare_renewal(db, user_tg_id, args)
+
+
+async def _tool_renew_service_with_wallet(db, user_tg_id: int, args: dict) -> dict:
+    result = await _prepare_renewal(db, user_tg_id, args)
+    if not result.get("ok"):
+        return result
+    if not result["wallet_covers_full_amount"]:
+        return {
+            "ok": False,
+            "reason": "insufficient_wallet",
+            "wallet_balance_toman": result["wallet_balance_toman"],
+            "price_toman": result["price_toman"],
+        }
+    return result
+
+
+async def _get_custom_service(db, user_tg_id: int, service_id: str):
+    """اگر service_id مالِ همین کاربر و از نوع custom باشد، رکورد را برمی‌گرداند؛
+    وگرنه None. برای تفکیکِ «سرویس یافت نشد» از «سرویس custom نیست» از
+    _resolve_service_target عمومی‌تر (بالا) استفاده می‌کند."""
+    target = await _resolve_service_target(db, user_tg_id, service_id)
+    if not target:
+        return None, "service_not_found"
+    if target["kind"] != "custom":
+        return None, "not_a_custom_service"
+    return target["custom"], None
+
+
+async def _tool_set_service_auto_renew(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    enabled = bool(args.get("enabled"))
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+    if (cc["duration_days"] or 0) <= 0:
+        return {"ok": False, "reason": "unlimited_service_no_auto_renew"}
+    return {"ok": True, "service_id": service_id, "enabled": enabled}
+
+
+async def _tool_get_service_history(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+
+    def _read():
+        return db.get_custom_config_history(cc["id"])
+
+    rows = await asyncio.to_thread(_read)
+    return {
+        "ok": True,
+        "events": [
+            {"type": r["event_type"], "detail": r["detail"] or "", "at": r["created_at"]}
+            for r in rows
+        ],
+    }
+
+
+async def _tool_request_service_qr(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    target = await _resolve_service_target(db, user_tg_id, service_id)
+    if not target:
+        return {"ok": False, "reason": "service_not_found"}
+    link = target["config"]["link"] if target["kind"] == "config" else target["custom"]["subscription_url"]
+    if not link:
+        return {"ok": False, "reason": "no_link_available"}
+    return {"ok": True, "service_id": service_id}
+
+
+async def _tool_request_individual_configs(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    target = await _resolve_service_target(db, user_tg_id, service_id)
+    if not target:
+        return {"ok": False, "reason": "service_not_found"}
+    link = target["config"]["link"] if target["kind"] == "config" else target["custom"]["subscription_url"]
+    if not link or not str(link).startswith(("http://", "https://")):
+        return {"ok": False, "reason": "no_individual_configs_available"}
+    return {"ok": True, "service_id": service_id}
+
+
+async def _tool_request_toggle_service_enabled(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    enabled = bool(args.get("enabled"))
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+
+    def _read_server():
+        server = db.get_panel_server(cc["panel_server_id"]) if cc["panel_server_id"] else None
+        return server if server and server["is_active"] else None
+
+    server = await asyncio.to_thread(_read_server)
+    if not server:
+        return {"ok": False, "reason": "panel_server_unavailable"}
+    return {"ok": True, "service_id": service_id, "enabled": enabled}
+
+
+async def _tool_request_rename_service(db, user_tg_id: int, args: dict) -> dict:
+    import re as _re
+    service_id = args.get("service_id")
+    new_name = (args.get("new_name") or "").strip()
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+    if not _re.fullmatch(r"[A-Za-z0-9_]{3,20}", new_name):
+        return {"ok": False, "reason": "invalid_format"}
+
+    def _read():
+        prefix = db.get_custom_config_prefix()
+        current_label = cc["display_name"] or cc["username"]
+        final_name = f"{prefix}-{new_name}" if (prefix and current_label.startswith(prefix + "-")) else new_name
+        taken = db.is_custom_username_taken(final_name) if final_name != current_label else False
+        return current_label, final_name, taken
+
+    current_label, final_name, taken = await asyncio.to_thread(_read)
+    if final_name == current_label:
+        return {"ok": False, "reason": "same_as_current_name"}
+    if taken:
+        return {"ok": False, "reason": "name_taken"}
+    return {"ok": True, "service_id": service_id, "new_name": new_name}
+
+
+async def _tool_request_regenerate_service_access(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+    if cc["source"] == "test":
+        return {"ok": False, "reason": "test_service_not_supported"}
+
+    def _read_server():
+        server = db.get_panel_server(cc["panel_server_id"]) if cc["panel_server_id"] else None
+        return server if server and server["is_active"] else None
+
+    server = await asyncio.to_thread(_read_server)
+    if not server:
+        return {"ok": False, "reason": "panel_server_unavailable"}
+    return {"ok": True, "service_id": service_id}
+
+
+async def _tool_request_transfer_service(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    try:
+        target_telegram_id = int(args.get("target_telegram_id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_target_id"}
+    cc, err = await _get_custom_service(db, user_tg_id, service_id)
+    if err:
+        return {"ok": False, "reason": err}
+    if cc["source"] == "test":
+        return {"ok": False, "reason": "test_service_not_supported"}
+    if target_telegram_id == user_tg_id:
+        return {"ok": False, "reason": "cannot_transfer_to_self"}
+
+    def _read():
+        return db.get_user(target_telegram_id)
+
+    target_user = await asyncio.to_thread(_read)
+    if not target_user:
+        return {"ok": False, "reason": "target_user_not_found"}
+    return {"ok": True, "service_id": service_id, "target_telegram_id": target_telegram_id}
+
+
+async def _tool_request_delete_service(db, user_tg_id: int, args: dict) -> dict:
+    service_id = args.get("service_id")
+    target = await _resolve_service_target(db, user_tg_id, service_id)
+    if not target:
+        return {"ok": False, "reason": "service_not_found"}
+    return {"ok": True, "service_id": service_id}
+
+
 async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
     if name == "check_account_status":
         return await _tool_check_account_status(db, user_tg_id)
@@ -673,6 +1205,30 @@ async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
         return await _tool_get_recent_tickets(db, user_tg_id)
     if name == "request_purchase_with_wallet":
         return await _tool_request_purchase_with_wallet(db, user_tg_id, args)
+    if name == "get_server_countries":
+        return await _tool_get_server_countries(db)
+    if name == "calculate_renewal_cost":
+        return await _tool_calculate_renewal_cost(db, user_tg_id, args)
+    if name == "renew_service_with_wallet":
+        return await _tool_renew_service_with_wallet(db, user_tg_id, args)
+    if name == "set_service_auto_renew":
+        return await _tool_set_service_auto_renew(db, user_tg_id, args)
+    if name == "get_service_history":
+        return await _tool_get_service_history(db, user_tg_id, args)
+    if name == "request_service_qr":
+        return await _tool_request_service_qr(db, user_tg_id, args)
+    if name == "request_individual_configs":
+        return await _tool_request_individual_configs(db, user_tg_id, args)
+    if name == "request_toggle_service_enabled":
+        return await _tool_request_toggle_service_enabled(db, user_tg_id, args)
+    if name == "request_rename_service":
+        return await _tool_request_rename_service(db, user_tg_id, args)
+    if name == "request_regenerate_service_access":
+        return await _tool_request_regenerate_service_access(db, user_tg_id, args)
+    if name == "request_transfer_service":
+        return await _tool_request_transfer_service(db, user_tg_id, args)
+    if name == "request_delete_service":
+        return await _tool_request_delete_service(db, user_tg_id, args)
     if name == "escalate_to_human":
         return {"ok": True, "reason": args.get("reason", "")}
     return {"error": f"ابزار ناشناخته: {name}"}
@@ -777,6 +1333,30 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
                             "product_id": result["product_id"],
                             "quantity": result["quantity"],
                         }
+                    if fc.name == "renew_service_with_wallet" and result.get("ok"):
+                        ui_action = {
+                            "type": "finalize_wallet_renewal",
+                            "service_id": result["service_id"],
+                            "mode": result["mode"],
+                            "amount": result.get("amount"),
+                            "product_id": result.get("product_id"),
+                        }
+                    if fc.name == "set_service_auto_renew" and result.get("ok"):
+                        ui_action = {"type": "toggle_auto_renew", "service_id": result["service_id"], "enabled": result["enabled"]}
+                    if fc.name == "request_service_qr" and result.get("ok"):
+                        ui_action = {"type": "send_service_qr", "service_id": result["service_id"]}
+                    if fc.name == "request_individual_configs" and result.get("ok"):
+                        ui_action = {"type": "send_individual_configs", "service_id": result["service_id"]}
+                    if fc.name == "request_toggle_service_enabled" and result.get("ok"):
+                        ui_action = {"type": "toggle_service_enabled", "service_id": result["service_id"], "enabled": result["enabled"]}
+                    if fc.name == "request_rename_service" and result.get("ok"):
+                        ui_action = {"type": "rename_service", "service_id": result["service_id"], "new_name": result["new_name"]}
+                    if fc.name == "request_regenerate_service_access" and result.get("ok"):
+                        ui_action = {"type": "regenerate_service_access", "service_id": result["service_id"]}
+                    if fc.name == "request_transfer_service" and result.get("ok"):
+                        ui_action = {"type": "transfer_service", "service_id": result["service_id"], "target_telegram_id": result["target_telegram_id"]}
+                    if fc.name == "request_delete_service" and result.get("ok"):
+                        ui_action = {"type": "delete_service", "service_id": result["service_id"]}
                     contents.append(types.Content(role="user", parts=[types.Part.from_function_response(name=fc.name, response=result)]))
                 if escalate:
                     return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
@@ -833,6 +1413,30 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
                             "product_id": result["product_id"],
                             "quantity": result["quantity"],
                         }
+                    if name == "renew_service_with_wallet" and result.get("ok"):
+                        ui_action = {
+                            "type": "finalize_wallet_renewal",
+                            "service_id": result["service_id"],
+                            "mode": result["mode"],
+                            "amount": result.get("amount"),
+                            "product_id": result.get("product_id"),
+                        }
+                    if name == "set_service_auto_renew" and result.get("ok"):
+                        ui_action = {"type": "toggle_auto_renew", "service_id": result["service_id"], "enabled": result["enabled"]}
+                    if name == "request_service_qr" and result.get("ok"):
+                        ui_action = {"type": "send_service_qr", "service_id": result["service_id"]}
+                    if name == "request_individual_configs" and result.get("ok"):
+                        ui_action = {"type": "send_individual_configs", "service_id": result["service_id"]}
+                    if name == "request_toggle_service_enabled" and result.get("ok"):
+                        ui_action = {"type": "toggle_service_enabled", "service_id": result["service_id"], "enabled": result["enabled"]}
+                    if name == "request_rename_service" and result.get("ok"):
+                        ui_action = {"type": "rename_service", "service_id": result["service_id"], "new_name": result["new_name"]}
+                    if name == "request_regenerate_service_access" and result.get("ok"):
+                        ui_action = {"type": "regenerate_service_access", "service_id": result["service_id"]}
+                    if name == "request_transfer_service" and result.get("ok"):
+                        ui_action = {"type": "transfer_service", "service_id": result["service_id"], "target_telegram_id": result["target_telegram_id"]}
+                    if name == "request_delete_service" and result.get("ok"):
+                        ui_action = {"type": "delete_service", "service_id": result["service_id"]}
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result, ensure_ascii=False)})
                 if escalate:
                     return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
