@@ -6536,7 +6536,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "env": "⚠️ کلید فقط از فایل .env سرور خوانده می‌شود؛ برای سادگی پیشنهاد می‌شود همینجا دوباره ثبتش کنی.",
             "none": "❌ هنوز کلید API تنظیم نشده؛ دستیار هوشمند غیرفعال می‌ماند.",
         }[source]
-        text = f"🤖 مدیریت دستیار هوشمند پشتیبانی\n\n{key_note}\n\n"
+        current_model = ai_support.resolve_gemini_model(db)
+        text = f"🤖 مدیریت دستیار هوشمند پشتیبانی\n\n{key_note}\n\n🧠 مدل فعلی: {current_model}\n\n"
         if items:
             text += "سوالات متداولی که به دستیار آموزش داده شده (برای حذف، روی 🗑 بزن):"
         else:
@@ -6558,6 +6559,40 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "ai_support_enabled", "0" if current == "1" else "1"))
         await _show_ai_faq_menu(call)
         await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_set_model")
+    async def cb_admin_ai_set_model(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await replace_admin_view(
+            call,
+            "🧠 انتخاب مدل دستیار هوشمند\n\n"
+            "اگر با محدودیت سهمیه‌ی رایگان روزانه مواجه شدی، «Flash-Lite» را انتخاب کن؛ "
+            "معمولاً سهمیه‌ی رایگان روزانه‌ی بیشتری نسبت به Flash دارد (اعداد دقیق و زنده "
+            "را در aistudio.google.com بخش Usage ببین). تغییر فوری است و نیازی به "
+            "ری‌استارت سرور ندارد.",
+            reply_markup=kb.ai_model_choice_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ai_model_pick:"))
+    async def cb_admin_ai_model_pick(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        model = call.data.split(":", 1)[1]
+        valid_ids = {m for m, _ in ai_support.MODEL_CHOICES}
+        if model not in valid_ids:
+            return await call.answer("❌ مدل نامعتبر.", show_alert=True)
+        (await asyncio.to_thread(db.set_setting, "gemini_model", model))
+        (await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "gemini_model_change", f"مدل دستیار هوشمند به {model} تغییر کرد."
+        ))
+        await replace_admin_view(
+            call,
+            f"✅ مدل دستیار هوشمند روی «{model}» تنظیم شد (فوری، بدون نیاز به ری‌استارت).",
+            reply_markup=kb.ai_model_choice_kb(db),
+        )
+        await call.answer("✅ ذخیره شد.")
 
     @router.callback_query(F.data == "adm_ai_set_key")
     async def cb_admin_ai_set_key(call: CallbackQuery, state: FSMContext):

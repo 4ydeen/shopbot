@@ -39,7 +39,29 @@ _log = logging.getLogger("ai_support")
 
 # حداکثر تعداد دوری که مدل مجاز است پشت‌سرهم ابزار صدا بزند، قبل از این‌که
 # مجبورش کنیم یک جواب متنی نهایی بدهد (جلوگیری از حلقه‌ی بی‌نهایت تابع‌زنی).
-_MAX_TOOL_ROUNDS = 4
+# توجه: هر دور یعنی یک درخواست واقعی و جداگانه به Gemini (و یک واحد از سهمیه‌ی
+# روزانه‌ی رایگان مصرف می‌شود). ۳ دور برای اکثر گفتگوها کافی است (مثلاً:
+# list_products → show_purchase_options → جواب نهایی) و نسبت به ۴ دور، مصرف
+# سهمیه به‌ازای پیام‌های پیچیده را کمی کاهش می‌دهد.
+_MAX_TOOL_ROUNDS = 3
+
+# گزینه‌های مدلی که از پنل ادمین قابل انتخاب هستند، به‌همراه توضیح کوتاه درباره‌ی
+# سهمیه‌ی رایگان تقریبی‌شان (اعداد رسمی گوگل مدام تغییر می‌کنند؛ این توضیح‌ها
+# فقط جهت مقایسه‌ی نسبی مدل‌ها هستند - برای عدد دقیق و زنده به aistudio.google.com
+# بخش Usage نگاه کن). ترتیب: از سریع‌ترین/بیشترین سهمیه‌ی رایگان تا باکیفیت‌ترین.
+MODEL_CHOICES = [
+    ("gemini-flash-lite-latest", "⚡ Flash-Lite (بیشترین سهمیه‌ی رایگان روزانه، مناسب حجم بالا)"),
+    ("gemini-flash-latest", "🔷 Flash (پیش‌فرض، تعادل سرعت/کیفیت)"),
+    ("gemini-pro-latest", "🎯 Pro (کیفیت بالاتر، سهمیه‌ی رایگان بسیار کمتر)"),
+]
+
+
+def resolve_gemini_model(db) -> str:
+    """نام مدل Gemini مورد استفاده را برمی‌گرداند. اولویت با مقداری است که ادمین
+    از داخل پنل بات انتخاب کرده (فوری، بدون نیاز به ری‌استارت سرور)؛ اگر
+    تنظیم نشده بود، مقدار AI_SUPPORT_MODEL از .env استفاده می‌شود."""
+    model = (db.get_setting("gemini_model", "") or "").strip()
+    return model or config.AI_SUPPORT_MODEL
 
 _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌زبان یک فروشگاه فروش اشتراک VPN (V2Ray/کانفیگ) هستی.
 
@@ -416,9 +438,10 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
         raise last_exc
 
     try:
+        model_name = resolve_gemini_model(db)
         for _ in range(_MAX_TOOL_ROUNDS):
             response = await _generate_with_rotation(
-                model=config.AI_SUPPORT_MODEL,
+                model=model_name,
                 contents=contents,
                 config=gen_config,
             )

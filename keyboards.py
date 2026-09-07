@@ -711,6 +711,7 @@ def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
             callback_data="adm_ai_toggle",
         )],
         [InlineKeyboardButton(text="🔑 تنظیم کلید API (Gemini)", callback_data="adm_ai_set_key")],
+        [InlineKeyboardButton(text="🧠 انتخاب مدل (برای سهمیه‌ی رایگان بیشتر)", callback_data="adm_ai_set_model")],
     ]
     for it in items:
         q = it["question"]
@@ -721,6 +722,18 @@ def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
         ])
     rows.append([InlineKeyboardButton(text="➕ افزودن سوال جدید", callback_data="adm_ai_faq_add")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
+    """لیست مدل‌های قابل‌انتخاب برای دستیار هوشمند، با علامت‌زدن مدل فعلی."""
+    import ai_support
+    current = ai_support.resolve_gemini_model(db)
+    rows = []
+    for model_id, label in ai_support.MODEL_CHOICES:
+        mark = "✅ " if model_id == current else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_model_pick:{model_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_ai_support_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
