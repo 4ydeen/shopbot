@@ -121,10 +121,36 @@ _TOOLS = [
 ]
 
 
+def _split_keys(raw: str) -> list:
+    """یک رشته را (که ممکن است چند کلید API با خط جدید/کاما/فاصله از هم جدا
+    شده باشند) به لیست کلیدهای یکتا و پاک‌شده تبدیل می‌کند."""
+    if not raw:
+        return []
+    parts = raw.replace(",", "\n").splitlines()
+    seen = set()
+    keys = []
+    for p in parts:
+        k = p.strip()
+        if k and k not in seen:
+            seen.add(k)
+            keys.append(k)
+    return keys
+
+
+def resolve_gemini_keys(db) -> list:
+    """لیست کلیدهای API Gemini را برمی‌گرداند (پشتیبانی از چند کلید برای
+    چرخش خودکار هنگام برخورد با خطای سهمیه/429). اولویت با کلید(های)ی است
+    که ادمین از داخل پنل بات تنظیم کرده؛ اگر خالی بود، کلید سراسری .env."""
+    keys = _split_keys(db.get_setting("gemini_api_key", ""))
+    if keys:
+        return keys
+    return _split_keys(config.GEMINI_API_KEY)
+
+
 def resolve_gemini_key(db) -> str:
-    """کلید API Gemini را برمی‌گرداند: اولویت با کلیدی است که ادمین از داخل
-    پنل بات تنظیم کرده؛ در غیر این صورت کلید سراسری .env (اگر باشد)."""
-    return db.get_setting("gemini_api_key", "") or config.GEMINI_API_KEY
+    """اولین کلید API تنظیم‌شده را برمی‌گرداند (سازگاری با کدهای قبلی)."""
+    keys = resolve_gemini_keys(db)
+    return keys[0] if keys else ""
 
 
 def resolve_gemini_key_source(db) -> str:
@@ -139,7 +165,7 @@ def resolve_gemini_key_source(db) -> str:
 
 
 def is_configured(db) -> bool:
-    return bool(resolve_gemini_key(db))
+    return bool(resolve_gemini_keys(db))
 
 
 def _gb(n: int) -> float:
@@ -295,11 +321,21 @@ async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
     return {"error": f"ابزار ناشناخته: {name}"}
 
 
-def _build_client(db):
+def _build_client(api_key: str):
     # ایمپورت تنبل (lazy) تا اگر کتابخانه‌ی google-genai نصب نبود، بقیه‌ی بات
     # (که ربطی به دستیار هوشمند ندارد) بدون خطا بالا بیاید.
     from google import genai
-    return genai.Client(api_key=resolve_gemini_key(db))
+    return genai.Client(api_key=api_key)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """آیا خطا مربوط به تمام‌شدن سهمیه/rate-limit است (429 RESOURCE_EXHAUSTED)؟
+    در این صورت باید کلید بعدی امتحان شود، نه اینکه کل درخواست شکست بخورد."""
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+    text = str(exc)
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
 def _history_to_contents(history, user_message: str):
@@ -343,15 +379,45 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
     tool = types.Tool(function_declarations=_TOOLS)
     gen_config = types.GenerateContentConfig(system_instruction=system_prompt, tools=[tool])
 
-    client = _build_client(db)
+    api_keys = resolve_gemini_keys(db)
+    if not api_keys:
+        return {
+            "reply": "دستیار هوشمند در حال حاضر تنظیم نشده. پیامت مستقیم برای پشتیبانی ارسال می‌شود.",
+            "escalate": True,
+        }
+
+    key_index = 0
+    client = _build_client(api_keys[key_index])
     escalate = False
     reply_text = ""
     ui_action = None
 
+    async def _generate_with_rotation(**kwargs):
+        """generate_content را با کلید فعلی صدا می‌زند؛ اگر خطای سهمیه (429)
+        بود، به‌ترتیب کلیدهای بعدی را امتحان می‌کند تا یکی جواب بدهد یا همه
+        تمام شوند."""
+        nonlocal client, key_index
+        last_exc = None
+        for attempt in range(len(api_keys)):
+            try:
+                return await asyncio.to_thread(client.models.generate_content, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                if not _is_quota_error(exc):
+                    raise
+                last_exc = exc
+                _log.warning(
+                    "کلید Gemini شماره %s سهمیه‌اش تمام شد؛ رفتن سراغ کلید بعدی (در صورت وجود).",
+                    key_index + 1,
+                )
+                key_index += 1
+                if key_index >= len(api_keys):
+                    raise
+                client = _build_client(api_keys[key_index])
+        raise last_exc
+
     try:
         for _ in range(_MAX_TOOL_ROUNDS):
-            response = await asyncio.to_thread(
-                client.models.generate_content,
+            response = await _generate_with_rotation(
                 model=config.AI_SUPPORT_MODEL,
                 contents=contents,
                 config=gen_config,

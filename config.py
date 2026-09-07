@@ -107,7 +107,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # نام مدل Gemini مورد استفاده برای دستیار پشتیبانی. اگر بعداً مدل جدیدتری آمد یا
 # این مدل منسوخ شد، فقط همین مقدار را در .env تغییر بده، نیازی به تغییر کد نیست.
-AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-3.6-flash")
+AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-2.5-flash")
 
 # کلید امضای نشست (session) پنل مدیریت وب مستقل - فقط توسط admin_panel/server.py
 # استفاده می‌شود. اگر ست نشود، هر ری‌استارت پروسه همه‌ی نشست‌های وب‌ادمین‌ها را

@@ -6563,14 +6563,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_ai_set_key(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        current = db.get_setting("gemini_api_key", "")
-        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        current_keys = ai_support._split_keys(db.get_setting("gemini_api_key", ""))
+        if current_keys:
+            masked = "\n".join(f"  {i+1}. ...{k[-4:]}" for i, k in enumerate(current_keys))
+        else:
+            masked = "❌ تنظیم نشده"
         await state.set_state(AdminSetGeminiKey.waiting_key)
         await replace_admin_view(
             call,
-            f"🔑 کلید API دستیار هوشمند (Gemini) را ارسال کن.\n"
-            f"رایگان از aistudio.google.com (بدون نیاز به کارت بانکی) قابل دریافت است.\n"
-            f"وضعیت فعلی: {masked}\n\n"
+            f"🔑 کلید(های) API دستیار هوشمند (Gemini) را ارسال کن.\n"
+            f"رایگان از aistudio.google.com (بدون نیاز به کارت بانکی) قابل دریافت است.\n\n"
+            f"برای افزایش سهمیه می‌توانی چند کلید (از چند اکانت/پروژه‌ی گوگل جدا) بفرستی؛ "
+            f"هر کلید را در یک خط جدا (یا با کاما) بنویس. وقتی سهمیه‌ی یک کلید تمام شود، "
+            f"بات خودکار سراغ کلید بعدی می‌رود.\n\n"
+            f"وضعیت فعلی:\n{masked}\n\n"
             f"برای حذف، عبارت «حذف» را بفرست.",
             reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
         )
@@ -6582,15 +6588,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         if text in ("حذف", "/حذف", "-"):
             (await asyncio.to_thread(db.set_setting, "gemini_api_key", ""))
-            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید API دستیار هوشمند حذف شد."))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید(های) API دستیار هوشمند حذف شد."))
             items = await asyncio.to_thread(db.get_ai_faq_items)
             await message.answer(
                 "✅ کلید API حذف شد؛ دستیار هوشمند تا تنظیم دوباره‌ی کلید غیرفعال می‌ماند.",
                 reply_markup=kb.ai_faq_admin_kb(db, items),
             )
             return
-        (await asyncio.to_thread(db.set_setting, "gemini_api_key", text))
-        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید API دستیار هوشمند تغییر کرد."))
+        keys = ai_support._split_keys(text)
+        (await asyncio.to_thread(db.set_setting, "gemini_api_key", "\n".join(keys)))
+        (await asyncio.to_thread(
+            db.log_admin_action, message.from_user.id, "gemini_key_change",
+            f"کلید(های) API دستیار هوشمند تغییر کرد ({len(keys)} کلید).",
+        ))
         # پیام کاربر حاوی کلید API است؛ به‌محض ذخیره حذفش می‌کنیم تا در تاریخچه‌ی چت باقی نماند.
         try:
             await message.delete()
@@ -6598,7 +6608,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
         items = await asyncio.to_thread(db.get_ai_faq_items)
         await message.answer(
-            "✅ کلید API ذخیره شد و دستیار هوشمند از همین الان فعال است (بدون نیاز به ری‌استارت سرور).",
+            f"✅ {len(keys)} کلید ذخیره شد و دستیار هوشمند از همین الان فعال است (بدون نیاز به ری‌استارت سرور).",
             reply_markup=kb.ai_faq_admin_kb(db, items),
         )
 
