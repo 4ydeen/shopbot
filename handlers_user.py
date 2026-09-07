@@ -932,125 +932,153 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             pending_discount_code_id=None, pending_discount_code_label=None,
         )
 
-        if order["final_price"] <= 0:
-            await state.clear()
+        # نکته‌ی مهم: از این‌جا به بعد کیف پول کاربر (در صورت استفاده) از قبل کسر
+        # شده (خط بالاتر) و سفارش با status='pending' ساخته شده. اگر هر خطای
+        # غیرمنتظره‌ای (نه فقط ProvisionError/موجودی تمام‌شده که خودشان مدیریت
+        # شده‌اند، بلکه هر Exception دیگری - مثلاً خطای پارس Markdown، قطعی موقت
+        # دیتابیس، خطای شبکه‌ی تلگرام و...) در ادامه‌ی این تابع رخ بدهد و کل
+        # هندلر کرش کند، بدون این try/except مبلغ کسرشده برای همیشه در سفارش
+        # pending گیر می‌کرد و هیچ‌جا برنمی‌گشت. reject_order فقط روی سفارش‌های
+        # هنوز pending اثر می‌کند (اگر سفارش already approved/rejected شده باشد
+        # بی‌اثر است)، پس فراخوانی آن در حالت خطا همیشه امن است.
+        try:
+            if order["final_price"] <= 0:
+                await state.clear()
 
-            if product["is_auto_provision"]:
+                if product["is_auto_provision"]:
+                    try:
+                        if product["provision_server_id"]:
+                            prov_results = await provision_direct(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
+                        else:
+                            prov_results = await provision_auto_config(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
+                    except (ProvisionError, DirectProvisionError) as e:
+                        (await asyncio.to_thread(db.reject_order, order_id))
+                        await _notify_admins_of_order(bot, order_id)
+                        await _safe_edit(
+                            call.message,
+                            f"⛔️ {e}\nمبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد."
+                        )
+                        await call.answer()
+                        return
+                    (await asyncio.to_thread(db.approve_order_auto, order_id))
+                    links = [r["subscription_url"] for r in prov_results]
+                else:
+                    results = (await asyncio.to_thread(db.take_unused_configs, product_id, call.from_user.id, quantity))
+                    if not results:
+                        # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
+                        (await asyncio.to_thread(db.reject_order, order_id))
+                        await _notify_admins_of_order(bot, order_id)
+                        await _safe_edit(
+                            call.message,
+                            "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
+                            "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
+                            "یا با پشتیبانی در تماس باشید."
+                        )
+                        await call.answer()
+                        return
+                    (await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results]))
+                    links = [r["link"] for r in results]
+                    await check_and_notify_low_stock(bot.send_message, db, product_id)
+                reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, call.from_user.id, order["base_price"]))
+                if reward_info:
+                    reward_amount, referrer_id = reward_info
+                    try:
+                        await bot.send_message(
+                            referrer_id,
+                            f"🤝 تبریک! یکی از زیرمجموعه‌های شما اولین خرید خود را انجام داد.\n"
+                            f"💰 {reward_amount:,} تومان به کیف پول شما اضافه شد.",
+                        )
+                    except Exception:
+                        pass
+
+                # اطلاع‌رسانی به ادمین‌ها فقط جهت آگاهی (نیازی به تایید دستی نیست)
                 try:
-                    if product["provision_server_id"]:
-                        prov_results = await provision_direct(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
-                    else:
-                        prov_results = await provision_auto_config(db, product, quantity, user_id=call.from_user.id, order_id=order_id)
-                except (ProvisionError, DirectProvisionError) as e:
-                    (await asyncio.to_thread(db.reject_order, order_id))
                     await _notify_admins_of_order(bot, order_id)
-                    await _safe_edit(
-                        call.message,
-                        f"⛔️ {e}\nمبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد."
-                    )
-                    await call.answer()
-                    return
-                (await asyncio.to_thread(db.approve_order_auto, order_id))
-                links = [r["subscription_url"] for r in prov_results]
-            else:
-                results = (await asyncio.to_thread(db.take_unused_configs, product_id, call.from_user.id, quantity))
-                if not results:
-                    # موجودی تمام شده: مبلغ کسرشده از کیف پول/کد تخفیف را برگردان و به ادمین اطلاع بده
-                    (await asyncio.to_thread(db.reject_order, order_id))
-                    await _notify_admins_of_order(bot, order_id)
-                    await _safe_edit(
-                        call.message,
-                        "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
-                        "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد. لطفاً بعداً دوباره تلاش کنید "
-                        "یا با پشتیبانی در تماس باشید."
-                    )
-                    await call.answer()
-                    return
-                (await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results]))
-                links = [r["link"] for r in results]
-                await check_and_notify_low_stock(bot.send_message, db, product_id)
-            reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, call.from_user.id, order["base_price"]))
-            if reward_info:
-                reward_amount, referrer_id = reward_info
-                try:
-                    await bot.send_message(
-                        referrer_id,
-                        f"🤝 تبریک! یکی از زیرمجموعه‌های شما اولین خرید خود را انجام داد.\n"
-                        f"💰 {reward_amount:,} تومان به کیف پول شما اضافه شد.",
-                    )
                 except Exception:
                     pass
 
-            # اطلاع‌رسانی به ادمین‌ها فقط جهت آگاهی (نیازی به تایید دستی نیست)
-            try:
-                await _notify_admins_of_order(bot, order_id)
-            except Exception:
-                pass
+                await _safe_edit(
+                    call.message,
+                    "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
+                    "کانفیگ شما در پیام بعدی ارسال می‌شود 👇"
+                )
+                await deliver_config_to_user(
+                    bot,
+                    call.from_user.id,
+                    product["name"],
+                    links,
+                    final_price=0,
+                    order_id=order_id,
+                    db=db,
+                )
+                await call.answer()
+                return
+
+            remaining_amount = order["final_price"]
+
+            if remaining_amount > 0 and not (await asyncio.to_thread(
+                db.has_any_payable_method, remaining_amount, allowed_methods
+            )):
+                # توجه: قبلاً این‌جا یک‌بار دستی add_wallet_credit(+wallet_used) هم زده
+                # می‌شد؛ چون reject_order خودش مبلغ order["wallet_used"] را برمی‌گرداند،
+                # آن فراخوانی اضافه باعث می‌شد مبلغ کیف پول کاربر دوبار برگردانده شود
+                # (کاربر اعتبار اضافه می‌گرفت). حذف شد.
+                (await asyncio.to_thread(db.reject_order, order_id))
+                await state.clear()
+                msg = "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
+                if allowed_methods == ["wallet"]:
+                    msg = "⛔️ این محصول فقط با کیف پول قابل خرید است و موجودی کیف پول شما کافی نیست."
+                if wallet_used > 0:
+                    msg += "\nمبلغ کسرشده از کیف پول شما بازگردانده شد."
+                await _safe_edit(call.message, msg)
+                await call.answer()
+                return
+
+            await state.set_state(BuyFlow.waiting_receipt)
+
+            after_buy_text = (await asyncio.to_thread(db.get_setting, "after_buy_text"))
+
+            text = f"{after_buy_text}\n\n"
+            if quantity > 1:
+                text += f"🔢 تعداد: {quantity} عدد\n"
+            if discount_amount:
+                text += f"🎟 تخفیف کد: {discount_amount:,} تومان\n"
+            if wallet_used:
+                text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
+            text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
+            text += "لطفاً روش پرداخت را انتخاب کنید:"
 
             await _safe_edit(
                 call.message,
-                "✅ مبلغ سفارش شما به‌طور کامل از کیف پول/تخفیف پوشش داده شد.\n"
-                "کانفیگ شما در پیام بعدی ارسال می‌شود 👇"
-            )
-            await deliver_config_to_user(
-                bot,
-                call.from_user.id,
-                product["name"],
-                links,
-                final_price=0,
-                order_id=order_id,
-                db=db,
+                text, parse_mode="Markdown",
+                reply_markup=kb.payment_choice_kb(
+                    crypto_payment.crypto_payment_available(db),
+                    abangateway_payment.abangateway_payment_available(db),
+                    custom_gateway_payment.list_enabled_gateways(db),
+                    (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
+                    card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
+                    amount=remaining_amount,
+                    db=db,
+                    allowed_methods=allowed_methods,
+                ),
             )
             await call.answer()
-            return
-
-        remaining_amount = order["final_price"]
-
-        if remaining_amount > 0 and not (await asyncio.to_thread(
-            db.has_any_payable_method, remaining_amount, allowed_methods
-        )):
-            if wallet_used > 0:
-                (await asyncio.to_thread(db.add_wallet_credit, call.from_user.id, wallet_used))
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "خطای غیرمنتظره در فرآیند خرید سفارش #%s برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+                order_id, call.from_user.id,
+            )
             (await asyncio.to_thread(db.reject_order, order_id))
             await state.clear()
-            msg = "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
-            if allowed_methods == ["wallet"]:
-                msg = "⛔️ این محصول فقط با کیف پول قابل خرید است و موجودی کیف پول شما کافی نیست."
-            if wallet_used > 0:
-                msg += "\nمبلغ کسرشده از کیف پول شما بازگردانده شد."
-            await _safe_edit(call.message, msg)
-            await call.answer()
-            return
-
-        await state.set_state(BuyFlow.waiting_receipt)
-
-        after_buy_text = (await asyncio.to_thread(db.get_setting, "after_buy_text"))
-
-        text = f"{after_buy_text}\n\n"
-        if quantity > 1:
-            text += f"🔢 تعداد: {quantity} عدد\n"
-        if discount_amount:
-            text += f"🎟 تخفیف کد: {discount_amount:,} تومان\n"
-        if wallet_used:
-            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
-        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
-        text += "لطفاً روش پرداخت را انتخاب کنید:"
-
-        await _safe_edit(
-            call.message,
-            text, parse_mode="Markdown",
-            reply_markup=kb.payment_choice_kb(
-                crypto_payment.crypto_payment_available(db),
-                abangateway_payment.abangateway_payment_available(db),
-                custom_gateway_payment.list_enabled_gateways(db),
-                (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
-                card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
-                amount=remaining_amount,
-                db=db,
-                allowed_methods=allowed_methods,
-            ),
-        )
-        await call.answer()
+            await _safe_edit(
+                call.message,
+                "⛔️ خطای غیرمنتظره‌ای در پردازش سفارش رخ داد.\n"
+                "اگر مبلغی از کیف پول شما کسر شده بود، به‌طور کامل بازگردانده شد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+            )
+            try:
+                await call.answer()
+            except Exception:
+                pass
 
     @router.callback_query(F.data == "pay_card2card", BuyFlow.waiting_receipt)
     async def cb_pay_card2card_order(call: CallbackQuery, state: FSMContext):
@@ -1524,75 +1552,87 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id))
         await state.update_data(order_id=order_id, custom_volume_gb=volume_gb)
 
-        if order["final_price"] <= 0:
-            await state.clear()
-            server_row = (await asyncio.to_thread(db.get_panel_server, server["id"]))
-            try:
-                provider = get_provider(server_row)
-                result = await provider.create_user(username, volume_gb, duration_days)
-            except PanelUsernameTakenError:
-                (await asyncio.to_thread(db.reject_order, order_id))
-                await message.answer("❌ این نام کاربری تکراری است، یک نام دیگر انتخاب کنید.\nمبلغ به کیف پول بازگردانده شد.")
+        try:
+            if order["final_price"] <= 0:
+                await state.clear()
+                server_row = (await asyncio.to_thread(db.get_panel_server, server["id"]))
+                try:
+                    provider = get_provider(server_row)
+                    result = await provider.create_user(username, volume_gb, duration_days)
+                except PanelUsernameTakenError:
+                    (await asyncio.to_thread(db.reject_order, order_id))
+                    await message.answer("❌ این نام کاربری تکراری است، یک نام دیگر انتخاب کنید.\nمبلغ به کیف پول بازگردانده شد.")
+                    return
+                except Exception as e:
+                    (await asyncio.to_thread(db.reject_order, order_id))
+                    await message.answer(f"⛔️ خطا در ساخت کانفیگ روی پنل: {e}\nمبلغ به کیف پول بازگردانده شد.")
+                    return
+                (await asyncio.to_thread(db.approve_custom_config_order, order_id))
+                (await asyncio.to_thread(db.add_custom_config, 
+                    message.from_user.id, server["id"], result.username, volume_gb,
+                    duration_days, result.subscription_url, order_id=order_id, product_id=product_id,
+                ))
+                await message.answer(
+                    "✅ مبلغ سفارش شما به‌طور کامل از کیف پول پوشش داده شد.\n"
+                    "کانفیگ شما در پیام بعدی ارسال می‌شود 👇",
+                    reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+                )
+                await _send_inline_main_menu(message, message.from_user.id)
+                await deliver_config_to_user(
+                    message.bot, message.from_user.id, "کانفیگ شخصی",
+                    [result.subscription_url], final_price=0, order_id=order_id, db=db,
+                )
+                try:
+                    await _notify_admins_of_order(message.bot, order_id)
+                except Exception:
+                    pass
                 return
-            except Exception as e:
-                (await asyncio.to_thread(db.reject_order, order_id))
-                await message.answer(f"⛔️ خطا در ساخت کانفیگ روی پنل: {e}\nمبلغ به کیف پول بازگردانده شد.")
-                return
-            (await asyncio.to_thread(db.approve_custom_config_order, order_id))
-            (await asyncio.to_thread(db.add_custom_config, 
-                message.from_user.id, server["id"], result.username, volume_gb,
-                duration_days, result.subscription_url, order_id=order_id, product_id=product_id,
-            ))
-            await message.answer(
-                "✅ مبلغ سفارش شما به‌طور کامل از کیف پول پوشش داده شد.\n"
-                "کانفیگ شما در پیام بعدی ارسال می‌شود 👇",
-                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
-            )
-            await _send_inline_main_menu(message, message.from_user.id)
-            await deliver_config_to_user(
-                message.bot, message.from_user.id, "کانفیگ شخصی",
-                [result.subscription_url], final_price=0, order_id=order_id, db=db,
-            )
-            try:
-                await _notify_admins_of_order(message.bot, order_id)
-            except Exception:
-                pass
-            return
 
-        remaining_amount = order["final_price"]
-        if not (await asyncio.to_thread(db.has_any_payable_method, remaining_amount, None)):
-            if wallet_used > 0:
-                (await asyncio.to_thread(db.add_wallet_credit, message.from_user.id, wallet_used))
+            remaining_amount = order["final_price"]
+            if not (await asyncio.to_thread(db.has_any_payable_method, remaining_amount, None)):
+                # reject_order خودش مبلغ order["wallet_used"] را برمی‌گرداند؛ برگرداندن
+                # دستی اضافه‌ی قبلی این‌جا حذف شد چون باعث بازگشت دوبرابری می‌شد.
+                (await asyncio.to_thread(db.reject_order, order_id))
+                await state.clear()
+                await message.answer(
+                    "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
+                    + ("\nمبلغ کسرشده از کیف پول شما بازگردانده شد." if wallet_used > 0 else "")
+                )
+                return
+
+            await state.set_state(CustomConfigFlow.waiting_receipt)
+            text = (
+                f"🛠 نام کاربری: {escape_md(username)}\n"
+                f"📶 حجم: {volume_gb} گیگابایت\n"
+                f"⏳ مدت: {duration_days} روز\n\n"
+            )
+            if wallet_used:
+                text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
+            text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
+            text += "لطفاً روش پرداخت را انتخاب کنید:"
+            await message.answer(
+                text, parse_mode="Markdown",
+                reply_markup=kb.payment_choice_kb(
+                    crypto_payment.crypto_payment_available(db),
+                    abangateway_payment.abangateway_payment_available(db),
+                    custom_gateway_payment.list_enabled_gateways(db),
+                    (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
+                    card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
+                    amount=remaining_amount,
+                    db=db,
+                ),
+            )
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "خطای غیرمنتظره در فرآیند ساخت کانفیگ شخصی (سفارش #%s) برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+                order_id, message.from_user.id,
+            )
             (await asyncio.to_thread(db.reject_order, order_id))
             await state.clear()
             await message.answer(
-                "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
-                + ("\nمبلغ کسرشده از کیف پول شما بازگردانده شد." if wallet_used > 0 else "")
+                "⛔️ خطای غیرمنتظره‌ای در پردازش سفارش رخ داد.\n"
+                "اگر مبلغی از کیف پول شما کسر شده بود، به‌طور کامل بازگردانده شد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
             )
-            return
-
-        await state.set_state(CustomConfigFlow.waiting_receipt)
-        text = (
-            f"🛠 نام کاربری: {escape_md(username)}\n"
-            f"📶 حجم: {volume_gb} گیگابایت\n"
-            f"⏳ مدت: {duration_days} روز\n\n"
-        )
-        if wallet_used:
-            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
-        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
-        text += "لطفاً روش پرداخت را انتخاب کنید:"
-        await message.answer(
-            text, parse_mode="Markdown",
-            reply_markup=kb.payment_choice_kb(
-                crypto_payment.crypto_payment_available(db),
-                abangateway_payment.abangateway_payment_available(db),
-                custom_gateway_payment.list_enabled_gateways(db),
-                (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
-                card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
-                amount=remaining_amount,
-                db=db,
-            ),
-        )
 
     @router.callback_query(F.data == "pay_card2card", CustomConfigFlow.waiting_receipt)
     async def cb_pay_card2card_custom_config(call: CallbackQuery, state: FSMContext):
@@ -2859,51 +2899,63 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         ))
         order = (await asyncio.to_thread(db.get_order, order_id))
 
-        if order["final_price"] <= 0:
-            try:
-                result_text = await execute_renewal(db, order)
-            except RenewalError as e:
-                (await asyncio.to_thread(db.reject_order, order_id))
-                await edit_fn(f"⛔️ تمدید ناموفق بود: {e}\nمبلغ کسرشده از کیف پول شما بازگردانده شد.")
+        try:
+            if order["final_price"] <= 0:
+                try:
+                    result_text = await execute_renewal(db, order)
+                except RenewalError as e:
+                    (await asyncio.to_thread(db.reject_order, order_id))
+                    await edit_fn(f"⛔️ تمدید ناموفق بود: {e}\nمبلغ کسرشده از کیف پول شما بازگردانده شد.")
+                    return
+                (await asyncio.to_thread(db.approve_renewal_order, order_id))
+                await edit_fn(result_text)
+                item2 = _find_my_orders_item(user_tg_id, cb_id)
+                if item2:
+                    text = await _my_orders_item_text(item2)
+                    deletable = item2["kind"] in ("config", "custom")
+                    await send_fn(text, parse_mode="Markdown", reply_markup=kb.service_detail_kb(db, cb_id, item2["kind"], deletable, **_svc_kb_kwargs(item2)))
                 return
-            (await asyncio.to_thread(db.approve_renewal_order, order_id))
-            await edit_fn(result_text)
-            item2 = _find_my_orders_item(user_tg_id, cb_id)
-            if item2:
-                text = await _my_orders_item_text(item2)
-                deletable = item2["kind"] in ("config", "custom")
-                await send_fn(text, parse_mode="Markdown", reply_markup=kb.service_detail_kb(db, cb_id, item2["kind"], deletable, **_svc_kb_kwargs(item2)))
-            return
 
-        remaining_amount = order["final_price"]
-        if not (await asyncio.to_thread(db.has_any_payable_method, remaining_amount, None)):
-            (await asyncio.to_thread(db.reject_order, order_id))
+            remaining_amount = order["final_price"]
+            if not (await asyncio.to_thread(db.has_any_payable_method, remaining_amount, None)):
+                (await asyncio.to_thread(db.reject_order, order_id))
+                await edit_fn(
+                    "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
+                    + ("\nمبلغ کسرشده از کیف پول شما بازگردانده شد." if wallet_used > 0 else ""),
+                )
+                return
+
+            await state.set_state(RenewalFlow.waiting_receipt)
+            await state.update_data(order_id=order_id, renew_cb_id=cb_id)
+
+            text = f"🔄 {_RENEW_MODE_LABEL[mode]} - {summary_label}\n\n"
+            if wallet_used:
+                text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
+            text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
+            text += "لطفاً روش پرداخت را انتخاب کنید:"
             await edit_fn(
-                "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
-                + ("\nمبلغ کسرشده از کیف پول شما بازگردانده شد." if wallet_used > 0 else ""),
+                text, parse_mode="Markdown",
+                reply_markup=kb.payment_choice_kb(
+                    crypto_payment.crypto_payment_available(db),
+                    abangateway_payment.abangateway_payment_available(db),
+                    custom_gateway_payment.list_enabled_gateways(db),
+                    (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
+                    card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
+                    amount=remaining_amount,
+                    db=db,
+                ),
             )
-            return
-
-        await state.set_state(RenewalFlow.waiting_receipt)
-        await state.update_data(order_id=order_id, renew_cb_id=cb_id)
-
-        text = f"🔄 {_RENEW_MODE_LABEL[mode]} - {summary_label}\n\n"
-        if wallet_used:
-            text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
-        text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
-        text += "لطفاً روش پرداخت را انتخاب کنید:"
-        await edit_fn(
-            text, parse_mode="Markdown",
-            reply_markup=kb.payment_choice_kb(
-                crypto_payment.crypto_payment_available(db),
-                abangateway_payment.abangateway_payment_available(db),
-                custom_gateway_payment.list_enabled_gateways(db),
-                (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
-                card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
-                amount=remaining_amount,
-                db=db,
-            ),
-        )
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "خطای غیرمنتظره در فرآیند تمدید سرویس (سفارش #%s) برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+                order_id, user_tg_id,
+            )
+            (await asyncio.to_thread(db.reject_order, order_id))
+            await state.clear()
+            await edit_fn(
+                "⛔️ خطای غیرمنتظره‌ای در پردازش تمدید رخ داد.\n"
+                "اگر مبلغی از کیف پول شما کسر شده بود، به‌طور کامل بازگردانده شد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+            )
 
     @router.callback_query(F.data.startswith("svc_renew:"))
     async def cb_service_renew_start(call: CallbackQuery, state: FSMContext):

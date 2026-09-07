@@ -15,8 +15,10 @@
 import base64
 import binascii
 import html as html_lib
+import json
 import logging
 import re
+import urllib.parse
 from datetime import datetime, timezone
 
 import aiohttp
@@ -33,6 +35,234 @@ _CONFIG_SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hyst
 # برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند نه ابتدای خط؛ این regex (عیناً
 # مثل geo_scan._CONFIG_URI_RE) برای استخراج از وسط چنین متنی استفاده می‌شود.
 _CONFIG_URI_RE = re.compile(r"(?:vmess|vless|trojan|hysteria2|hy2|hysteria|tuic|ssr|ss)://[^\s\"'<>]+")
+
+
+# ------------------------------------------------------- فرمت JSON کامل ---
+# بعضی پنل‌ها (تایید شده از لاگ واقعی production: user.coloner.ir:2053) به‌جای
+# لیست لینک‌های vmess://... یک کانفیگ *کامل* Xray-core به فرمت JSON برمی‌گردانند
+# (شامل کلیدهای سطح‌بالای log/policy/inbounds/outbounds و...). این فرمت هیچ
+# رشته‌ی vless://... در خودش ندارد، پس هیچ regex/base64-decode‌ای نمی‌تواند
+# «کانفیگ تکی» ازش دربیاورد؛ باید از روی فیلدهای outbounds[] یک لینک استاندارد
+# (قابل کپی/وارد کردن در v2rayNG و مشابه) از نو ساخت.
+def _net_params_from_stream(stream: dict, host: str) -> dict:
+    stream = stream or {}
+    security = (stream.get("security") or "none").lower()
+    network = (stream.get("network") or "tcp").lower()
+    ws_path, ws_host, header_type = "/", host, "none"
+    if network in ("ws", "httpupgrade", "h2"):
+        key = {"ws": "wsSettings", "httpupgrade": "httpupgradeSettings", "h2": "httpSettings"}[network]
+        settings = stream.get(key) or {}
+        ws_path = settings.get("path") or "/"
+        headers = settings.get("headers") or {}
+        ws_host = headers.get("Host") or settings.get("host") or host
+    elif network == "grpc":
+        grpc_settings = stream.get("grpcSettings") or {}
+        ws_path = grpc_settings.get("serviceName") or ""
+    elif network == "tcp":
+        header = (stream.get("tcpSettings") or {}).get("header") or {}
+        header_type = (header.get("type") or "none").lower()
+        if header_type == "http":
+            request = header.get("request") or {}
+            host_hdr = (request.get("headers") or {}).get("Host")
+            if isinstance(host_hdr, list) and host_hdr:
+                ws_host = host_hdr[0]
+            path_hdr = request.get("path")
+            if isinstance(path_hdr, list) and path_hdr:
+                ws_path = path_hdr[0]
+
+    sni = ws_host or host
+    reality = {}
+    if security == "tls":
+        sni = (stream.get("tlsSettings") or {}).get("serverName") or sni
+    elif security == "reality":
+        rs = stream.get("realitySettings") or {}
+        sni = rs.get("serverName") or sni
+        reality = {
+            "pbk": rs.get("publicKey") or "", "sid": rs.get("shortId") or "",
+            "fp": rs.get("fingerprint") or "chrome", "spx": rs.get("spiderX") or "",
+        }
+    return {
+        "security": security, "network": network, "sni": sni,
+        "ws_path": ws_path, "ws_host": ws_host, "header_type": header_type, "reality": reality,
+    }
+
+
+def _vmess_uri(host, port, uuid_, remark, net: dict) -> str:
+    payload = {
+        "v": "2", "ps": remark or host, "add": host, "port": str(port),
+        "id": uuid_, "aid": "0", "scy": "auto",
+        "net": net["network"], "type": net.get("header_type", "none"),
+        "host": net["ws_host"], "path": net["ws_path"],
+        "tls": "tls" if net["security"] == "tls" else ("reality" if net["security"] == "reality" else ""),
+        "sni": net["sni"],
+    }
+    encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    return f"vmess://{encoded}"
+
+
+def _vless_or_trojan_uri(scheme: str, host, port, auth, remark, net: dict) -> str:
+    params = {"type": net["network"], "security": net["security"] or "none"}
+    if scheme == "vless":
+        params["encryption"] = "none"
+    if net["security"] in ("tls", "reality"):
+        params["sni"] = net["sni"]
+    if net["network"] in ("ws", "httpupgrade", "h2"):
+        params["host"] = net["ws_host"]
+        params["path"] = net["ws_path"]
+    elif net["network"] == "grpc":
+        params["serviceName"] = net["ws_path"]
+    if net["security"] == "reality":
+        r = net["reality"]
+        params.update({"pbk": r["pbk"], "sid": r["sid"], "fp": r["fp"]})
+        if r.get("spx"):
+            params["spx"] = r["spx"]
+    query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    frag = urllib.parse.quote(remark or host)
+    return f"{scheme}://{urllib.parse.quote(str(auth), safe='')}@{host}:{port}?{query}#{frag}"
+
+
+def _ss_uri(host, port, method, password, remark) -> str:
+    creds = base64.b64encode(f"{method}:{password}".encode("utf-8")).decode("ascii").rstrip("=")
+    frag = urllib.parse.quote(remark or host)
+    return f"ss://{creds}@{host}:{port}#{frag}"
+
+
+def _profile_remark(profile: dict):
+    for key in ("remarks", "remark", "ps", "name", "title", "alias", "profile_title"):
+        val = profile.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _xray_outbound_to_uri(ob: dict, profile_remark=None):
+    protocol = (ob.get("protocol") or "").lower()
+    settings = ob.get("settings") or {}
+    tag = str(ob.get("tag") or "").strip()
+
+    if protocol in ("vmess", "vless"):
+        vnext = settings.get("vnext") or []
+        if not vnext or not isinstance(vnext[0], dict):
+            return None
+        v = vnext[0]
+        host = str(v.get("address") or "").strip()
+        port = v.get("port")
+        if not host or not port:
+            return None
+        users = v.get("users") or []
+        user0 = users[0] if users and isinstance(users[0], dict) else {}
+        uuid_ = user0.get("id")
+        if not uuid_:
+            return None
+        email = user0.get("email") if isinstance(user0.get("email"), str) else None
+        remark = (email or "").strip() or profile_remark or tag or host
+        net = _net_params_from_stream(ob.get("streamSettings"), host)
+        if protocol == "vmess":
+            return _vmess_uri(host, port, uuid_, remark, net)
+        return _vless_or_trojan_uri("vless", host, port, uuid_, remark, net)
+
+    if protocol in ("trojan", "shadowsocks"):
+        servers = settings.get("servers") or []
+        if not servers or not isinstance(servers[0], dict):
+            return None
+        s = servers[0]
+        host = str(s.get("address") or "").strip()
+        port = s.get("port")
+        if not host or not port:
+            return None
+        email = s.get("email") if isinstance(s.get("email"), str) else None
+        remark = (email or "").strip() or profile_remark or tag or host
+        if protocol == "trojan":
+            password = s.get("password")
+            if not password:
+                return None
+            net = _net_params_from_stream(ob.get("streamSettings"), host)
+            return _vless_or_trojan_uri("trojan", host, port, password, remark, net)
+        method = s.get("method")
+        password = s.get("password")
+        if not method or not password:
+            return None
+        return _ss_uri(host, port, method, password, remark)
+
+    return None  # freedom/blackhole/dns و بقیه‌ی outboundهای غیر پروکسی
+
+
+def _singbox_outbound_to_uri(ob: dict, profile_remark=None):
+    otype = (ob.get("type") or "").lower()
+    if otype not in ("vmess", "vless", "trojan", "shadowsocks"):
+        return None
+    host = str(ob.get("server") or "").strip()
+    port = ob.get("server_port")
+    if not host or not port:
+        return None
+    tag = str(ob.get("tag") or "").strip()
+    remark = profile_remark or tag or host
+    tls = ob.get("tls") or {}
+    security = "tls" if tls.get("enabled") else ("reality" if (tls.get("reality") or {}).get("enabled") else "none")
+    transport = ob.get("transport") or {}
+    ttype = (transport.get("type") or "tcp").lower()
+    net = {
+        "security": security, "network": ttype,
+        "sni": tls.get("server_name") or host,
+        "ws_path": transport.get("path") or "/",
+        "ws_host": (transport.get("headers") or {}).get("Host") or host,
+        "header_type": "none", "reality": {},
+    }
+    if security == "reality":
+        rs = tls.get("reality") or {}
+        net["reality"] = {
+            "pbk": rs.get("public_key") or "", "sid": rs.get("short_id") or "",
+            "fp": (tls.get("utls") or {}).get("fingerprint") or "chrome", "spx": "",
+        }
+    if otype == "vmess":
+        uuid_ = ob.get("uuid")
+        if not uuid_:
+            return None
+        return _vmess_uri(host, port, uuid_, remark, net)
+    if otype == "vless":
+        uuid_ = ob.get("uuid")
+        if not uuid_:
+            return None
+        return _vless_or_trojan_uri("vless", host, port, uuid_, remark, net)
+    if otype == "trojan":
+        password = ob.get("password")
+        if not password:
+            return None
+        return _vless_or_trojan_uri("trojan", host, port, password, remark, net)
+    if otype == "shadowsocks":
+        method, password = ob.get("method"), ob.get("password")
+        if not method or not password:
+            return None
+        return _ss_uri(host, port, method, password, remark)
+    return None
+
+
+def _full_json_configs_to_uris(text: str) -> list:
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+
+    if isinstance(data, dict):
+        profiles = [data]
+    elif isinstance(data, list):
+        profiles = [p for p in data if isinstance(p, dict)]
+    else:
+        return []
+
+    out = []
+    for profile in profiles:
+        outbounds = profile.get("outbounds")
+        if not isinstance(outbounds, list):
+            continue
+        remark = _profile_remark(profile)
+        for ob in outbounds:
+            if not isinstance(ob, dict):
+                continue
+            uri = _xray_outbound_to_uri(ob, remark) if "protocol" in ob else _singbox_outbound_to_uri(ob, remark)
+            if uri:
+                out.append(uri)
+    return out
 
 
 def _session() -> aiohttp.ClientSession:
@@ -86,7 +316,22 @@ async def fetch_individual_links(sub_url: str) -> list:
 
     _log.info("fetch_individual_links: %d بایت خام دریافت شد از %s؛ نمونه: %r", len(raw), sub_url, raw[:200])
 
+    # حالت ۱: خودِ متن خام، یک کانفیگ کامل Xray-core/sing-box به فرمت JSON است
+    # (نه لیست لینک) - این حالت اصلاً base64 نیست، پس باید قبل از تلاش برای
+    # decode روی متن خام امتحان شود.
+    json_uris = _full_json_configs_to_uris(raw.strip())
+    if json_uris:
+        return json_uris
+
     decoded = _b64_decode(raw.strip())
+
+    # حالت ۲: خودِ محتوای base64-دیکدشده یک JSON کامل است (بعضی پنل‌ها حتی
+    # این فرمت رو هم یه‌بار base64 می‌کنند).
+    if decoded != raw.strip():
+        json_uris = _full_json_configs_to_uris(decoded.strip())
+        if json_uris:
+            return json_uris
+
     lines = [ln.strip() for ln in decoded.splitlines() if ln.strip()]
     out = [ln for ln in lines if ln.startswith(_CONFIG_SCHEMES)]
     if out:
