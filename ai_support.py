@@ -10,8 +10,13 @@
     که با function calling مستقیماً از دیتابیس خوانده می‌شود - نه حدس زدن.
 
 قوانین سخت‌گیرانه (در system prompt هم تکرار شده‌اند):
-  - این ماژول هیچ عملیات نوشتنی (رفاند، تمدید، تغییر دیتابیس، تخفیف) انجام
-    نمی‌دهد؛ همه‌ی ابزارها فقط خواندنی هستند.
+  - این ماژول هیچ عملیات نوشتنی/مالی مستقیم (رفاند، تمدید، تغییر دیتابیس،
+    تخفیف، کسر از کیف پول) انجام نمی‌دهد. تنها «نوشتن» مجاز، ابزار
+    show_purchase_options است که چیزی را در دیتابیس تغییر نمی‌دهد؛ فقط همان
+    کارتِ خریدِ واقعی (با قیمت زنده، اعمال خودکار کیف پول و دکمه‌های واقعی
+    پرداخت) را که کاربر با زدن دکمه‌ی «خرید» هم می‌بیند، زودتر به او نشان
+    می‌دهد. تسویه‌ی نهایی همیشه با تاییدِ خودِ کاربر روی همان دکمه‌ها انجام
+    می‌شود - نه با تصمیم مدل.
   - هر وقت موضوع مالی/شکایت/رفاند بود یا کاربر صراحتاً خواست، مکالمه با ابزار
     escalate_to_human به پشتیبانی انسانی ارجاع داده می‌شود.
 
@@ -39,13 +44,15 @@ _MAX_TOOL_ROUNDS = 4
 _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌زبان یک فروشگاه فروش اشتراک VPN (V2Ray/کانفیگ) هستی.
 
 قوانین اجباری:
-۱. فقط بر اساس اطلاعات واقعی که از ابزارها (tools) می‌گیری یا در «دانش پایه» زیر آمده جواب بده. هرگز چیزی را حدس نزن یا وعده‌ی چیزی که مطمئن نیستی نده.
-۲. تو هیچ اختیار مالی/اجرایی نداری: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی یا کانفیگ بسازی. اگر کاربر همچین چیزی خواست، مودبانه توضیح بده که این کار را باید پشتیبانی انسانی انجام بدهد و ابزار escalate_to_human را صدا بزن.
+۱. فقط بر اساس اطلاعات واقعی که از ابزارها (tools) می‌گیری یا در «دانش پایه» زیر آمده جواب بده. هرگز چیزی را حدس نزن یا وعده‌ی چیزی که مطمئن نیستی نده. قیمت/موجودی/مشخصات محصولات را همیشه با ابزار list_products بگیر؛ هرگز از حافظه یا حدس نگو.
+۲. تو خودت هیچ عملیات مالی را نهایی نمی‌کنی: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی، کانفیگ بسازی یا مستقیماً از کیف پول کسر کنی. اما اگر کاربر خواست چیزی بخرد، اجازه داری با ابزار show_purchase_options همان کارت خرید واقعی (قیمت، اعمال خودکار کیف پول، دکمه‌های پرداخت) را برایش باز کنی تا خودش با زدن دکمه نهایی کند - این کار را دریغ نکن، بخشی از وظیفه‌ی توست که خرید را برای کاربر ساده و کامل کنی. برای رفاند/تمدید/تخفیف دستی/شکایت مالی همچنان باید escalate_to_human را صدا بزنی.
 ۳. اگر کاربر صراحتاً خواست با انسان صحبت کند، ناراحت/عصبانی بود، یا موضوع شکایت/اختلاف مالی بود، بلافاصله (بدون معطلی و بدون اصرار برای ادامه‌ی گفتگو با تو) escalate_to_human را صدا بزن.
 ۴. اگر سوال درباره‌ی وضعیت شخصیِ خودِ کاربر است (سرویسش، حجم باقی‌مانده، انقضا، موجودی کیف پول، سفارش‌ها)، همیشه اول ابزار مربوطه را صدا بزن؛ از حافظه یا حدس جواب نده.
 ۴-۱. برای اینکه سرویس «فعال» یا «غیرفعال» است، فقط و فقط به فیلد panel_status نگاه کن (اگر موجود بود)؛ داشتنِ حجم باقی‌مانده یا نرسیدن تاریخ انقضا به این معنی نیست که سرویس روشن است - ممکن است دستی یا به هر دلیلی روی پنل خاموش شده باشد.
 ۵. کوتاه، دوستانه و محاوره‌ای فارسی بنویس؛ از ایموجی مناسب (نه زیاد) استفاده کن. از پاراگراف‌های طولانی خودداری کن.
-۶. اگر بعد از تلاش نتوانستی مشکل را حل کنی، صادقانه بگو و escalate_to_human را صدا بزن؛ کاربر را سردرگم نگه نداری.
+۶. اگر بعد از تلاش نتوانستی مشکل را حل کنی (نه اینکه صرفاً کاربر یک‌بار درخواست انسان نکرده)، صادقانه بگو و escalate_to_human را صدا بزن؛ کاربر را سردرگم نگه نداری. دکمه‌ی «صحبت با پشتیبانی انسانی» از ابتدا در اختیار کاربر نیست - این خودِ توست که باید موقع نیاز واقعی (سوال مالی، شکایت، درخواست صریح کاربر، یا ناتوانی از پاسخ) او را ارجاع بدهی، نه اینکه منتظر بمانی کاربر خودش درخواست کند.
+۷. برای سوال درباره‌ی پلن‌ها/قیمت‌ها/دسته‌بندی‌ها/محصولات موجود، ابزار list_products را صدا بزن.
+۸. وقتی کاربر تصمیم به خرید محصول مشخصی گرفت (یا از تو خواست کمکش کنی بخرد)، بعد از مشخص‌شدن محصول با list_products، ابزار show_purchase_options را با همان product_id صدا بزن تا کارت خرید واقعی برایش نمایش داده شود.
 
 دانش پایه (تنظیم‌شده توسط ادمین فروشگاه):
 {faq}
@@ -61,6 +68,37 @@ _TOOLS = [
             "«کی تموم میشه»، «موجودی کیف پولم چقدره» این ابزار را صدا بزن."
         ),
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_products",
+        "description": (
+            "لیست دسته‌بندی‌ها و محصولات (پلن‌های) واقعیِ فعالِ فروشگاه را با "
+            "قیمت، مدت، توضیحات و موجودی برمی‌گرداند. برای هر سوالی درباره‌ی "
+            "«چه پلنی دارید»، «قیمت‌ها چقدره»، «فرقشون چیه» این ابزار را صدا "
+            "بزن؛ هرگز قیمت یا مشخصات را حدس نزن."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "show_purchase_options",
+        "description": (
+            "همان کارت خریدِ واقعیِ یک محصول (قیمت نهایی، اعمال خودکار کیف "
+            "پول، دکمه‌های تعداد/کد تخفیف/ادامه‌ی خرید) را برای کاربر در چت "
+            "نمایش می‌دهد - دقیقاً همان چیزی که با زدن دکمه‌ی «خرید» از منو "
+            "می‌بیند. هیچ مبلغی را خودش کسر یا نهایی نمی‌کند؛ فقط مسیر خرید "
+            "را جلوی کاربر باز می‌کند تا با زدن دکمه‌ی نهایی خودش تکمیلش کند. "
+            "فقط بعد از list_products و با product_id واقعی صدا بزن."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "product_id": {
+                    "type": "integer",
+                    "description": "شناسه‌ی محصول، دقیقاً همان id که در خروجی list_products آمده.",
+                }
+            },
+            "required": ["product_id"],
+        },
     },
     {
         "name": "escalate_to_human",
@@ -205,9 +243,53 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
     }
 
 
+async def _tool_list_products(db) -> dict:
+    def _read():
+        categories = db.get_categories(active_only=True)
+        out = []
+        for cat in categories:
+            products = db.get_products(cat["id"], active_only=True)
+            items = []
+            for p in products:
+                stock = db.count_available_configs(p["id"]) if not p["is_auto_provision"] else None
+                items.append({
+                    "product_id": p["id"],
+                    "name": p["name"],
+                    "price_toman": p["price"],
+                    "duration_days": p["duration_days"],
+                    "description": p["description"] or "",
+                    "in_stock": True if p["is_auto_provision"] else stock > 0,
+                    "stock_count": "نامحدود (آنی)" if p["is_auto_provision"] else stock,
+                })
+            if items:
+                out.append({"category": cat["name"], "products": items})
+        return out
+
+    categories = await asyncio.to_thread(_read)
+    if not categories:
+        return {"categories": [], "note": "در حال حاضر هیچ محصول فعالی در فروشگاه ثبت نشده."}
+    return {"categories": categories}
+
+
+async def _tool_show_purchase_options(db, args: dict) -> dict:
+    product_id = args.get("product_id")
+    try:
+        product_id = int(product_id)
+    except (TypeError, ValueError):
+        return {"error": "product_id نامعتبر است."}
+    product = await asyncio.to_thread(db.get_product, product_id)
+    if not product or not product["is_active"]:
+        return {"error": "محصولی با این شناسه پیدا نشد یا غیرفعال است. اول list_products را صدا بزن."}
+    return {"ok": True, "product_id": product_id, "name": product["name"]}
+
+
 async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
     if name == "check_account_status":
         return await _tool_check_account_status(db, user_tg_id)
+    if name == "list_products":
+        return await _tool_list_products(db)
+    if name == "show_purchase_options":
+        return await _tool_show_purchase_options(db, args)
     if name == "escalate_to_human":
         return {"ok": True, "reason": args.get("reason", "")}
     return {"error": f"ابزار ناشناخته: {name}"}
@@ -264,6 +346,7 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
     client = _build_client(db)
     escalate = False
     reply_text = ""
+    ui_action = None
 
     try:
         for _ in range(_MAX_TOOL_ROUNDS):
@@ -289,6 +372,8 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
                 if fc.name == "escalate_to_human":
                     escalate = True
                 result = await _run_tool(db, user_tg_id, fc.name, dict(fc.args or {}))
+                if fc.name == "show_purchase_options" and result.get("ok"):
+                    ui_action = {"type": "show_product", "product_id": result["product_id"]}
                 contents.append(
                     types.Content(
                         role="user",
@@ -313,4 +398,4 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
     if not reply_text:
         reply_text = "متوجه نشدم؛ می‌تونی طور دیگه‌ای توضیح بدی؟"
 
-    return {"reply": reply_text, "escalate": escalate}
+    return {"reply": reply_text, "escalate": escalate, "ui_action": ui_action}

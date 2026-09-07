@@ -4106,6 +4106,25 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         await message.answer(result["reply"], reply_markup=kb.ai_chat_kb())
 
+        # اگر دستیار تشخیص داد کاربر می‌خواهد محصولی بخرد، همان کارت خرید
+        # واقعی (قیمت زنده + اعمال خودکار کیف پول + دکمه‌های واقعی پرداخت) را
+        # درست مثل مسیر عادی «خرید» نشانش بده. هیچ مبلغی اینجا کسر نمی‌شود؛
+        # تسویه فقط با زدن خودِ کاربر روی دکمه‌های زیر همین کارت انجام می‌شود.
+        ui_action = result.get("ui_action")
+        if ui_action and ui_action.get("type") == "show_product":
+            product_id = ui_action.get("product_id")
+            product = await asyncio.to_thread(db.get_product, product_id)
+            if product:
+                stock = await asyncio.to_thread(db.count_available_configs, product_id)
+                wallet_credit = await asyncio.to_thread(db.get_wallet_credit, user.id)
+                if product["is_auto_provision"] or stock > 0:
+                    text = _product_confirm_text(product, 1, stock, wallet_credit)
+                    await message.answer(
+                        text, reply_markup=kb.product_confirm_kb(db, product_id, 1, max(stock, 1))
+                    )
+                else:
+                    await message.answer("⛔️ موجودی این محصول در حال حاضر تمام شده.")
+
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 
     @router.callback_query(F.data == "tickets_new")

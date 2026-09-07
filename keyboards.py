@@ -725,11 +725,15 @@ def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
 
 
 def ai_chat_kb() -> InlineKeyboardMarkup:
-    """کیبورد پایین گفتگو با دستیار هوشمند: همیشه یک راه سریع برای انتقال به
-    انسان در دسترس باشد."""
+    """کیبورد پایین گفتگو با دستیار هوشمند.
+
+    عمداً از ابتدا دکمه‌ی «صحبت با پشتیبانی انسانی» را نشان نمی‌دهیم: دستیار
+    باید اول تلاش کند خودش جواب بدهد و فقط وقتی واقعاً نتوانست (یا موضوع
+    مالی/شکایت بود یا کاربر صریحاً خواست) خودش ارجاع را با ابزار
+    escalate_to_human انجام می‌دهد (نگاه کن به ai_support.py و
+    handlers_user.cb_ai_escalate/ai_chat_receive)."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="👤 صحبت با پشتیبانی انسانی", callback_data="ai_escalate")],
             [InlineKeyboardButton(text="❌ پایان گفتگو", callback_data="ai_end")],
         ]
     )
