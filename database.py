@@ -270,6 +270,7 @@ ACCOUNT_TOGGLE_KEYS = [
     ("svc_show_auto_renew", "🔄 دکمه «تمدید خودکار»", "1"),
     ("svc_show_transfer", "👤 دکمه «انتقال کانفیگ»", "1"),
     ("svc_show_history", "📜 دکمه «تاریخچه سرویس»", "1"),
+    ("svc_show_inquiry", "🔍 دکمه «استعلام»", "1"),
 ]
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 

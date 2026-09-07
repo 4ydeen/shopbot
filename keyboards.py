@@ -345,6 +345,11 @@ def my_order_error_back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت به لیست", callback_data="mo_back")]])
 
 
+def service_inquiry_kb(cb_id: str) -> InlineKeyboardMarkup:
+    """کیبورد صفحه‌ی «استعلام»: فقط یک دکمه‌ی بازگشت به صفحه‌ی جزئیات همان سرویس."""
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"mo_v:{cb_id}")]])
+
+
 def service_detail_kb(db, cb_id: str, kind: str, deletable: bool, show_links: bool = False,
                        enabled: bool = True, auto_renew: bool = False, is_test: bool = False) -> InlineKeyboardMarkup:
     """دکمه‌های صفحه‌ی جزئیات یک سرویس.
@@ -399,6 +404,12 @@ def service_detail_kb(db, cb_id: str, kind: str, deletable: bool, show_links: bo
             row7.append(InlineKeyboardButton(text="📜 تاریخچه سرویس", callback_data=f"svc_hist:{cb_id}"))
         if row7:
             rows.append(row7)
+    if kind == "custom":
+        row_inquiry = []
+        if on("svc_show_inquiry"):
+            row_inquiry.append(InlineKeyboardButton(text="🔍 استعلام", callback_data=f"svc_inquiry:{cb_id}"))
+        if row_inquiry:
+            rows.append(row_inquiry)
     if kind in ("custom", "config"):
         row4 = []
         if on("svc_show_update_config"):

@@ -13,6 +13,7 @@ import random
 import re
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
@@ -2056,6 +2057,21 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     _MO_STATUS_MAP = {"pending": "⏳ در انتظار بررسی", "approved": "✅ تایید شده", "rejected": "❌ رد شده"}
     _MO_STATUS_ICON = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
 
+    _PANEL_STATUS_MAP = {
+        "active": "🟢 فعال",
+        "disabled": "🔴 غیرفعال",
+        "limited": "🟡 محدود شده (اتمام حجم)",
+        "expired": "🔴 منقضی شده",
+        "on_hold": "⏸ در حال انتظار",
+    }
+
+    def _fmt_bytes(n: int) -> str:
+        n = n or 0
+        gb = n / (1024 ** 3)
+        if gb >= 1:
+            return f"{gb:.2f} گیگابایت"
+        return f"{n / (1024 ** 2):.2f} مگابایت"
+
     def _my_orders_items(user_tg_id: int):
         """هر آیتم یک ردیف/دکمه‌ی جدا در منوست: یک کانفیگ محصول، یک کانفیگ شخصی،
         یا (فقط برای سفارش‌های در انتظار بررسی که هنوز کانفیگی ندارند) خود
@@ -2285,6 +2301,81 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             text = text[:3950] + "\n\n… (فهرست کوتاه شد؛ تعداد کانفیگ‌ها زیاد است)"
         await _safe_edit(call.message, text, parse_mode="Markdown", reply_markup=markup)
         await call.answer("✅ اطلاعات بروزرسانی شد.")
+
+    @router.callback_query(F.data.startswith("svc_inquiry:"))
+    async def cb_service_inquiry(call: CallbackQuery):
+        """دکمه‌ی «🔍 استعلام»: فقط برای سرویس‌های kind='custom' (متصل به یک پنل
+        VPN واقعی) نمایش داده می‌شود. برخلاف متن پیش‌فرض صفحه‌ی جزئیات که فقط
+        یک خلاصه‌ی ترکیبی از fetch_sub_info نشان می‌دهد، این صفحه هر فیلد
+        (وضعیت/آپلود/دانلود/حجم کل/حجم باقی‌مانده/تاریخ اتمام/روز باقی‌مانده)
+        را جدا و مطابق کارتی که ادمین در پنل‌های دیگر (مثلاً مینی‌اپ) می‌بیند
+        نمایش می‌دهد."""
+        if (await asyncio.to_thread(db.get_setting, "svc_show_inquiry", "1")) != "1":
+            await call.answer("این قابلیت غیرفعال است.", show_alert=True)
+            return
+        cb_id = call.data.split(":", 1)[1]
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item or item["kind"] != "custom":
+            await call.answer("این مورد یافت نشد (شاید قبلاً حذف شده).", show_alert=True)
+            await _show_my_orders_list(call.message, call.from_user.id, edit=True)
+            return
+        cc = item["custom"]
+        if not cc["panel_server_id"] or not cc["subscription_url"]:
+            await call.answer("این سرویس به پنل VPN متصل نیست.", show_alert=True)
+            return
+        await call.answer()
+
+        config_name = cc["display_name"] or cc["username"]
+        status_line = "❔ نامشخص"
+        server = await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])
+        if server and server["is_active"]:
+            try:
+                provider = get_provider(server)
+                usage = await provider.get_user_usage(cc["username"])
+                status_line = _PANEL_STATUS_MAP.get(usage.get("status"), usage.get("status") or "❔ نامشخص")
+            except Exception:
+                logging.getLogger("handlers_user").exception(
+                    "استعلام وضعیت سرویس «%s» از پنل ناموفق بود.", cc["username"],
+                )
+
+        info = await fetch_sub_info(cc["subscription_url"])
+        if not info.get("ok"):
+            text = (
+                f"🎫 نام کانفیگ: {config_name}\n"
+                f"⚡️ وضعیت: {status_line}\n\n"
+                "⚠️ دریافت اطلاعات مصرف از سرور امکان‌پذیر نبود."
+            )
+        else:
+            upload, download, total = info["upload"], info["download"], info["total"]
+            used = upload + download
+            if total > 0:
+                remaining_line = _fmt_bytes(max(0, total - used))
+                total_line = _fmt_bytes(total)
+            else:
+                remaining_line = "نامحدود"
+                total_line = "نامحدود"
+
+            if info["expire"]:
+                exp_dt = datetime.fromtimestamp(info["expire"], tz=timezone.utc)
+                expire_line = to_jalali_str(exp_dt, with_time=True)
+                days_left = max(0, (exp_dt - datetime.now(timezone.utc)).days)
+                days_left_line = str(days_left)
+            else:
+                expire_line = "نامحدود"
+                days_left_line = "نامحدود"
+
+            text = (
+                f"📋 مشخصات این لحظه سرویس:\n\n"
+                f"⚡️ وضعیت: {status_line}\n"
+                f"🎫 نام کانفیگ: {config_name}\n"
+                f"⬆️ آپلود: {_fmt_bytes(upload)}\n"
+                f"⬇️ دانلود: {_fmt_bytes(download)}\n"
+                f"🔋 حجم کل: {total_line}\n"
+                f"🪫 حجم باقی‌مانده: {remaining_line}\n"
+                f"📅 تاریخ اتمام: {expire_line}\n"
+                f"⏳ روز باقی‌مانده: {days_left_line}"
+            )
+        await _safe_edit(call.message, text, reply_markup=kb.service_inquiry_kb(cb_id))
 
     @router.callback_query(F.data.startswith("mo_links:"))
     async def cb_my_orders_links(call: CallbackQuery):
