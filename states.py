@@ -26,6 +26,10 @@ class TicketFlow(StatesGroup):
     waiting_message = State()
 
 
+class AIChatFlow(StatesGroup):
+    chatting = State()
+
+
 class TicketReplyFlow(StatesGroup):
     waiting_message = State()
 
@@ -40,6 +44,15 @@ class AdminTicketReplyFlow(StatesGroup):
 
 class AdminSetSupportContact(StatesGroup):
     waiting_id = State()
+
+
+class AdminAIFaqAdd(StatesGroup):
+    waiting_question = State()
+    waiting_answer = State()
+
+
+class AdminSetGeminiKey(StatesGroup):
+    waiting_key = State()
 
 
 class AdminAddCategory(StatesGroup):

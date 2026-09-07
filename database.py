@@ -107,6 +107,17 @@ DEFAULT_SETTINGS = {
     # پشتیبانی (از طریق لینک tg://user?id=... بدون نیاز به یوزرنیم عمومی باز می‌شود).
     "support_admin_id": "",
     "ticket_intro_text": "لطفاً موضوع تیکت را در یک خط ارسال کنید:",
+    # دستیار پشتیبانی هوش مصنوعی (Gemini) - در صورت خالی بودن GEMINI_API_KEY
+    # در .env، این بخش حتی اگر "1" باشد غیرفعال می‌ماند.
+    "ai_support_enabled": "1",
+    "ai_support_intro_text": (
+        "🤖 دستیار هوشمند پشتیبانی\n"
+        "سوالت رو بپرس؛ سعی می‌کنم با بررسی وضعیت واقعی حسابت سریع جوابت رو بدم.\n"
+        "هر وقت خواستی با پشتیبانی انسانی صحبت کنی، دکمه‌ی زیر رو بزن."
+    ),
+    # دانش پایه‌ای که به دستیار هوشمند داده می‌شود (به‌صورت لیست سوال/جواب،
+    # از پنل مدیریت → «ادمین و دسترسی» → «دستیار هوشمند (سوالات متداول)»
+    # قابل افزودن/حذف است - جدول ai_faq_items).
     "after_buy_text": "برای تکمیل خرید، مبلغ را به شماره کارت زیر واریز کرده و سپس عکس رسید را ارسال کنید:",
     # رنگ دکمه‌ها (ویژگی جدید Bot API 9.4 / فوریه 2026)
     # مقادیر مجاز: "" (پیش‌فرض/خاکستری), "primary" (آبی), "success" (سبز), "danger" (قرمز)
@@ -173,6 +184,7 @@ DEFAULT_SETTINGS = {
     # پرداخت کریپتو (Plisio)
     "crypto_payment_enabled": "0",
     "plisio_api_key": "",  # کلید API درگاه Plisio؛ از داخل بات (دکمه‌ی «تنظیم درگاه کریپتو») قابل تنظیم است
+    "gemini_api_key": "",  # کلید API دستیار هوشمند (Gemini)؛ از داخل بات (دستیار هوشمند → تنظیم کلید API) قابل تنظیم است
     "usd_to_toman_rate": "0",  # نرخ تبدیل هر ۱ دلار به تومان؛ توسط ادمین دستی تنظیم می‌شود
     # پرداخت کارت‌به‌کارت خودکار (آبان گیت وی)
     "abangateway_payment_enabled": "0",
@@ -628,6 +640,22 @@ class Database:
                     user_id INTEGER PRIMARY KEY,
                     assigned_admin_id INTEGER,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS ai_support_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS ai_faq_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    question TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS admin_presence (
@@ -4179,6 +4207,68 @@ class Database:
                 "UPDATE support_messages SET is_read_by_admin=1 WHERE user_id=? AND is_read_by_admin=0",
                 (user_id,),
             )
+
+    # -----------------------------------------------------------------------
+    # مکالمه‌ی دستیار پشتیبانی هوش مصنوعی (Gemini)
+    # -----------------------------------------------------------------------
+
+    def add_ai_message(self, user_id: int, role: str, message: str) -> int:
+        """role باید 'user' یا 'model' باشد (مطابق نام‌گذاری Gemini)."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO ai_support_messages (user_id, role, message) VALUES (?, ?, ?)",
+                (user_id, role, message),
+            )
+            return cur.lastrowid
+
+    def get_ai_conversation(self, user_id: int, limit: int = 30):
+        """آخرین `limit` پیام مکالمه‌ی AI را به ترتیب زمانی (قدیم به جدید)
+        برمی‌گرداند - برای ارسال به‌عنوان تاریخچه به مدل."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ai_support_messages WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+            return list(reversed(rows))
+
+    def clear_ai_conversation(self, user_id: int):
+        """بعد از escalate به پشتیبانی انسانی یا با دستور صریح کاربر صدا زده
+        می‌شود تا گفتگوی بعدی از صفر شروع شود."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM ai_support_messages WHERE user_id=?", (user_id,))
+
+    # -----------------------------------------------------------------------
+    # سوالات متداول دستیار هوش مصنوعی (قابل مدیریت از پنل ادمین)
+    # -----------------------------------------------------------------------
+
+    def add_ai_faq_item(self, question: str, answer: str) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT COALESCE(MAX(sort_order), 0) m FROM ai_faq_items").fetchone()
+            next_order = (row["m"] or 0) + 1
+            cur = conn.execute(
+                "INSERT INTO ai_faq_items (question, answer, sort_order) VALUES (?, ?, ?)",
+                (question, answer, next_order),
+            )
+            return cur.lastrowid
+
+    def get_ai_faq_items(self):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM ai_faq_items ORDER BY sort_order, id").fetchall()
+
+    def get_ai_faq_item(self, item_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM ai_faq_items WHERE id=?", (item_id,)).fetchone()
+
+    def delete_ai_faq_item(self, item_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM ai_faq_items WHERE id=?", (item_id,))
+
+    def build_ai_faq_text(self) -> str:
+        """متن نهایی سوالات متداول برای تزریق به system prompt دستیار هوشمند."""
+        items = self.get_ai_faq_items()
+        if not items:
+            return "(چیزی ثبت نشده)"
+        return "\n\n".join(f"سوال: {it['question']}\nجواب: {it['answer']}" for it in items)
 
     # -----------------------------------------------------------------------
     # آنلاین‌بودن ادمین‌ها (برای مسیریابی چت زنده به اولین ادمین/مالک آنلاین)

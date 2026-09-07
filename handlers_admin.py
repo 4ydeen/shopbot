@@ -36,6 +36,7 @@ from backup import (
 )
 import crypto_payment
 import abangateway_payment
+import ai_support
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
@@ -68,7 +69,8 @@ from states import (
     AdminReplyFlow,
     AdminTicketReplyFlow,
     AdminSetSupportContact,
-    AdminCreateDiscount,
+    AdminAIFaqAdd,
+    AdminSetGeminiKey,
     AdminReferralPercent,
     AdminReferralCommissionMax,
     AdminReferralFreeConfigThreshold,
@@ -6520,6 +6522,145 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reply_markup=kb.support_contact_settings_kb(db),
         )
         await call.answer("✅ حذف شد.")
+
+    # -------------------------------------------------------------------
+    # دستیار پشتیبانی هوش مصنوعی (سوالات متداول + روشن/خاموش)
+    # -------------------------------------------------------------------
+
+    async def _show_ai_faq_menu(call: CallbackQuery):
+        items = await asyncio.to_thread(db.get_ai_faq_items)
+        source = ai_support.resolve_gemini_key_source(db)
+        key_note = {
+            "db": "✅ کلید API از همین پنل بات تنظیم شده.",
+            "env": "⚠️ کلید فقط از فایل .env سرور خوانده می‌شود؛ برای سادگی پیشنهاد می‌شود همینجا دوباره ثبتش کنی.",
+            "none": "❌ هنوز کلید API تنظیم نشده؛ دستیار هوشمند غیرفعال می‌ماند.",
+        }[source]
+        text = f"🤖 مدیریت دستیار هوشمند پشتیبانی\n\n{key_note}\n\n"
+        if items:
+            text += "سوالات متداولی که به دستیار آموزش داده شده (برای حذف، روی 🗑 بزن):"
+        else:
+            text += "هنوز سوالی ثبت نشده. با «➕ افزودن سوال جدید» شروع کن."
+        await replace_admin_view(call, text, reply_markup=kb.ai_faq_admin_kb(db, items))
+
+    @router.callback_query(F.data == "adm_ai_support_settings")
+    async def cb_admin_ai_support_settings(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await _show_ai_faq_menu(call)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_toggle")
+    async def cb_admin_ai_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = db.get_setting("ai_support_enabled", "1")
+        (await asyncio.to_thread(db.set_setting, "ai_support_enabled", "0" if current == "1" else "1"))
+        await _show_ai_faq_menu(call)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_set_key")
+    async def cb_admin_ai_set_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = db.get_setting("gemini_api_key", "")
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
+        await state.set_state(AdminSetGeminiKey.waiting_key)
+        await replace_admin_view(
+            call,
+            f"🔑 کلید API دستیار هوشمند (Gemini) را ارسال کن.\n"
+            f"رایگان از aistudio.google.com (بدون نیاز به کارت بانکی) قابل دریافت است.\n"
+            f"وضعیت فعلی: {masked}\n\n"
+            f"برای حذف، عبارت «حذف» را بفرست.",
+            reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminSetGeminiKey.waiting_key)
+    async def process_set_gemini_key(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        await state.clear()
+        if text in ("حذف", "/حذف", "-"):
+            (await asyncio.to_thread(db.set_setting, "gemini_api_key", ""))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید API دستیار هوشمند حذف شد."))
+            items = await asyncio.to_thread(db.get_ai_faq_items)
+            await message.answer(
+                "✅ کلید API حذف شد؛ دستیار هوشمند تا تنظیم دوباره‌ی کلید غیرفعال می‌ماند.",
+                reply_markup=kb.ai_faq_admin_kb(db, items),
+            )
+            return
+        (await asyncio.to_thread(db.set_setting, "gemini_api_key", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "gemini_key_change", "کلید API دستیار هوشمند تغییر کرد."))
+        # پیام کاربر حاوی کلید API است؛ به‌محض ذخیره حذفش می‌کنیم تا در تاریخچه‌ی چت باقی نماند.
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        items = await asyncio.to_thread(db.get_ai_faq_items)
+        await message.answer(
+            "✅ کلید API ذخیره شد و دستیار هوشمند از همین الان فعال است (بدون نیاز به ری‌استارت سرور).",
+            reply_markup=kb.ai_faq_admin_kb(db, items),
+        )
+
+    @router.callback_query(F.data == "adm_ai_faq_add")
+    async def cb_admin_ai_faq_add(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminAIFaqAdd.waiting_question)
+        await replace_admin_view(
+            call,
+            "❓ متن سوال را ارسال کن (همان چیزی که کاربر معمولاً می‌پرسد):",
+            reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminAIFaqAdd.waiting_question)
+    async def process_ai_faq_question(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("لطفاً متن سوال را به‌صورت نوشتاری ارسال کن:")
+            return
+        await state.update_data(ai_faq_question=text)
+        await state.set_state(AdminAIFaqAdd.waiting_answer)
+        await message.answer("✅ حالا جواب این سوال را ارسال کن (همانی که دستیار باید بدهد):")
+
+    @router.message(AdminAIFaqAdd.waiting_answer)
+    async def process_ai_faq_answer(message: Message, state: FSMContext):
+        answer = (message.text or "").strip()
+        if not answer:
+            await message.answer("لطفاً متن جواب را به‌صورت نوشتاری ارسال کن:")
+            return
+        data = await state.get_data()
+        question = data.get("ai_faq_question")
+        if not question:
+            await state.clear()
+            await message.answer("⚠️ خطایی رخ داد، دوباره تلاش کنید.")
+            return
+        (await asyncio.to_thread(db.add_ai_faq_item, question, answer))
+        (await asyncio.to_thread(
+            db.log_admin_action, message.from_user.id, "ai_faq_add", f"سوال جدید دستیار هوشمند: {question}"
+        ))
+        await state.clear()
+        items = await asyncio.to_thread(db.get_ai_faq_items)
+        await message.answer(
+            "✅ سوال به دانش دستیار هوشمند اضافه شد.",
+            reply_markup=kb.ai_faq_admin_kb(db, items),
+        )
+
+    @router.callback_query(F.data.startswith("adm_ai_faq_del:"))
+    async def cb_admin_ai_faq_del(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        item_id = callback_id(call.data, "adm_ai_faq_del")
+        if item_id is None:
+            return await call.answer("⚠️ درخواست نامعتبر است.", show_alert=True)
+        if (await asyncio.to_thread(db.get_ai_faq_item, item_id)) is None:
+            await call.answer("این سوال قبلاً حذف شده.", show_alert=True)
+            await _show_ai_faq_menu(call)
+            return
+        (await asyncio.to_thread(db.delete_ai_faq_item, item_id))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_faq_delete", f"حذف سوال #{item_id}"))
+        await _show_ai_faq_menu(call)
+        await call.answer("🗑 حذف شد.")
 
     # -------------------------------------------------------------------
     # آمار فروش

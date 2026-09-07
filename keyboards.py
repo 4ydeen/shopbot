@@ -681,7 +681,12 @@ TICKET_STATUS_LABELS = {"open": "🟢 باز", "answered": "🟡 پاسخ داد
 def contact_menu_kb(db) -> InlineKeyboardMarkup:
     """منوی اصلی بخش «ارتباط با پشتیبانی»: پیام مستقیم، تیکت و در صورت تنظیم‌بودن
     آیدی مدیر، یک دکمه‌ی لینک برای باز شدن مستقیم پی‌وی او."""
-    rows = [
+    rows = []
+    if db.get_setting("ai_support_enabled", "1") == "1":
+        import ai_support
+        if ai_support.is_configured(db):
+            rows.append([InlineKeyboardButton(text="🤖 دستیار هوشمند (پاسخ آنی)", callback_data="contact_ai")])
+    rows += [
         [InlineKeyboardButton(text="✉️ پیام مستقیم به پشتیبانی", callback_data="contact_direct")],
         [InlineKeyboardButton(text="🎫 ثبت تیکت جدید", callback_data="tickets_new")],
         [InlineKeyboardButton(text="📂 تیکت‌های من", callback_data="tickets_mine")],
@@ -693,6 +698,41 @@ def contact_menu_kb(db) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
+    """لیست سوالات متداولِ دستیار هوشمند برای پنل ادمین: هر آیتم یک ردیف با
+    دکمه‌ی حذف، به‌علاوه‌ی روشن/خاموش‌کردن کل دستیار، تنظیم کلید API و افزودن
+    سوال جدید."""
+    ai_enabled = db.get_setting("ai_support_enabled", "1") == "1"
+    rows = [
+        [InlineKeyboardButton(
+            text=f"دستیار هوشمند: {'🟢 فعال' if ai_enabled else '🔴 غیرفعال'} (برای تغییر بزن)",
+            callback_data="adm_ai_toggle",
+        )],
+        [InlineKeyboardButton(text="🔑 تنظیم کلید API (Gemini)", callback_data="adm_ai_set_key")],
+    ]
+    for it in items:
+        q = it["question"]
+        short_q = q if len(q) <= 40 else q[:37] + "..."
+        rows.append([
+            InlineKeyboardButton(text=f"❓ {short_q}", callback_data="noop"),
+            InlineKeyboardButton(text="🗑", callback_data=f"adm_ai_faq_del:{it['id']}"),
+        ])
+    rows.append([InlineKeyboardButton(text="➕ افزودن سوال جدید", callback_data="adm_ai_faq_add")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت به پنل مدیریت", callback_data="adm_back_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_chat_kb() -> InlineKeyboardMarkup:
+    """کیبورد پایین گفتگو با دستیار هوشمند: همیشه یک راه سریع برای انتقال به
+    انسان در دسترس باشد."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👤 صحبت با پشتیبانی انسانی", callback_data="ai_escalate")],
+            [InlineKeyboardButton(text="❌ پایان گفتگو", callback_data="ai_end")],
+        ]
+    )
 
 
 def tickets_list_kb(tickets) -> InlineKeyboardMarkup:
@@ -825,6 +865,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
     ("adm_set_support_contact", "🆔 آیدی مدیر برای چت مستقیم", "adm_set_support_contact"),
+    ("adm_ai_support_settings", "🤖 دستیار هوشمند (سوالات متداول)", "adm_ai_support_settings"),
 ]
 
 
@@ -888,6 +929,7 @@ ADMIN_PANEL_CATEGORIES = [
     ("access", "👤 ادمین و دسترسی", [
         "adm_admins_menu",
         "adm_set_support_contact",
+        "adm_ai_support_settings",
     ]),
     ("appearance", "🎨 ظاهر و رنگ‌بندی", [
         "adm_edit_buttons",

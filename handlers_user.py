@@ -23,7 +23,8 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, Teleg
 
 from md_utils import escape_md, escape_html
 import keyboards as kb
-from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
+from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
+import ai_support
 from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path
 from database import Database
 from config_delivery import deliver_config_to_user, send_individual_configs, build_qr_bytes
@@ -4003,6 +4004,107 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
         await _send_inline_main_menu(message, user.id)
         await state.clear()
+
+    # --- دستیار پشتیبانی هوش مصنوعی ---
+
+    async def _forward_ai_transcript_to_admin(bot: Bot, user, reason: str):
+        """کل مکالمه‌ی کاربر با دستیار هوشمند را برای ادمین (طبق همان منطق
+        مسیریابی چت مستقیم) می‌فرستد تا وقتی وارد می‌شود از صفر شروع نکند."""
+        history = await asyncio.to_thread(db.get_ai_conversation, user.id)
+        lines = [
+            f"🤖 ارجاع از دستیار هوشمند\n👤 {user.first_name or ''} (@{user.username or '---'})\n🆔 {user.id}",
+        ]
+        if reason:
+            lines.append(f"📌 دلیل: {reason}")
+        if history:
+            lines.append("\n--- تاریخچه‌ی گفتگو با دستیار ---")
+            for row in history:
+                who = "👤 کاربر" if row["role"] == "user" else "🤖 دستیار"
+                lines.append(f"{who}: {row['message']}")
+        text = "\n".join(lines)
+        target_admin = (await asyncio.to_thread(db.resolve_support_admin_for_message, user.id))
+        admin_ids = [target_admin] if target_admin else (await asyncio.to_thread(db.list_admins))
+        for admin_id in admin_ids:
+            try:
+                await bot.send_message(admin_id, text, reply_markup=kb.contact_reply_kb(user.id))
+            except Exception:
+                logging.getLogger("handlers_user").exception(
+                    "ارسال ارجاع دستیار هوشمند کاربر %s به ادمین %s ناموفق بود.", user.id, admin_id
+                )
+        await asyncio.to_thread(db.clear_ai_conversation, user.id)
+
+    @router.callback_query(F.data == "contact_ai")
+    async def cb_contact_ai(call: CallbackQuery, state: FSMContext):
+        if db.get_setting("ai_support_enabled", "1") != "1" or not ai_support.is_configured(db):
+            await call.answer("دستیار هوشمند در حال حاضر فعال نیست.", show_alert=True)
+            return
+        await asyncio.to_thread(db.clear_ai_conversation, call.from_user.id)
+        await state.set_state(AIChatFlow.chatting)
+        await _safe_edit(
+            call.message,
+            (await asyncio.to_thread(db.get_setting, "ai_support_intro_text")),
+            reply_markup=kb.ai_chat_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "ai_escalate")
+    async def cb_ai_escalate(call: CallbackQuery, state: FSMContext, bot: Bot):
+        user = call.from_user
+        await _forward_ai_transcript_to_admin(bot, user, "کاربر درخواست صحبت با پشتیبانی انسانی کرد.")
+        await state.set_state(ContactFlow.waiting_message)
+        await _safe_edit(
+            call.message,
+            "گفتگوی شما برای پشتیبانی انسانی ارسال شد. اگر پیام دیگری داری همین‌جا بنویس:",
+            reply_markup=kb.cancel_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "ai_end")
+    async def cb_ai_end(call: CallbackQuery, state: FSMContext):
+        await asyncio.to_thread(db.clear_ai_conversation, call.from_user.id)
+        await state.clear()
+        await _safe_edit(call.message, "گفتگو با دستیار هوشمند پایان یافت.")
+        await call.answer()
+
+    @router.message(AIChatFlow.chatting)
+    async def ai_chat_receive(message: Message, state: FSMContext, bot: Bot):
+        user = message.from_user
+        if not message.text:
+            await message.answer("فعلاً فقط پیام متنی رو می‌فهمم؛ لطفاً سوالت رو بنویس.")
+            return
+
+        history = await asyncio.to_thread(db.get_ai_conversation, user.id)
+        thinking_msg = await message.answer("در حال بررسی... ⏳")
+        try:
+            result = await ai_support.get_reply(db, user.id, history, message.text)
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "خطای غیرمنتظره در دستیار هوشمند برای کاربر %s.", user.id
+            )
+            result = {
+                "reply": "یه مشکلی پیش اومد؛ پیامت رو برای پشتیبانی انسانی می‌فرستم.",
+                "escalate": True,
+            }
+
+        await asyncio.to_thread(db.add_ai_message, user.id, "user", message.text)
+        await asyncio.to_thread(db.add_ai_message, user.id, "model", result["reply"])
+
+        try:
+            await thinking_msg.delete()
+        except Exception:
+            pass
+
+        if result.get("escalate"):
+            await message.answer(result["reply"])
+            await _forward_ai_transcript_to_admin(bot, user, "دستیار هوشمند مکالمه را ارجاع داد.")
+            await state.set_state(ContactFlow.waiting_message)
+            await message.answer(
+                "مکالمه برای پشتیبانی انسانی ارسال شد. اگر پیام دیگری داری همین‌جا بنویس:",
+                reply_markup=kb.cancel_kb(),
+            )
+            return
+
+        await message.answer(result["reply"], reply_markup=kb.ai_chat_kb())
 
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 
