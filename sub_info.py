@@ -40,11 +40,18 @@ def _session() -> aiohttp.ClientSession:
 
 
 def _b64_decode(value: str) -> str:
+    """دیکد base64 برای متن اشتراک — دقیقاً هم‌منطق با geo_scan._b64_decode_text/
+    parse_subscription_text: هم urlsafe base64 (-/_) رو پشتیبانی می‌کنه و هم اگر
+    نتیجه‌ی دیکد شامل هیچ URI کانفیگی نبود (یعنی ورودی اصلاً base64 نبوده و
+    b64decode با نادیده‌گرفتن کاراکترهای نامعتبر یه خروجی بی‌معنی ولی UTF-8-معتبر
+    ساخته)، برمی‌گرده به متن خام به‌جای اینکه اون خروجی بی‌معنی رو قبول کنه."""
     try:
-        padded = value + "=" * (-len(value) % 4)
-        return base64.b64decode(padded).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError, ValueError):
+        padded = value.strip().replace("-", "+").replace("_", "/")
+        padded += "=" * (-len(padded) % 4)
+        decoded = base64.b64decode(padded).decode("utf-8", errors="ignore")
+    except (binascii.Error, ValueError):
         return value
+    return decoded if decoded and "://" in decoded else value
 
 
 async def fetch_individual_links(sub_url: str) -> list:
