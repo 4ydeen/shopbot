@@ -2231,7 +2231,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         ساخته نشده، پس چیزی برای کاربر ندارند).
         در پایان بر اساس تاریخ ثبت (created_at سفارش/کانفیگ شخصی) از جدید به
         قدیم مرتب می‌شود - مستقل از این‌که آیتم از کدام منبع (سفارش عادی یا
-        کانفیگ شخصی) آمده باشد."""
+        کانفیگ شخصی) آمده باشد.
+        نکته‌ی مهم درباره‌ی محصولات is_auto_provision (اعتبار حجمی نماینده/تحویل
+        آنی): این‌ها به‌جای بانک کانفیگ، مستقیماً یک ردیف در custom_configs
+        می‌سازند (تا حجم/انقضا قابل پیگیری باشد) - یعنی سفارششان هیچ‌وقت
+        configs مرتبط ندارد. بدون این استثنا، همان یک خرید هم به‌صورت آیتم
+        «سفارش» ناقص (بدون لینک/حجم، چون configs خالی است) و هم به‌صورت آیتم
+        «کانفیگ شخصی» کامل (از حلقه‌ی custom_configs پایین‌تر) دوبار نمایش داده
+        می‌شد."""
+        custom_order_ids = {cc["order_id"] for cc in db.get_custom_configs_for_user(user_tg_id) if cc["order_id"]}
         items = []
         for o in db.get_user_orders(user_tg_id):
             if o["status"] == "rejected":
@@ -2271,6 +2279,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                             "order": o, "product_name": pname, "config": cfg, "_ts": order_ts,
                         })
                     continue
+            if o["status"] == "approved" and o["id"] in custom_order_ids:
+                # این سفارش (محصول is_auto_provision) از قبل با یک ردیف کامل در
+                # custom_configs (پایین‌تر) نمایش داده می‌شود؛ آیتم ناقصِ سفارش
+                # را دوباره اضافه نکن.
+                continue
             items.append({
                 "cb_id": f"o{o['id']}", "kind": "order", "label": base_label, "order": o,
                 "product_name": pname, "_ts": order_ts,
