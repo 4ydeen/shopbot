@@ -1417,7 +1417,7 @@ async function fetchCustomGateways(amount, productId) {
   return _customGatewaysCache[cacheKey];
 }
 
-function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice, customGateways, createCustomGatewayInvoice, cardToCardEnabled, cardAutoEnabled, createCardAutoInvoice, checkCardAutoStatus }) {
+function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice, customGateways, createCustomGatewayInvoice, cardToCardEnabled, cardAutoEnabled, createCardAutoInvoice, checkCardAutoStatus, noapayEnabled, createNoapayInvoice }) {
   customGateways = customGateways || [];
   // اگر ادمین کارت‌به‌کارت دستی را غیرفعال کرده باشد (card_to_card_enabled=0)، این بخش
   // باید مثل بات اصلی مخفی شود؛ پیش‌فرض (undefined، برای سازگاری با پاسخ‌های قدیمی) فعال است.
@@ -1492,6 +1492,16 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
       <div id="card-auto-error" class="field-error"></div>
     ` : ""}
 
+
+    ${noapayEnabled ? `
+      <div style="display:flex;align-items:center;gap:8px;margin:16px 0">
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+        <span class="hint-text" style="margin:0">یا</span>
+        <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+      </div>
+      <button class="btn outline" id="pay-noapay-btn" style="width:100%">⭐ NoapayBot - استارز تلگرام (تایید آنی)</button>
+      <div id="noapay-pay-error" class="field-error"></div>
+    ` : ""}
     ${customGatewaysHtml}
   `;
 
@@ -1592,6 +1602,30 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
     };
   }
 
+
+  if (noapayEnabled) {
+    const noapayBtn = box.querySelector("#pay-noapay-btn");
+    const noapayErr = box.querySelector("#noapay-pay-error");
+    noapayBtn.onclick = async () => {
+      noapayErr.textContent = "";
+      noapayBtn.disabled = true;
+      noapayBtn.textContent = "در حال ساخت فاکتور...";
+      try {
+        const res = await createNoapayInvoice();
+        box.innerHTML = `
+          <div class="receipt-card">
+            <div class="receipt-title">⭐ پرداخت با NoapayBot</div>
+            <p class="hint-text">فاکتور ساخته شد. پرداخت را در صفحه‌ی NoapayBot تکمیل کن.</p>
+            <button class="btn" id="open-noapay-invoice-btn" style="width:100%;margin-top:12px">🔗 رفتن به صفحه‌ی پرداخت</button>
+          </div>`;
+        box.querySelector("#open-noapay-invoice-btn").onclick = () => tg.openLink(res.payment_url);
+      } catch (e) {
+        noapayErr.textContent = e.message;
+        noapayBtn.disabled = false;
+        noapayBtn.textContent = "⭐ NoapayBot - استارز تلگرام (تایید آنی)";
+      }
+    };
+  }
   if (customGateways.length && createCustomGatewayInvoice) {
     const cgErr = box.querySelector("#custom-gw-error");
     box.querySelectorAll(".custom-gw-btn").forEach((btn) => {
@@ -1900,6 +1934,8 @@ async function buyProduct(productId, quantity, code) {
         cardAutoEnabled: result.card_to_card_auto_enabled,
         createCardAutoInvoice: async () => api(`/api/orders/${result.order_id}/card-auto-invoice`, { method: "POST" }),
         checkCardAutoStatus: async (invoiceId) => api(`/api/card-auto-invoice/${invoiceId}/status`),
+        noapayEnabled: result.noapay_enabled,
+        createNoapayInvoice: async () => api(`/api/orders/${result.order_id}/noapay-invoice`, { method: "POST" }),
         customGateways,
         createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
       });
@@ -2038,6 +2074,8 @@ async function submitCustomConfig(username, volumeGb, useCredit, info) {
         cardAutoEnabled: result.card_to_card_auto_enabled,
         createCardAutoInvoice: async () => api(`/api/orders/${result.order_id}/card-auto-invoice`, { method: "POST" }),
         checkCardAutoStatus: async (invoiceId) => api(`/api/card-auto-invoice/${invoiceId}/status`),
+        noapayEnabled: result.noapay_enabled,
+        createNoapayInvoice: async () => api(`/api/orders/${result.order_id}/noapay-invoice`, { method: "POST" }),
         customGateways: customGateways2,
         createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
       });
@@ -2180,7 +2218,7 @@ async function renderWallet() {
       btn.disabled = true;
       try {
         const r = await api("/api/wallet/topup-request", { method: "POST", body: JSON.stringify({ amount }) });
-        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled, r.card_to_card_enabled, r.card_to_card_auto_enabled);
+        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled, r.card_to_card_enabled, r.card_to_card_auto_enabled, r.noapay_enabled);
       } catch (e) {
         notify("خطا: " + e.message);
         btn.disabled = false;
@@ -2191,7 +2229,7 @@ async function renderWallet() {
   }
 }
 
-async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled, cardToCardEnabled, cardAutoEnabled) {
+async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled, cardToCardEnabled, cardAutoEnabled, noapayEnabled) {
   const box = document.getElementById("topup-card");
   const customGateways = await fetchCustomGateways(amount, null);
   renderReceiptCard(box, {
@@ -2208,6 +2246,8 @@ async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, c
     cardAutoEnabled,
     createCardAutoInvoice: async () => api("/api/wallet/card-auto-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
     checkCardAutoStatus: async (invoiceId) => api(`/api/card-auto-invoice/${invoiceId}/status`),
+    noapayEnabled,
+    createNoapayInvoice: async () => api("/api/wallet/noapay-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
     customGateways,
     createCustomGatewayInvoice: async (key) => api(`/api/wallet/custom-invoice/${key}`, { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
   });
@@ -4595,6 +4635,8 @@ const ADMIN_ACTION_LABELS = {
   card_change: "💳 تغییر شماره کارت",
   plisio_key_change: "🪙 تغییر کلید کریپتو (Plisio)",
   abangateway_key_change: "💳 تغییر کلید آبان گیت‌وی",
+  noapay_key_change: "⭐ تغییر تنظیمات NoapayBot",
+  noapay_toggle: "⭐ تغییر وضعیت NoapayBot",
   backup_create: "🗄 دریافت بکاپ",
   backup_restore: "♻️ بازیابی بکاپ",
   factory_reset: "🏭 بازگشت به حالت کارخانه",
@@ -5221,10 +5263,11 @@ async function renderAdminFinanceSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(3);
   try {
-    const [card, crypto, aban] = await Promise.all([
+    const [card, crypto, aban, noapay] = await Promise.all([
       api("/api/admin/settings/card"),
       api("/api/admin/settings/crypto"),
       api("/api/admin/settings/abangateway"),
+      api("/api/admin/settings/noapay"),
     ]);
 
     body.innerHTML = `
@@ -5289,6 +5332,20 @@ async function renderAdminFinanceSection() {
         <div class="field-error" id="fin-aban-error"></div>
         <button class="btn" id="fin-aban-save" style="margin-top:8px">💾 ذخیره</button>
         ${aban.has_own_key ? `<button class="btn outline danger" id="fin-aban-clear" style="margin-top:8px">🗑 حذف کلید و غیرفعال‌سازی</button>` : ""}
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">⭐ NoapayBot (خرید استارز تلگرام، تایید آنی)</div>
+        <p class="hint-text">کلید API، رمز وب‌هوک و نرخ تقریبی استارز را تنظیم کن.</p>
+        <label class="field-label">کلید API</label>
+        <input class="input" id="fin-noapay-key" type="password" placeholder="${noapay.has_own_key ? noapay.masked_key || "•••• تنظیم شده" : "کلید را وارد کن"}" style="direction:ltr;text-align:left;margin-bottom:4px" />
+        <label class="field-label">رمز وب‌هوک</label>
+        <input class="input" id="fin-noapay-secret" type="password" placeholder="${noapay.has_webhook_secret ? "•••• تنظیم شده" : "رمز را وارد کن"}" style="direction:ltr;text-align:left;margin-bottom:4px" />
+        <label class="field-label">نرخ تقریبی تومان به‌ازای هر استارز</label>
+        <input class="input" id="fin-noapay-rate" type="number" value="${noapay.rate_toman_per_star || ""}" style="margin-bottom:4px" />
+        <div class="field-switch-row"><span>NoapayBot فعال باشد</span><label class="switch"><input type="checkbox" id="fin-noapay-enabled" ${noapay.enabled ? "checked" : ""} /><span class="switch-slider"></span></label></div>
+        <div class="field-error" id="fin-noapay-error"></div>
+        <button class="btn" id="fin-noapay-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
@@ -5448,6 +5505,19 @@ async function renderAdminFinanceSection() {
         } catch (e) { notify(e.message); }
       };
     }
+
+    document.getElementById("fin-noapay-save").onclick = async () => {
+      const errBox = document.getElementById("fin-noapay-error"); errBox.textContent = "";
+      try {
+        await api("/api/admin/settings/noapay", { method: "POST", body: JSON.stringify({
+          enabled: document.getElementById("fin-noapay-enabled").checked,
+          api_key: document.getElementById("fin-noapay-key").value || null,
+          webhook_secret: document.getElementById("fin-noapay-secret").value || null,
+          rate_toman_per_star: document.getElementById("fin-noapay-rate").value ? parseInt(document.getElementById("fin-noapay-rate").value, 10) : null,
+        })});
+        notify("تنظیمات NoapayBot ذخیره شد."); renderAdminFinanceSection();
+      } catch (e) { errBox.textContent = e.message; }
+    };
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
