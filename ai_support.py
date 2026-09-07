@@ -154,7 +154,7 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 
 قوانین اجباری:
 ۱. فقط بر اساس اطلاعات واقعی که از ابزارها (tools) می‌گیری یا در «دانش پایه» زیر آمده جواب بده. هرگز چیزی را حدس نزن یا وعده‌ی چیزی که مطمئن نیستی نده. قیمت/موجودی/مشخصات محصولات را همیشه با ابزار list_products بگیر؛ هرگز از حافظه یا حدس نگو.
-۲. تو خودت هیچ عملیات مالی را نهایی نمی‌کنی: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی، کانفیگ بسازی یا مستقیماً از کیف پول کسر کنی. اما اگر کاربر خواست چیزی بخرد، اجازه داری با ابزار show_purchase_options همان کارت خرید واقعی (قیمت، اعمال خودکار کیف پول، دکمه‌های پرداخت) را برایش باز کنی تا خودش با زدن دکمه نهایی کند - این کار را دریغ نکن، بخشی از وظیفه‌ی توست که خرید را برای کاربر ساده و کامل کنی. برای رفاند/تمدید/تخفیف دستی/شکایت مالی همچنان باید escalate_to_human را صدا بزنی.
+۲. تو خودت هیچ عملیات مالی را نهایی نمی‌کنی: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی، کانفیگ بسازی یا مستقیماً از کیف پول کسر کنی. اما اگر کاربر خواست چیزی بخرد، اجازه داری با ابزار show_purchase_options همان کارت خرید واقعی (قیمت، اعمال خودکار کیف پول، دکمه‌های پرداخت) را برایش باز کنی تا خودش با زدن دکمه نهایی کند، یا (فقط بعد از تاییدِ صریحِ کاربر در یک پیامِ جداگانه - قانون ۱۳) با request_purchase_with_wallet بگذاری اگر موجودی کیف پولش کافی بود سیستم خودش خرید را نهایی کند. این کار را دریغ نکن، بخشی از وظیفه‌ی توست که خرید را برای کاربر ساده و کامل کنی. برای رفاند/تمدید/تخفیف دستی/شکایت مالی همچنان باید escalate_to_human را صدا بزنی.
 ۳. اگر کاربر صراحتاً خواست با انسان صحبت کند، ناراحت/عصبانی بود، یا موضوع شکایت/اختلاف مالی بود، بلافاصله (بدون معطلی و بدون اصرار برای ادامه‌ی گفتگو با تو) escalate_to_human را صدا بزن.
 ۴. اگر سوال درباره‌ی وضعیت شخصیِ خودِ کاربر است (سرویسش، حجم باقی‌مانده، انقضا، موجودی کیف پول، سفارش‌ها)، همیشه اول ابزار مربوطه را صدا بزن؛ از حافظه یا حدس جواب نده.
 ۴-۱. برای اینکه سرویس «فعال» یا «غیرفعال» است، فقط و فقط به فیلد panel_status نگاه کن (اگر موجود بود)؛ داشتنِ حجم باقی‌مانده یا نرسیدن تاریخ انقضا به این معنی نیست که سرویس روشن است - ممکن است دستی یا به هر دلیلی روی پنل خاموش شده باشد.
@@ -162,6 +162,11 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 ۶. اگر بعد از تلاش نتوانستی مشکل را حل کنی (نه اینکه صرفاً کاربر یک‌بار درخواست انسان نکرده)، صادقانه بگو و escalate_to_human را صدا بزن؛ کاربر را سردرگم نگه نداری. دکمه‌ی «صحبت با پشتیبانی انسانی» از ابتدا در اختیار کاربر نیست - این خودِ توست که باید موقع نیاز واقعی (سوال مالی، شکایت، درخواست صریح کاربر، یا ناتوانی از پاسخ) او را ارجاع بدهی، نه اینکه منتظر بمانی کاربر خودش درخواست کند.
 ۷. برای سوال درباره‌ی پلن‌ها/قیمت‌ها/دسته‌بندی‌ها/محصولات موجود، ابزار list_products را صدا بزن.
 ۸. وقتی کاربر تصمیم به خرید محصول مشخصی گرفت (یا از تو خواست کمکش کنی بخرد)، بعد از مشخص‌شدن محصول با list_products، ابزار show_purchase_options را با همان product_id صدا بزن تا کارت خرید واقعی برایش نمایش داده شود.
+۹. برای سوال درباره‌ی «چطور پرداخت کنم»/«چه روش‌های پرداختی دارید»/«حداقل مبلغ شارژ چقدره»، ابزار list_payment_methods را صدا بزن و فقط همان روش‌های واقعاً فعال را توضیح بده؛ هرگز روشی که در خروجی ابزار نبود یا enabled آن false بود را پیشنهاد نده، و مراحل فنی هر درگاه (مثل واریز کارت‌به‌کارت یا اسکن کیف کریپتو) را از «دانش پایه» زیر (اگر ادمین نوشته) توضیح بده نه از حدس خودت.
+۱۰. اگر کاربر کانفیگ تست/رایگان خواست، ابزار request_test_config را صدا بزن. این ابزار فقط وضعیت را می‌خواند (آیا امکانش هست یا قبلاً استفاده کرده)؛ خودِ ارسال لینک به‌صورت خودکار و امن توسط سیستم (دقیقاً همان مسیر دکمه‌ی «کانفیگ تست» با همان محدودیت یک‌بار در کل عمر حساب) انجام می‌شود، نه توسط تو. اگر ابزار گفت eligible=true فقط بگو «الان براتون می‌فرستم 🧪» و به پیام سیستم که بعدش می‌آید اعتماد کن؛ اگر eligible=false بود، دلیل (قبلاً استفاده شده / غیرفعال بودن قابلیت / نبود پلن) را از روی reason به زبان ساده به کاربر بگو و پیشنهاد بده به‌جایش یکی از پلن‌های واقعی را با list_products ببیند.
+۱۱. برای «چطور زیرمجموعه بگیرم/لینک دعوتم چیه» ابزار get_referral_info را صدا بزن؛ اگر ok=true بود فقط بگو «الان اطلاعاتش رو می‌فرستم» چون پیام واقعی (لینک واقعی و آمار واقعی) بلافاصله توسط سیستم ارسال می‌شود.
+۱۲. برای بررسی یک کد تخفیف، check_discount_code را صدا بزن و فقط بر همان جواب تکیه کن؛ هرگز درصد یا اعتبار کد را حدس نزن.
+۱۳. اگر کاربر گفت خرید X را با کیف پولش نهایی کن (یا از قبل روشن بود که فقط کیف پول کافی است)، اول با list_products محصول و قیمت را دقیق بگو و صراحتاً بپرس آیا تایید می‌کند مبلغ از کیف پولش کسر شود؛ فقط بعد از اینکه کاربر در یک پیامِ جداگانه به‌روشنی تایید کرد (مثلاً «بله»، «تایید کن»، «باشه بخر»)، ابزار request_purchase_with_wallet را صدا بزن. هرگز این ابزار را در همان دوری که کاربر فقط تمایلش را گفته (بدون تاییدِ صریحِ بعدی) صدا نزن. اگر ok=true برگشت، بگو «باشه، الان براتون نهایی می‌کنم 🛒» چون تحویل/کسر واقعی بلافاصله توسط سیستم (دقیقاً با همان مسیر امنِ خرید واقعی) انجام می‌شود؛ اگر reason=insufficient_wallet بود، صادقانه بگو موجودی کافی نیست و با show_purchase_options کارت خرید واقعی را برایش باز کن تا از روش دیگری پرداخت کند.
 
 دانش پایه (تنظیم‌شده توسط ادمین فروشگاه):
 {faq}
@@ -205,6 +210,93 @@ _TOOLS = [
                     "type": "integer",
                     "description": "شناسه‌ی محصول، دقیقاً همان id که در خروجی list_products آمده.",
                 }
+            },
+            "required": ["product_id"],
+        },
+    },
+    {
+        "name": "list_payment_methods",
+        "description": (
+            "لیست واقعیِ روش‌های پرداختِ فعال فروشگاه را برمی‌گرداند (کیف پول، "
+            "کارت‌به‌کارت، درگاه‌ها، کریپتو و ...) به‌همراه حداقل مبلغ هرکدام. "
+            "برای هر سوالی درباره‌ی «چطور پرداخت کنم»، «چه روش‌هایی دارید»، "
+            "«حداقل مبلغ چقدره» این ابزار را صدا بزن؛ هرگز روش پرداخت را از "
+            "حدس یا حافظه نگو، چون ممکن است ادمین آن را غیرفعال کرده باشد."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "request_test_config",
+        "description": (
+            "برای درخواست «کانفیگ تست/رایگان» توسط کاربر صدا بزن. این ابزار "
+            "هیچ کانفیگی نمی‌سازد و چیزی در دیتابیس تغییر نمی‌دهد؛ فقط وضعیت "
+            "واقعی را می‌خواند (آیا قابلیت فعال است، کاربر قبلاً از سهمیه‌ی "
+            "یک‌باره‌اش استفاده کرده یا نه). اگر eligible=true برگردد، سیستم "
+            "بلافاصله و به‌صورت خودکار - دقیقاً با همان مسیر امنِ دکمه‌ی "
+            "«کانفیگ تست» در منو (همان محدودیت‌ها و همان تاییدها) - لینک را "
+            "برای کاربر ارسال می‌کند؛ خودِ مدل هیچ لینک یا کانفیگی نمی‌سازد."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_referral_info",
+        "description": (
+            "برای سوال درباره‌ی «چطور زیرمجموعه بگیرم»/«لینک دعوتم چیه»/«پورسانتم "
+            "چقدره» صدا بزن. این ابزار خودش چیزی برنمی‌گرداند؛ فقط بررسی می‌کند "
+            "سیستم زیرمجموعه‌گیری فعال است یا نه - در صورت فعال بودن، همان پیام "
+            "واقعیِ زیرمجموعه‌گیری (با لینک اختصاصیِ واقعی و آمار واقعی) بلافاصله "
+            "برای کاربر ارسال می‌شود."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "check_discount_code",
+        "description": (
+            "اعتبار واقعیِ یک کد تخفیف را بررسی می‌کند (فعال/غیرفعال، منقضی، "
+            "سقف استفاده، اختصاصی‌بودن به یک محصول). برای سوال «کد X معتبره؟» "
+            "صدا بزن؛ هرگز اعتبار یا درصدِ یک کد را حدس نزن. اگر کاربر گفت "
+            "می‌خواهد کد را برای محصول مشخصی استفاده کند، همان product_id (از "
+            "list_products) را هم بده تا دقیق‌تر بررسی شود. این ابزار کد را "
+            "اعمال نمی‌کند - اعمال نهایی فقط داخل خودِ کارت خرید ممکن است."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "متن کد تخفیف که کاربر گفته."},
+                "product_id": {"type": "integer", "description": "اختیاری؛ اگر کاربر محصول مشخصی را در نظر دارد."},
+            },
+            "required": ["code"],
+        },
+    },
+    {
+        "name": "get_recent_tickets",
+        "description": (
+            "چند تیکت پشتیبانیِ اخیر کاربر (موضوع و وضعیت باز/بسته) را می‌خواند. "
+            "قبل از escalate_to_human یا وقتی کاربر می‌پرسد «تیکت قبلیم چی شد» "
+            "صدا بزن تا بدون سوال زائد، کانتکست قبلی را بدانی."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "request_purchase_with_wallet",
+        "description": (
+            "فقط زمانی صدا بزن که کاربر صراحتاً و در یک پیامِ جداگانه خرید را "
+            "تایید کرده باشد (مثلاً بعد از اینکه خودت قیمت دقیق را گفتی و "
+            "پرسیدی «تایید می‌کنی؟» و او «بله»/«تایید کن» گفت) - هرگز در همان "
+            "دوری که کاربر فقط تمایلش را گفته این ابزار را صدا نزن، اول قیمت "
+            "را از list_products بگیر و بگو و منتظر تاییدِ صریح در پیام بعدی "
+            "بمان. این ابزار خودش هم چیزی کسر نمی‌کند - فقط بررسی می‌کند که "
+            "آیا موجودی کیف پول کاربر کل مبلغ را می‌پوشاند. اگر بله، بلافاصله "
+            "بعد از این پیام، خریدِ واقعی (دقیقاً با همان کد و همان محدودیت‌های "
+            "مسیر دکمه‌ی «ادامه و ارسال رسید») به‌صورت خودکار انجام و کانفیگ "
+            "تحویل داده می‌شود. اگر موجودی کافی نبود، خودت با show_purchase_options "
+            "کارت خرید واقعی را نشانش بده تا از روش دیگری پرداخت کند."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "product_id": {"type": "integer", "description": "شناسه‌ی محصول، همان id در list_products."},
+                "quantity": {"type": "integer", "description": "تعداد؛ اگر نگفت 1 بگذار."},
             },
             "required": ["product_id"],
         },
@@ -418,6 +510,150 @@ async def _tool_show_purchase_options(db, args: dict) -> dict:
     return {"ok": True, "product_id": product_id, "name": product["name"]}
 
 
+async def _tool_list_payment_methods(db) -> dict:
+    def _read():
+        return db.get_payment_methods_catalog(only_enabled=True)
+
+    methods = await asyncio.to_thread(_read)
+    if not methods:
+        return {"methods": [], "note": "در حال حاضر هیچ روش پرداخت فعالی تعریف نشده."}
+    return {
+        "methods": [
+            {
+                "key": m["key"],
+                "label": m["label"],
+                "min_amount_toman": m.get("min_amount") or 0,
+            }
+            for m in methods
+        ]
+    }
+
+
+async def _tool_request_test_config(db, user_tg_id: int) -> dict:
+    """فقط وضعیتِ خواندنی را برمی‌گرداند - هیچ کانفیگی نمی‌سازد و هیچ فیلدی
+    در دیتابیس تغییر نمی‌دهد. تصمیمِ نهاییِ ساخت/تحویلِ واقعیِ کانفیگ همیشه در
+    هندلر get_test_config (همان مسیر دکمه‌ی «کانفیگ تست») گرفته می‌شود که
+    خودش دوباره همین بررسی‌ها را - این بار به‌صورت قطعی - انجام می‌دهد."""
+
+    def _read():
+        test_enabled = db.get_setting("test_enabled", "1") == "1"
+        user = db.get_user(user_tg_id)
+        test_used = user["test_used"] if user else 0
+        plans = db.get_test_config_plans(True)
+        return test_enabled, test_used, plans
+
+    test_enabled, test_used, plans = await asyncio.to_thread(_read)
+    if not test_enabled:
+        return {"eligible": False, "reason": "test_disabled"}
+    if test_used >= config.MAX_TEST_PER_USER:
+        return {"eligible": False, "reason": "already_used"}
+    if not plans:
+        # نصب‌های خیلی قدیمی بدون پلن تعریف‌شده ممکن است هنوز بانک لینک دستی
+        # داشته باشند (مسیر legacy در get_test_config)؛ برای سادگی و امنیت
+        # اینجا محافظه‌کارانه eligible=False برمی‌گردانیم - در بدترین حالت
+        # مدل کاربر را به پشتیبانی/پلن‌های واقعی هدایت می‌کند، نه اشتباه.
+        return {"eligible": False, "reason": "no_plan_defined"}
+    return {"eligible": True}
+
+
+async def _tool_get_referral_info(db) -> dict:
+    def _read():
+        settings = db.get_all_settings()
+        return (
+            settings.get("referral_button_enabled", "1") == "1"
+            and (
+                settings.get("referral_enabled", "1") == "1"
+                or settings.get("referral_free_config_enabled", "0") == "1"
+                or settings.get("referral_invite_bonus_enabled", "0") == "1"
+            )
+        )
+
+    enabled = await asyncio.to_thread(_read)
+    if not enabled:
+        return {"ok": False, "reason": "referral_disabled"}
+    return {"ok": True}
+
+
+async def _tool_check_discount_code(db, args: dict) -> dict:
+    code = (args.get("code") or "").strip()
+    if not code:
+        return {"valid": False, "reason": "empty_code"}
+    product_id = args.get("product_id")
+    try:
+        product_id = int(product_id) if product_id is not None else None
+    except (TypeError, ValueError):
+        product_id = None
+
+    def _read():
+        row = db.get_discount_code(code)
+        if not row:
+            return None, None
+        reason = db.get_discount_invalid_reason(row, product_id=product_id)
+        return row, reason
+
+    row, reason = await asyncio.to_thread(_read)
+    if not row:
+        return {"valid": False, "reason": "not_found"}
+    if reason:
+        return {"valid": False, "reason": reason}
+    return {
+        "valid": True,
+        "percent": row["percent"] or 0,
+        "fixed_amount_toman": row["fixed_amount"] or 0,
+    }
+
+
+async def _tool_get_recent_tickets(db, user_tg_id: int) -> dict:
+    def _read():
+        return db.get_user_tickets(user_tg_id)[:5]
+
+    tickets = await asyncio.to_thread(_read)
+    return {
+        "tickets": [
+            {"id": t["id"], "subject": t["subject"], "status": t["status"]}
+            for t in tickets
+        ]
+    }
+
+
+async def _tool_request_purchase_with_wallet(db, user_tg_id: int, args: dict) -> dict:
+    try:
+        product_id = int(args.get("product_id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_product_id"}
+    try:
+        quantity = max(1, int(args.get("quantity", 1) or 1))
+    except (TypeError, ValueError):
+        quantity = 1
+
+    def _read():
+        product = db.get_product(product_id)
+        if not product or not product["is_active"]:
+            return None, None, None, None
+        stock = None if product["is_auto_provision"] else db.count_available_configs(product_id)
+        allowed_methods = db.get_product_payment_methods(product_id)
+        wallet_credit = db.get_wallet_credit(user_tg_id)
+        return product, stock, allowed_methods, wallet_credit
+
+    product, stock, allowed_methods, wallet_credit = await asyncio.to_thread(_read)
+    if not product:
+        return {"ok": False, "reason": "product_not_found"}
+    if stock is not None and stock < quantity:
+        return {"ok": False, "reason": "out_of_stock"}
+    wallet_allowed = allowed_methods is None or "wallet" in allowed_methods
+    if not wallet_allowed:
+        return {"ok": False, "reason": "wallet_not_allowed"}
+    total_price = product["price"] * quantity
+    if wallet_credit < total_price:
+        return {
+            "ok": False,
+            "reason": "insufficient_wallet",
+            "wallet_balance_toman": wallet_credit,
+            "price_toman": total_price,
+        }
+    return {"ok": True, "product_id": product_id, "quantity": quantity, "price_toman": total_price}
+
+
 async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
     if name == "check_account_status":
         return await _tool_check_account_status(db, user_tg_id)
@@ -425,6 +661,18 @@ async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
         return await _tool_list_products(db)
     if name == "show_purchase_options":
         return await _tool_show_purchase_options(db, args)
+    if name == "list_payment_methods":
+        return await _tool_list_payment_methods(db)
+    if name == "request_test_config":
+        return await _tool_request_test_config(db, user_tg_id)
+    if name == "get_referral_info":
+        return await _tool_get_referral_info(db)
+    if name == "check_discount_code":
+        return await _tool_check_discount_code(db, args)
+    if name == "get_recent_tickets":
+        return await _tool_get_recent_tickets(db, user_tg_id)
+    if name == "request_purchase_with_wallet":
+        return await _tool_request_purchase_with_wallet(db, user_tg_id, args)
     if name == "escalate_to_human":
         return {"ok": True, "reason": args.get("reason", "")}
     return {"error": f"ابزار ناشناخته: {name}"}
@@ -519,6 +767,16 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
                     result = await _run_tool(db, user_tg_id, fc.name, dict(fc.args or {}))
                     if fc.name == "show_purchase_options" and result.get("ok"):
                         ui_action = {"type": "show_product", "product_id": result["product_id"]}
+                    if fc.name == "request_test_config" and result.get("eligible"):
+                        ui_action = {"type": "deliver_test_config"}
+                    if fc.name == "get_referral_info" and result.get("ok"):
+                        ui_action = {"type": "show_referral_info"}
+                    if fc.name == "request_purchase_with_wallet" and result.get("ok"):
+                        ui_action = {
+                            "type": "finalize_wallet_purchase",
+                            "product_id": result["product_id"],
+                            "quantity": result["quantity"],
+                        }
                     contents.append(types.Content(role="user", parts=[types.Part.from_function_response(name=fc.name, response=result)]))
                 if escalate:
                     return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
@@ -565,6 +823,16 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
                     result = await _run_tool(db, user_tg_id, name, args)
                     if name == "show_purchase_options" and result.get("ok"):
                         ui_action = {"type": "show_product", "product_id": result["product_id"]}
+                    if name == "request_test_config" and result.get("eligible"):
+                        ui_action = {"type": "deliver_test_config"}
+                    if name == "get_referral_info" and result.get("ok"):
+                        ui_action = {"type": "show_referral_info"}
+                    if name == "request_purchase_with_wallet" and result.get("ok"):
+                        ui_action = {
+                            "type": "finalize_wallet_purchase",
+                            "product_id": result["product_id"],
+                            "quantity": result["quantity"],
+                        }
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result, ensure_ascii=False)})
                 if escalate:
                     return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}

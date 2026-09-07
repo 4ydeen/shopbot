@@ -4288,6 +4288,124 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     )
                 else:
                     await message.answer("⛔️ موجودی این محصول در حال حاضر تمام شده.")
+        elif ui_action and ui_action.get("type") == "deliver_test_config":
+            # دستیار هوشمند فقط تشخیص داد کاربر واجد شرایط کانفیگ تست است؛
+            # ساخت/تحویل واقعی همیشه از دقیقاً همان تابعِ دکمه‌ی «کانفیگ تست»
+            # انجام می‌شود تا همان محدودیت یک‌بار-در-عمر-حساب و همان بررسی‌های
+            # فعال/غیرفعال بودن دوباره (و این‌بار قطعی) اعمال شوند.
+            await get_test_config(message)
+        elif ui_action and ui_action.get("type") == "show_referral_info":
+            # همان پیامِ واقعیِ زیرمجموعه‌گیری (لینک واقعی + آمار زنده) - دقیقاً
+            # همان تابعی که دکمه‌ی «زیرمجموعه‌گیری» هم صدا می‌زند.
+            await referral_menu(message, bot)
+        elif ui_action and ui_action.get("type") == "finalize_wallet_purchase":
+            # فقط وقتی به این‌جا می‌رسیم که مدل از کاربر تاییدِ صریح گرفته و
+            # ابزار request_purchase_with_wallet هم موجودی کافی کیف پول را
+            # تایید کرده؛ اینجا (دفاع در عمق) دوباره از صفر بررسی و نهایی
+            # می‌کنیم - دقیقاً با همان توابع دیتابیس/تحویلی که دکمه‌ی واقعیِ
+            # «ادامه و ارسال رسید» برای حالتِ «کاملاً با کیف‌پول پوشش داده شده»
+            # استفاده می‌کند.
+            await _ai_finalize_wallet_purchase(
+                message, bot, ui_action.get("product_id"), ui_action.get("quantity", 1)
+            )
+
+    async def _ai_finalize_wallet_purchase(message: Message, bot: Bot, product_id, quantity: int) -> None:
+        user_id = message.from_user.id
+        quantity = max(1, int(quantity or 1))
+        product = await asyncio.to_thread(db.get_product, product_id)
+        if not product or not product["is_active"]:
+            await message.answer("⛔️ این محصول دیگر موجود نیست.")
+            return
+        stock = None if product["is_auto_provision"] else await asyncio.to_thread(db.count_available_configs, product_id)
+        if stock is not None and stock < quantity:
+            await message.answer("⛔️ موجودی این محصول در حال حاضر کافی نیست.")
+            return
+
+        allowed_methods = await asyncio.to_thread(db.get_product_payment_methods, product_id)
+        wallet_allowed = allowed_methods is None or "wallet" in allowed_methods
+        total_price = product["price"] * quantity
+        wallet_credit = await asyncio.to_thread(db.get_wallet_credit, user_id)
+
+        if not wallet_allowed or wallet_credit < total_price:
+            # موجودی کافی نبود یا از این نظر تغییر کرده (مثلاً هم‌زمان جای دیگر
+            # خرج شده)؛ به‌جای خرید خودکار، همان کارت خرید واقعی را نشان بده تا
+            # کاربر خودش با روش دیگری تکمیل کند - هیچ کسری اینجا اتفاق نمی‌افتد.
+            stock_display = stock if stock is not None else quantity
+            text = _product_confirm_text(product, quantity, stock_display, wallet_credit)
+            await message.answer(
+                "👛 موجودی کیف پول برای تکمیل خودکار کافی نیست؛ کارت خرید رو برات باز می‌کنم:"
+            )
+            await message.answer(
+                text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, max(stock_display, quantity))
+            )
+            return
+
+        order_id = await asyncio.to_thread(
+            db.create_order, user_id, product_id,
+            base_price=total_price, wallet_used=total_price,
+            discount_code_id=None, discount_amount=0, quantity=quantity,
+        )
+        await asyncio.to_thread(db.add_wallet_credit, user_id, -total_price)
+        order = await asyncio.to_thread(db.get_order, order_id)
+
+        try:
+            if product["is_auto_provision"]:
+                try:
+                    if product["provision_server_id"]:
+                        prov_results = await provision_direct(db, product, quantity, user_id=user_id, order_id=order_id)
+                    else:
+                        prov_results = await provision_auto_config(db, product, quantity, user_id=user_id, order_id=order_id)
+                except (ProvisionError, DirectProvisionError) as e:
+                    await asyncio.to_thread(db.reject_order, order_id)
+                    await _notify_admins_of_order(bot, order_id)
+                    await message.answer(f"⛔️ {e}\nمبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد.")
+                    return
+                await asyncio.to_thread(db.approve_order_auto, order_id)
+                links = [r["subscription_url"] for r in prov_results]
+            else:
+                results = await asyncio.to_thread(db.take_unused_configs, product_id, user_id, quantity)
+                if not results:
+                    await asyncio.to_thread(db.reject_order, order_id)
+                    await _notify_admins_of_order(bot, order_id)
+                    await message.answer(
+                        "⛔️ موجودی این محصول در حال حاضر تمام شده است.\n"
+                        "مبلغ کسرشده از کیف پول شما به‌طور کامل بازگردانده شد."
+                    )
+                    return
+                await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results])
+                links = [r["link"] for r in results]
+                await check_and_notify_low_stock(bot.send_message, db, product_id)
+
+            reward_info = await asyncio.to_thread(db.reward_referrer_if_first_purchase, user_id, order["base_price"])
+            if reward_info:
+                reward_amount, referrer_id = reward_info
+                try:
+                    await bot.send_message(
+                        referrer_id,
+                        f"🤝 تبریک! یکی از زیرمجموعه‌های شما اولین خرید خود را انجام داد.\n"
+                        f"💰 {reward_amount:,} تومان به کیف پول شما اضافه شد.",
+                    )
+                except Exception:
+                    pass
+            try:
+                await _notify_admins_of_order(bot, order_id)
+            except Exception:
+                pass
+
+            await message.answer(
+                "✅ خرید شما به‌طور کامل از کیف پول پرداخت شد.\nکانفیگ شما در پیام بعدی ارسال می‌شود 👇"
+            )
+            await deliver_config_to_user(bot, user_id, product["name"], links, final_price=0, order_id=order_id, db=db)
+        except Exception:
+            logging.getLogger("handlers_user").exception(
+                "خطای غیرمنتظره در خرید خودکارِ دستیار هوشمند برای سفارش #%s کاربر %s؛ سفارش رد و کیف پول بازگردانده شد.",
+                order_id, user_id,
+            )
+            await asyncio.to_thread(db.reject_order, order_id)
+            await message.answer(
+                "⛔️ یه خطای غیرمنتظره پیش اومد؛ مبلغ کسرشده به کیف پولت به‌طور کامل برگشت. "
+                "لطفاً دوباره امتحان کن یا با پشتیبانی تماس بگیر."
+            )
 
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 
