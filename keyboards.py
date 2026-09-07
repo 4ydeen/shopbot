@@ -350,6 +350,22 @@ def service_inquiry_kb(cb_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"mo_v:{cb_id}")]])
 
 
+def service_inquiry_card_kb(cb_id: str, fields: list) -> InlineKeyboardMarkup:
+    """کیبورد «کارتی» صفحه‌ی استعلام: هر آیتم از fields یک تاپل (برچسب، مقدار) است
+    و به‌صورت یک ردیفِ دو-دکمه‌ای (برچسب راست، مقدار چپ) نمایش داده می‌شود. هر دو
+    دکمه غیرفعال‌اند (callback_data='noop') و صرفاً برای نمایش شبکه‌ای اطلاعات
+    به‌کار می‌روند (دقیقاً مثل کارت وضعیت سرویس که در پنل‌های مشابه دیده می‌شود)."""
+    rows = [
+        [
+            InlineKeyboardButton(text=str(label), callback_data="noop"),
+            InlineKeyboardButton(text=str(value), callback_data="noop"),
+        ]
+        for label, value in fields
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"mo_v:{cb_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def service_detail_kb(db, cb_id: str, kind: str, deletable: bool, show_links: bool = False,
                        enabled: bool = True, auto_renew: bool = False, is_test: bool = False) -> InlineKeyboardMarkup:
     """دکمه‌های صفحه‌ی جزئیات یک سرویس.
