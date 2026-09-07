@@ -5039,6 +5039,12 @@ const SETTINGS_GROUPS = [
     { key: 'abangateway_payment_enabled', label: 'فعال بودن درگاه آبان گیت‌وی', type: 'bool' },
     { key: 'abangateway_api_key', label: 'کلید API آبان گیت‌وی', type: 'password' },
   ]},
+  { tab: 'payment', title: '⭐ NoapayBot - استارز تلگرام (تایید آنی)', fields: [
+    { key: 'noapay_payment_enabled', label: 'فعال بودن درگاه NoapayBot', type: 'bool' },
+    { key: 'noapay_api_key', label: 'کلید API NoapayBot', type: 'password' },
+    { key: 'noapay_webhook_secret', label: 'رمز HMAC وب‌هوک (X-Starbot-Signature)', type: 'password' },
+    { key: 'noapay_rate_toman_per_star', label: 'نرخ تومان به‌ازای هر استارز', type: 'number' },
+  ]},
   { tab: 'payment', title: '📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)', fields: [
     { key: 'card_to_card_auto_enabled', label: 'فعال بودن (نیازمند حداقل یک کارت فعال - پایین همین صفحه)', type: 'bool' },
     { key: 'card_to_card_auto_timeout_minutes', label: 'مهلت هر مبلغ (دقیقه) - بعدش می‌رود صف بررسی دستی', type: 'number' },
