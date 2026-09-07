@@ -93,6 +93,13 @@ async def _send_admin_notification(bot, admin_id, send_coro_factory, context_lab
 
 
 def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
+    # امنیت/هزینه: جلوگیری از اسپم پیام به دستیار هوش مصنوعی. هر بات (اصلی یا
+    # نمایندگی) نمونه‌ی مستقل خودش از این دیکشنری را دارد (بسته به closure)،
+    # پس رفتار بین بات‌های مختلف قاطی نمی‌شود. فقط حافظه‌ی درون‌پروسه‌ای است -
+    # با ری‌استارت پاک می‌شود که برای یک محدودیتِ ثانیه‌ای کاملاً کافی است.
+    _ai_last_call_at = {}
+    _AI_COOLDOWN_SECONDS = 3.0
+
     async def _send_receipt_to_admin(bot: Bot, admin_id: int, file_id: str, receipt_type: str, caption: str, reply_markup=None):
         if receipt_type == "document":
             return await bot.send_document(admin_id, file_id, caption=caption, reply_markup=reply_markup)
@@ -4237,6 +4244,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("فعلاً فقط پیام متنی رو می‌فهمم؛ لطفاً سوالت رو بنویس.")
             return
 
+        now = asyncio.get_event_loop().time()
+        last_at = _ai_last_call_at.get(user.id, 0.0)
+        if now - last_at < _AI_COOLDOWN_SECONDS:
+            await message.answer("لطفاً چند لحظه صبر کن و دوباره بفرست. ⏳")
+            return
+        _ai_last_call_at[user.id] = now
+
         history = await asyncio.to_thread(db.get_ai_conversation, user.id)
         thinking_msg = await message.answer("در حال بررسی... ⏳")
         try:
@@ -4624,6 +4638,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         ))
         await _refresh_service_card(message, user_id, service_id, f"✅ نام کانفیگ به «{new_label}» تغییر کرد. {note}")
 
+    # امنیت: عملیات‌های غیرقابل‌بازگشت (قطع دسترسی/انتقال/حذف) دیگر مستقیماً
+    # توسط تصمیم مدل اجرا نمی‌شوند - چون تنها سدِ راه در آن حالت، دستورالعمل
+    # متنیِ system prompt بود که با اشتباه مدل یا prompt injection قابل دور
+    # زدن است. این سه تابع حالا فقط اعتبارسنجی می‌کنند و همان کیبورد تاییدِ
+    # واقعی/تست‌شده‌ی مسیر دستی «سرویس‌های من» (mo_delok / svc_cutok /
+    # svc_transok) را نشان می‌دهند؛ اجرای واقعی فقط با تپ خودِ کاربر روی آن
+    # دکمه، توسط همان هندلرهای callback موجود، انجام می‌شود - نه اینجا.
     async def _ai_regenerate_service_access(message: Message, service_id) -> None:
         user_id = message.from_user.id
         item = _find_my_orders_item(user_id, service_id)
@@ -4638,16 +4659,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not server or not server["is_active"]:
             await message.answer("⛔️ سرور پنل مربوط به این سرویس یافت نشد یا غیرفعال است.")
             return
-        try:
-            provider = get_provider(server)
-            result = await provider.revoke_credentials(cc["username"])
-        except PanelError as e:
-            await message.answer(f"⛔️ قطع دسترسی ناموفق بود: {e}")
-            return
-        if result.subscription_url:
-            (await asyncio.to_thread(db.update_custom_config_subscription_url, cc["id"], result.subscription_url))
-        (await asyncio.to_thread(db.add_custom_config_history, cc["id"], "cut_access", "دسترسی قطع و لینک جدید صادر شد"))
-        await _refresh_service_card(message, user_id, service_id, "✅ دسترسی قبلی قطع شد و لینک جدید صادر شد.")
+        await message.answer(
+            "⚠️ این عملیات غیرقابل‌بازگشت است: لینک فعلی از کار می‌افتد و لینک "
+            "جدیدی (با همان حجم/زمان باقی‌مانده) صادر می‌شود.\nبرای تایید نهایی "
+            "روی دکمه‌ی زیر بزن:",
+            reply_markup=kb.service_cut_confirm_kb(str(service_id)),
+        )
 
     async def _ai_transfer_service(message: Message, bot: Bot, service_id, target_telegram_id) -> None:
         user_id = message.from_user.id
@@ -4658,72 +4675,35 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if _is_test_item(item):
             await message.answer("⛔️ این قابلیت برای کانفیگ تست در دسترس نیست.")
             return
-        cc = item["custom"]
         try:
             target_telegram_id = int(target_telegram_id)
         except (TypeError, ValueError):
             await message.answer("⛔️ آی‌دی مقصد نامعتبر است.")
             return
+        if target_telegram_id == user_id:
+            await message.answer("⛔️ نمی‌توانی سرویس را به خودت منتقل کنی.")
+            return
         target_user = await asyncio.to_thread(db.get_user, target_telegram_id)
         if not target_user:
             await message.answer("⛔️ آن کاربر بات را استارت نکرده یا آی‌دی نادرست است.")
             return
-        ok = (await asyncio.to_thread(db.transfer_custom_config, cc["id"], user_id, target_telegram_id))
-        if not ok:
-            await message.answer("⛔️ انتقال ناموفق بود.")
-            return
-        (await asyncio.to_thread(
-            db.add_custom_config_history, cc["id"], "transfer", f"از {user_id} به {target_telegram_id}",
-        ))
-        await message.answer("✅ کانفیگ منتقل شد.")
-        try:
-            await bot.send_message(
-                target_telegram_id,
-                f"📦 یک کانفیگ («{cc['display_name'] or cc['username']}») از طرف کاربر دیگری به حساب شما منتقل شد.\n"
-                "برای مشاهده، حساب کاربری ← سرویس‌ها و سفارش‌های من را ببینید.",
-            )
-        except Exception:
-            pass
+        await message.answer(
+            f"⚠️ این عملیات غیرقابل‌بازگشت است: سرویس برای همیشه به کاربر با آی‌دی "
+            f"{target_telegram_id} منتقل می‌شود.\nبرای تایید نهایی روی دکمه‌ی زیر بزن:",
+            reply_markup=kb.service_transfer_confirm_kb(str(service_id), target_telegram_id),
+        )
 
     async def _ai_delete_service(message: Message, service_id) -> None:
         user_id = message.from_user.id
-        if not service_id or len(str(service_id)) < 2:
+        item = _find_my_orders_item(user_id, service_id)
+        if not item:
             await message.answer("⛔️ این سرویس دیگر یافت نشد.")
             return
-        kind_char, raw_id = str(service_id)[0], str(service_id)[1:]
-        try:
-            item_id = int(raw_id)
-        except ValueError:
-            await message.answer("⛔️ درخواست نامعتبر.")
-            return
-
-        if kind_char == "c":
-            removed = (await asyncio.to_thread(db.delete_owned_config, item_id, user_id))
-            if not removed:
-                await message.answer("⛔️ این کانفیگ یافت نشد (شاید قبلاً حذف شده).")
-                return
-            await message.answer("✅ کانفیگ برای همیشه حذف شد.")
-        elif kind_char == "x":
-            all_cc = await asyncio.to_thread(db.get_custom_configs_for_user, user_id)
-            cc_row = next((c for c in all_cc if c["id"] == item_id), None)
-            if not cc_row:
-                await message.answer("⛔️ این کانفیگ یافت نشد (شاید قبلاً حذف شده).")
-                return
-            if cc_row["panel_server_id"]:
-                server = await asyncio.to_thread(db.get_panel_server, cc_row["panel_server_id"])
-                if server:
-                    try:
-                        provider = get_provider(server)
-                        await provider.delete_user(cc_row["username"])
-                    except Exception:
-                        logging.getLogger("handlers_user").exception(
-                            "حذف کاربر «%s» از پنل سرور #%s (توسط دستیار هوشمند) ناموفق بود؛ در هر صورت از لیست کاربر حذف می‌شود.",
-                            cc_row["username"], cc_row["panel_server_id"],
-                        )
-            (await asyncio.to_thread(db.delete_owned_custom_config, item_id, user_id))
-            await message.answer("✅ کانفیگ برای همیشه حذف شد.")
-        else:
-            await message.answer("⛔️ درخواست نامعتبر.")
+        await message.answer(
+            "⚠️ این عملیات غیرقابل‌بازگشت است: سرویس برای همیشه حذف می‌شود.\n"
+            "برای تایید نهایی روی دکمه‌ی زیر بزن:",
+            reply_markup=kb.my_order_delete_confirm_kb(str(service_id)),
+        )
 
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 

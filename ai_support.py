@@ -176,9 +176,9 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 ۲۰. برای «کانفیگ‌های تکی‌اش رو بفرست»، ابزار request_individual_configs را صدا بزن؛ اگر ok=true بود فقط بگو الان می‌فرستم، چون لیست واقعی بلافاصله توسط سیستم ارسال می‌شود.
 ۲۱. برای «فعال/غیرفعالش کن»، ابزار request_toggle_service_enabled را با service_id و enabled مناسب صدا بزن (فقط سرویس‌های custom)؛ اگر ok=true بود فقط بگو انجامش می‌دی، چون تغییرِ واقعی روی پنل بلافاصله توسط سیستم اعمال می‌شود.
 ۲۲. برای «اسمش رو عوض کن»، اول نامِ جدید را دقیقاً از کاربر بگیر، بعد request_rename_service را با service_id و new_name صدا بزن (فقط سرویس‌های custom)؛ اگر invalid_format یا name_taken برگشت، دلیل را ساده به کاربر بگو و نامِ دیگری بخواه.
-۲۳. برای «دسترسی فعلی رو قطع کن و لینک جدید بده» (قطع دسترسی/صدور مجدد)، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده که لینکِ فعلی از کار می‌افتد و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_regenerate_service_access را صدا بزن (فقط سرویس‌های custom).
-۲۴. برای «این سرویس رو به فلان آی‌دی منتقل کن»، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_transfer_service را با service_id و target_telegram_id صدا بزن (فقط سرویس‌های custom)؛ اگر target_user_not_found برگشت، بگو آن کاربر باید اول بات را استارت کند.
-۲۵. برای «این سرویس/کانفیگ رو کامل حذف کن»، این عملیات غیرقابل‌بازگشت است - دقیقاً مثل قانونِ ۱۳، اول صراحتاً هشدار بده که برای همیشه پاک می‌شود و منتظر تاییدِ صریح در پیامِ بعدی بمان، سپس request_delete_service را صدا بزن.
+۲۳. برای «دسترسی فعلی رو قطع کن و لینک جدید بده» (قطع دسترسی/صدور مجدد)، این عملیات غیرقابل‌بازگشت است - صراحتاً هشدار بده که لینکِ فعلی از کار می‌افتد، سپس request_regenerate_service_access را صدا بزن (فقط سرویس‌های custom). اگر ok=true برگشت، فقط بگو «یک دکمه‌ی تاییدِ نهایی برات می‌فرستم، خودت باید رویش بزنی» - چون اجرای واقعی فقط با تپِ خودِ کاربر روی همان دکمه انجام می‌شود، نه با این پیام.
+۲۴. برای «این سرویس رو به فلان آی‌دی منتقل کن»، این عملیات غیرقابل‌بازگشت است - صراحتاً هشدار بده، سپس request_transfer_service را با service_id و target_telegram_id صدا بزن (فقط سرویس‌های custom)؛ اگر target_user_not_found برگشت، بگو آن کاربر باید اول بات را استارت کند. اگر ok=true برگشت، فقط بگو «یک دکمه‌ی تاییدِ نهایی برات می‌فرستم» - اجرای واقعی فقط با تپِ کاربر روی آن دکمه انجام می‌شود.
+۲۵. برای «این سرویس/کانفیگ رو کامل حذف کن»، این عملیات غیرقابل‌بازگشت است - صراحتاً هشدار بده که برای همیشه پاک می‌شود، سپس request_delete_service را صدا بزن. اگر ok=true برگشت، فقط بگو «یک دکمه‌ی تاییدِ نهایی برات می‌فرستم» - اجرای واقعی فقط با تپِ کاربر روی آن دکمه انجام می‌شود، نه با این پیام.
 ۲۶. برای همه‌ی ابزارهایی که در بالا «فقط سرویس‌های custom» گفته شد، اگر service_id مربوط به یک کانفیگِ خریداری‌شده از پلن (kind=config) بود و ابزار reason=not_a_custom_service برگرداند، صادقانه بگو این قابلیت فقط برای کانفیگ‌های ساخته‌شده در دسترس است.
 
 دانش پایه (تنظیم‌شده توسط ادمین فروشگاه):
@@ -476,7 +476,9 @@ _TOOLS = [
             "غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر هشدار دادی و "
             "او در یک پیامِ جداگانه تایید کرد (مثل قانونِ تاییدِ خرید/تمدید با "
             "کیف‌پول) صدا بزن. خودش چیزی تغییر نمی‌دهد؛ اگر ok=true برگردد، "
-            "بلافاصله بعد از این پیام لینکِ قبلی باطل و لینکِ جدید صادر می‌شود."
+            "بلافاصله بعد از این پیام یک دکمه‌ی تاییدِ نهاییِ واقعی برای کاربر "
+            "ارسال می‌شود - عملیات واقعی فقط با تپِ خودِ کاربر روی همان دکمه "
+            "انجام می‌شود، نه با این پیام."
         ),
         "parameters": {
             "type": "object",
@@ -491,8 +493,9 @@ _TOOLS = [
             "تلگرامِ کاربرِ دیگر (که باید قبلاً بات را استارت کرده باشد). این "
             "عملیات غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر "
             "هشدار دادی و او در یک پیامِ جداگانه تایید کرد صدا بزن. خودش چیزی "
-            "منتقل نمی‌کند؛ اگر ok=true برگردد، بلافاصله بعد از این پیام انتقالِ "
-            "واقعی انجام می‌شود."
+            "منتقل نمی‌کند؛ اگر ok=true برگردد، بلافاصله بعد از این پیام یک دکمه‌ی "
+            "تاییدِ نهاییِ واقعی برای کاربر ارسال می‌شود - انتقالِ واقعی فقط با "
+            "تپِ خودِ کاربر روی همان دکمه انجام می‌شود، نه با این پیام."
         ),
         "parameters": {
             "type": "object",
@@ -509,8 +512,9 @@ _TOOLS = [
             "بررسیِ درخواستِ حذفِ کاملِ یک سرویس (config یا custom). این عملیات "
             "غیرقابل‌بازگشت است - فقط بعد از اینکه صراحتاً به کاربر هشدار دادی "
             "و او در یک پیامِ جداگانه تایید کرد صدا بزن. خودش چیزی حذف نمی‌کند؛ "
-            "اگر ok=true برگردد، بلافاصله بعد از این پیام حذفِ واقعی انجام "
-            "می‌شود."
+            "اگر ok=true برگردد، بلافاصله بعد از این پیام یک دکمه‌ی تاییدِ "
+            "نهاییِ واقعی برای کاربر ارسال می‌شود - حذفِ واقعی فقط با تپِ خودِ "
+            "کاربر روی همان دکمه انجام می‌شود، نه با این پیام."
         ),
         "parameters": {
             "type": "object",
@@ -537,53 +541,6 @@ _TOOLS = [
         },
     },
 ]
-
-
-def _split_keys(raw: str) -> list:
-    """یک رشته را (که ممکن است چند کلید API با خط جدید/کاما/فاصله از هم جدا
-    شده باشند) به لیست کلیدهای یکتا و پاک‌شده تبدیل می‌کند."""
-    if not raw:
-        return []
-    parts = raw.replace(",", "\n").splitlines()
-    seen = set()
-    keys = []
-    for p in parts:
-        k = p.strip()
-        if k and k not in seen:
-            seen.add(k)
-            keys.append(k)
-    return keys
-
-
-def resolve_gemini_keys(db) -> list:
-    """لیست کلیدهای API Gemini را برمی‌گرداند (پشتیبانی از چند کلید برای
-    چرخش خودکار هنگام برخورد با خطای سهمیه/429). اولویت با کلید(های)ی است
-    که ادمین از داخل پنل بات تنظیم کرده؛ اگر خالی بود، کلید سراسری .env."""
-    keys = _split_keys(db.get_setting("gemini_api_key", ""))
-    if keys:
-        return keys
-    return _split_keys(config.GEMINI_API_KEY)
-
-
-def resolve_gemini_key(db) -> str:
-    """اولین کلید API تنظیم‌شده را برمی‌گرداند (سازگاری با کدهای قبلی)."""
-    keys = resolve_gemini_keys(db)
-    return keys[0] if keys else ""
-
-
-def resolve_gemini_key_source(db) -> str:
-    """برای نمایش در پنل ادمین: کلید از کجا آمده؟ 'db' یعنی از داخل بات
-    تنظیم شده (فوری، بدون نیاز به ری‌استارت سرور). 'env' یعنی فقط از .env
-    این پروسه خوانده شده. 'none' یعنی هیچ‌کدام تنظیم نشده."""
-    if db.get_setting("gemini_api_key", ""):
-        return "db"
-    if config.GEMINI_API_KEY:
-        return "env"
-    return "none"
-
-
-def is_configured(db) -> bool:
-    return bool(resolve_gemini_keys(db))
 
 
 def _gb(n: int) -> float:
@@ -630,12 +587,12 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
         if o["status"] not in ("approved", "rejected")
     ]
 
-    services = []
     approved_with_config = [o for o in orders if o["status"] == "approved" and o["config_id"]]
-    for o in approved_with_config:
+
+    async def _plan_service(o):
         cfg = await asyncio.to_thread(db.get_config_by_id, o["config_id"])
         if not cfg or not cfg["link"]:
-            continue
+            return None
         try:
             info = await fetch_sub_info(cfg["link"])
         except Exception:
@@ -643,9 +600,9 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
             info = {}
         entry = {"order_id": o["id"], "service_id": f"c{cfg['id']}"}
         entry.update(_summarize_sub_info(info))
-        services.append(entry)
+        return entry
 
-    for cc in custom_configs:
+    async def _custom_service(cc):
         sub_url = cc["subscription_url"]
         entry = {
             "service_id": f"x{cc['id']}",
@@ -679,8 +636,17 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
             _log.exception("خطا هنگام خواندن وضعیت واقعی از پنل برای کانفیگ شخصی کاربر %s.", user_tg_id)
         except Exception:
             _log.exception("خطای غیرمنتظره هنگام خواندن وضعیت پنل برای کاربر %s.", user_tg_id)
+        return entry
 
-        services.append(entry)
+    # قبلاً هر سرویس (sub_info + استعلام زنده‌ی پنل) به‌صورت پشت‌سرهم/تک‌به‌تک
+    # await می‌شد؛ برای کاربرانی که چند سرویس دارند این یعنی چند برابر تاخیر
+    # شبکه قبل از اینکه دستیار حتی بتواند شروع به جواب‌دادن کند. با gather
+    # همه‌ی این I/O های مستقل هم‌زمان اجرا می‌شوند.
+    results = await asyncio.gather(
+        *[_plan_service(o) for o in approved_with_config],
+        *[_custom_service(cc) for cc in custom_configs],
+    )
+    services = [r for r in results if r is not None]
 
     return {
         "wallet_balance_toman": wallet,
@@ -1186,7 +1152,30 @@ async def _tool_request_delete_service(db, user_tg_id: int, args: dict) -> dict:
     return {"ok": True, "service_id": service_id}
 
 
-async def _run_tool(db, user_tg_id: int, name: str, args: dict) -> dict:
+# نام ابزارهایی که هم بدون آرگومان‌اند و هم فقط می‌خوانند (هیچ نوشتنی حتی
+# غیرمستقیم ندارند) - در طول یک get_reply واحد (چند دور tool-calling)
+# می‌شود جواب اولشان را کش کرد؛ چون هیچ نوشتنِ واقعی‌ای وسط همین تابع رخ
+# نمی‌دهد (خرید/تمدید واقعی فقط بعد از برگشتن get_reply و با ui_action در
+# handler انجام می‌شود)، این کش هیچ داده‌ی بات‌مانده‌ای به مدل نمی‌دهد و فقط
+# از round-trip های تکراری (که مدل گاهی اشتباهاً در چند دور صدا می‌زند)
+# جلوگیری می‌کند.
+_CACHEABLE_NOARG_TOOLS = frozenset({
+    "check_account_status", "list_products", "list_payment_methods", "get_server_countries",
+})
+
+
+async def _run_tool(db, user_tg_id: int, name: str, args: dict, cache: "dict | None" = None) -> dict:
+    if cache is not None and name in _CACHEABLE_NOARG_TOOLS and name in cache:
+        return cache[name]
+
+    result = await _run_tool_uncached(db, user_tg_id, name, args)
+
+    if cache is not None and name in _CACHEABLE_NOARG_TOOLS:
+        cache[name] = result
+    return result
+
+
+async def _run_tool_uncached(db, user_tg_id: int, name: str, args: dict) -> dict:
     if name == "check_account_status":
         return await _tool_check_account_status(db, user_tg_id)
     if name == "list_products":
@@ -1282,7 +1271,11 @@ async def _openai_chat(provider: str, api_key: str, model: str, messages: list):
         "tool_choice": "auto",
         "temperature": 0.2,
     }
-    timeout = aiohttp.ClientTimeout(total=75)
+    # قبلاً ۷۵ ثانیه بود؛ یعنی اگر یک کلید/پروایدر کند یا گیر کرده بود، کاربر
+    # تا ۷۵ ثانیه معطل یک تلاش می‌ماند قبل از رفتن سراغ کلید/پروایدر بعدی.
+    # ۳۰ ثانیه برای این مدل‌های سریع (Groq/OpenRouter) به‌اندازه‌ی کافی زیاد
+    # است و rotate بین کلیدها را چند برابر سریع‌تر می‌کند.
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
             body = await resp.text()
@@ -1306,6 +1299,11 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
     last_exc = None
     for api_key in api_keys:
         client = _build_client(api_key)
+        # کش فقط برای همین یک تلاش (یک کلید API) زنده می‌ماند - اگر این کلید
+        # با خطای موقتی شکست بخورد و کلید بعدی امتحان شود، کش تازه ساخته
+        # می‌شود؛ داده‌ی بات‌مانده باقی نمی‌ماند.
+        tool_cache: dict = {}
+        tools_used: list = []
         try:
             escalate, ui_action = False, None
             for _ in range(_MAX_TOOL_ROUNDS):
@@ -1315,12 +1313,20 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
                 calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
                 if not calls:
                     text = "".join(p.text for p in parts if getattr(p, "text", None)).strip()
-                    return {"reply": text, "escalate": escalate, "ui_action": ui_action}
+                    return {"reply": text, "escalate": escalate, "ui_action": ui_action, "tools_used": tools_used}
                 contents.append(candidate.content)
-                for fc in calls:
+                # اگر مدل در یک دور چند ابزارِ مستقل را هم‌زمان صدا بزند (مثلاً
+                # list_products و list_payment_methods)، هر دو به‌صورت موازی
+                # اجرا می‌شوند نه پشت‌سرهم - نتیجه‌ها همان ترتیبِ calls برمی‌گردند
+                # پس پردازشِ ui_action/contents زیر دقیقاً همان رفتار قبلی
+                # (ترتیبی) را حفظ می‌کند.
+                results = await asyncio.gather(
+                    *[_run_tool(db, user_tg_id, fc.name, dict(fc.args or {}), tool_cache) for fc in calls]
+                )
+                for fc, result in zip(calls, results):
+                    tools_used.append(fc.name)
                     if fc.name == "escalate_to_human":
                         escalate = True
-                    result = await _run_tool(db, user_tg_id, fc.name, dict(fc.args or {}))
                     if fc.name == "show_purchase_options" and result.get("ok"):
                         ui_action = {"type": "show_product", "product_id": result["product_id"]}
                     if fc.name == "request_test_config" and result.get("eligible"):
@@ -1359,8 +1365,8 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
                         ui_action = {"type": "delete_service", "service_id": result["service_id"]}
                     contents.append(types.Content(role="user", parts=[types.Part.from_function_response(name=fc.name, response=result)]))
                 if escalate:
-                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
-            return {"reply": "متوجه شدم؛ برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action}
+                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action, "tools_used": tools_used}
+            return {"reply": "متوجه شدم؛ برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action, "tools_used": tools_used}
         except Exception as exc:
             last_exc = exc
             if not _is_retryable(exc):
@@ -1378,6 +1384,8 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
     last_exc = None
     for api_key in keys:
         messages = list(base_messages)
+        tool_cache: dict = {}
+        tools_used: list = []
         try:
             ui_action = None
             for _ in range(_MAX_TOOL_ROUNDS):
@@ -1387,10 +1395,12 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
                 tool_calls = msg.get("tool_calls") or []
                 content = msg.get("content") or ""
                 if not tool_calls:
-                    return {"reply": content.strip(), "escalate": False, "ui_action": ui_action}
+                    return {"reply": content.strip(), "escalate": False, "ui_action": ui_action, "tools_used": tools_used}
                 assistant_msg = {"role": "assistant", "content": content, "tool_calls": tool_calls}
                 messages.append(assistant_msg)
                 escalate = False
+
+                parsed_calls = []
                 for tc in tool_calls:
                     fn = tc.get("function") or {}
                     name = fn.get("name", "")
@@ -1400,7 +1410,15 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
                         args = {}
                     if name == "escalate_to_human":
                         escalate = True
-                    result = await _run_tool(db, user_tg_id, name, args)
+                    tools_used.append(name)
+                    parsed_calls.append((tc, name, args))
+
+                # چند ابزارِ مستقلِ درخواستی در یک دور، موازی اجرا می‌شوند
+                # (نگاه کن به توضیح مشابه در _run_gemini).
+                results = await asyncio.gather(
+                    *[_run_tool(db, user_tg_id, name, args, tool_cache) for _, name, args in parsed_calls]
+                )
+                for (tc, name, _args), result in zip(parsed_calls, results):
                     if name == "show_purchase_options" and result.get("ok"):
                         ui_action = {"type": "show_product", "product_id": result["product_id"]}
                     if name == "request_test_config" and result.get("eligible"):
@@ -1439,8 +1457,8 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
                         ui_action = {"type": "delete_service", "service_id": result["service_id"]}
                     messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result, ensure_ascii=False)})
                 if escalate:
-                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action}
-            return {"reply": "برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action}
+                    return {"reply": "باشه، مکالمه رو به پشتیبانی انسانی وصل می‌کنم؛ لطفاً چند لحظه صبر کن. 🙏", "escalate": True, "ui_action": ui_action, "tools_used": tools_used}
+            return {"reply": "برای اینکه جواب اشتباه ندم، این مورد رو به پشتیبانی انسانی می‌سپارم.", "escalate": True, "ui_action": ui_action, "tools_used": tools_used}
         except Exception as exc:
             last_exc = exc
             if not _is_retryable(exc):
@@ -1458,6 +1476,7 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
     mode = resolve_provider_mode(db)
     providers = configured_providers(db) if mode == "auto" else [mode]
     last_exc = None
+    turn_started = asyncio.get_event_loop().time()
     for provider in providers:
         try:
             if provider == "gemini":
@@ -1465,6 +1484,17 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str) -> di
             else:
                 result = await _run_openai_compatible(db, user_tg_id, history, user_message, system_prompt, provider)
             if result.get("reply"):
+                # لاگِ آنالیتیکسِ سبک (بدون نیاز به تغییر اسکیمای دیتابیس):
+                # هر تِرن موفق دستیار، یک خط ساختاریافته در لاگ می‌نویسد -
+                # پروایدر/مدلِ استفاده‌شده، مدت زمان، تعداد دورِ ابزار، آیا
+                # escalate شد، و اسم ابزارهایی که صدا زده شدند. با هر ابزار
+                # لاگِ متمرکز (Loki/ELK/...) قابل agregate و dashboard شدن است.
+                elapsed_ms = round((asyncio.get_event_loop().time() - turn_started) * 1000)
+                _log.info(
+                    "ai_turn user=%s provider=%s elapsed_ms=%s escalate=%s tools=%s",
+                    user_tg_id, provider, elapsed_ms, result.get("escalate", False),
+                    ",".join(result.get("tools_used", [])) or "-",
+                )
                 return result
             raise RuntimeError(f"{provider} پاسخ خالی داد")
         except Exception as exc:
