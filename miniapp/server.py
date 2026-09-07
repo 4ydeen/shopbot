@@ -414,8 +414,15 @@ def api_me(auth=Depends(get_verified_user)):
 def api_orders(auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
     orders = db.get_user_orders(tg_id)
+    # محصولات is_auto_provision به‌جای بانک کانفیگ، مستقیماً یک ردیف در
+    # custom_configs می‌سازند (تا حجم/انقضا قابل پیگیری باشد)؛ سفارششان هیچ‌وقت
+    # configs مرتبط ندارد. بدون این استثنا، همان خرید هم این‌جا (ناقص، بدون
+    # لینک/انقضا) و هم در /api/custom-configs (کامل) نمایش داده می‌شد.
+    custom_order_ids = {cc["order_id"] for cc in db.get_custom_configs_for_user(tg_id) if cc["order_id"]}
     result = []
     for o in orders:
+        if o["status"] == "approved" and not o["is_custom_config"] and o["id"] in custom_order_ids:
+            continue
         if o["is_custom_config"]:
             result.append({
                 "id": o["id"],
