@@ -62,6 +62,8 @@ import exchange_rate
 import crypto_payment
 import abangateway_client
 import abangateway_payment
+import noapay_client
+import noapay_payment
 import payment_engine
 import card_to_card_payment
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
@@ -713,6 +715,7 @@ def api_custom_config_info(auth=Depends(get_verified_user)):
         and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
         "abangateway_enabled": db.get_setting("abangateway_payment_enabled", "0") == "1"
         and bool(_resolve_abangateway_key(db)) and bool(API_BASE_URL),
+        "noapay_enabled": noapay_payment.noapay_payment_available(db),
         "card_to_card_enabled": db.get_setting("card_to_card_enabled", "1") == "1",
         "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
     }
@@ -1296,6 +1299,7 @@ def _payment_flags(db: Database, amount: int, product_id: int = None) -> dict:
         and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL) and _ok("crypto"),
         "abangateway_enabled": db.get_setting("abangateway_payment_enabled", "0") == "1"
         and bool(_resolve_abangateway_key(db)) and bool(API_BASE_URL) and _ok("abangateway"),
+        "noapay_enabled": noapay_payment.noapay_payment_available(db) and _ok("noapay"),
         "card_to_card_auto_enabled": db.get_setting("card_to_card_auto_enabled", "0") == "1"
         and bool(db.list_card_to_card_cards(only_active=True)) and _ok("card_auto"),
     }
@@ -1759,6 +1763,109 @@ async def api_abangateway_webhook(request: Request, tenant: Tenant = Depends(get
                     )
                 except Exception:
                     pass
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# پرداخت با خرید استارز تلگرام (NoapayBot)
+# ---------------------------------------------------------------------------
+
+async def _create_noapay_invoice_for(
+    db: Database, tenant, tg_id: int, kind: str, ref_id: int, amount_toman: int,
+    order_name: str,
+):
+    try:
+        return await noapay_payment.create_invoice_for(
+            db, tenant.tenant_id, tg_id, kind, ref_id, amount_toman, order_name,
+        )
+    except noapay_payment.NoapayPaymentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/orders/{order_id}/noapay-invoice")
+async def api_order_noapay_invoice(order_id: int, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
+    _require_payment_method_allowed(db, order["final_price"], "noapay", order["product_id"])
+    if order["is_custom_config"]:
+        order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
+    else:
+        product = db.get_product(order["product_id"])
+        order_label = f"سفارش #{order_id} - {product['name'] if product else ''}"
+    result = await _create_noapay_invoice_for(
+        db, tenant, tg_id, "order", order_id, order["final_price"],
+        order_name=order_label,
+    )
+    return result
+
+
+class NoapayWalletInvoiceRequest(BaseModel):
+    topup_id: int
+
+
+@app.post("/api/wallet/noapay-invoice")
+async def api_wallet_noapay_invoice(body: NoapayWalletInvoiceRequest, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    topup = db.get_topup(body.topup_id)
+    if not topup or topup["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
+    if topup["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این درخواست شارژ قبلاً بررسی شده است.")
+    _require_payment_method_allowed(db, topup["amount"], "noapay")
+    result = await _create_noapay_invoice_for(
+        db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
+        order_name=f"شارژ کیف پول #{body.topup_id}",
+    )
+    result["topup_id"] = body.topup_id
+    return result
+
+
+@app.post("/api/webhooks/noapay")
+async def api_noapay_webhook(request: Request, tenant: Tenant = Depends(get_tenant)):
+    """
+    برخلاف آبان گیت وی، NoapayBot امضای وب‌هوک را با HMAC-SHA256 مستند کرده
+    (هدر X-Starbot-Signature). با این‌حال، طبق همان الگوی دفاعی abangateway،
+    حتی بعد از تایید امضا وضعیت واقعی با کلید API خودمان از GET /invoice/:token
+    استعلام می‌شود (noapay_payment.try_verify_and_finalize)، نه از بدنه‌ی وب‌هوک.
+    """
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body or b"{}")
+    except Exception:
+        body = {}
+
+    db = tenant.db
+    signature = request.headers.get("X-Starbot-Signature", "")
+    secret = noapay_payment.resolve_webhook_secret(db)
+    if not secret or not noapay_payment.verify_webhook_signature(secret, raw_body, signature):
+        db.log_webhook_event(gateway="noapay", txn_id=body.get("invoice_token"), verified=False,
+                              status="invalid_signature", raw_body=raw_body.decode("utf-8", "ignore"))
+        raise HTTPException(status_code=403, detail="امضای وب‌هوک نامعتبر است.")
+
+    invoice_token = noapay_payment.extract_invoice_token_from_webhook(body)
+    if not invoice_token:
+        raise HTTPException(status_code=400, detail="شناسه‌ی فاکتور (invoice_token) در وب‌هوک پیدا نشد.")
+
+    invoice = db.get_noapay_invoice_by_token(invoice_token)
+    if not invoice:
+        db.log_webhook_event(gateway="noapay", txn_id=invoice_token, verified=False,
+                              status="ignored", error="فاکتور در دیتابیس پیدا نشد.",
+                              raw_body=raw_body.decode("utf-8", "ignore"))
+        return {"status": "ignored"}
+
+    result = await noapay_payment.try_verify_and_finalize(db, invoice)
+    db.log_webhook_event(gateway="noapay", txn_id=invoice_token, verified=(result == "verified_now"),
+                          status=result, raw_body=raw_body.decode("utf-8", "ignore"))
+    if result != "verified_now":
+        # already_delivered / not_paid_yet / expired / rejected / error:...
+        return {"status": result}
+
+    invoice = db.get_noapay_invoice_by_token(invoice_token)
+    await _complete_generic_gateway_payment(db, tenant, invoice)
     return {"status": "ok"}
 
 
@@ -4374,6 +4481,49 @@ def api_admin_set_abangateway_settings(body: AbanGatewaySettingsUpdate, auth=Dep
     if body.enabled and (not api_key or not API_BASE_URL):
         raise HTTPException(status_code=400, detail="ابتدا کلید API آبان گیت وی را تنظیم کن. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
     db.set_setting("abangateway_payment_enabled", "1" if body.enabled else "0")
+    return {"status": "ok"}
+
+
+class NoapaySettingsUpdate(BaseModel):
+    enabled: bool
+    api_key: Optional[str] = None
+    webhook_secret: Optional[str] = None
+    rate_toman_per_star: Optional[int] = None
+
+
+@app.get("/api/admin/settings/noapay")
+def api_admin_get_noapay_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    api_key = noapay_payment.resolve_api_key(db)
+    return {
+        "enabled": db.get_setting("noapay_payment_enabled", "0") == "1",
+        "has_own_key": bool(db.get_setting("noapay_api_key", "")),
+        "masked_key": (f"...{api_key[-4:]}" if api_key else ""),
+        "has_webhook_secret": bool(db.get_setting("noapay_webhook_secret", "")),
+        "rate_toman_per_star": noapay_payment.resolve_rate(db),
+        "gateway_configured": noapay_payment.noapay_payment_available(db),
+        "key_source": noapay_payment.resolve_api_key_source(db),
+    }
+
+
+@app.post("/api/admin/settings/noapay")
+def api_admin_set_noapay_settings(body: NoapaySettingsUpdate, auth=Depends(require_senior_admin)):
+    admin_id, db, _ = auth
+    if body.api_key is not None:
+        new_key = body.api_key.strip()
+        db.set_setting("noapay_api_key", new_key)
+        db.log_admin_action(admin_id, "noapay_key_change", "کلید API NoapayBot از مینی‌اپ تغییر کرد." if new_key else "کلید API NoapayBot از مینی‌اپ حذف شد.")
+    if body.webhook_secret is not None:
+        db.set_setting("noapay_webhook_secret", body.webhook_secret.strip())
+        db.log_admin_action(admin_id, "noapay_key_change", "رمز وب‌هوک NoapayBot از مینی‌اپ تغییر کرد.")
+    if body.rate_toman_per_star is not None:
+        if body.rate_toman_per_star <= 0:
+            raise HTTPException(status_code=400, detail="نرخ تبدیل باید عددی بزرگ‌تر از صفر باشد.")
+        db.set_setting("noapay_rate_toman_per_star", str(int(body.rate_toman_per_star)))
+        db.log_admin_action(admin_id, "noapay_key_change", f"نرخ استارز NoapayBot از مینی‌اپ: {body.rate_toman_per_star} تومان")
+    if body.enabled and not noapay_payment.noapay_payment_available(db):
+        raise HTTPException(status_code=400, detail="ابتدا کلید API، رمز وب‌هوک و نرخ تبدیل NoapayBot را تنظیم کن. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
+    db.set_setting("noapay_payment_enabled", "1" if body.enabled else "0")
     return {"status": "ok"}
 
 
