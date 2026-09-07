@@ -4521,8 +4521,12 @@ def api_admin_set_noapay_settings(body: NoapaySettingsUpdate, auth=Depends(requi
             raise HTTPException(status_code=400, detail="نرخ تبدیل باید عددی بزرگ‌تر از صفر باشد.")
         db.set_setting("noapay_rate_toman_per_star", str(int(body.rate_toman_per_star)))
         db.log_admin_action(admin_id, "noapay_key_change", f"نرخ استارز NoapayBot از مینی‌اپ: {body.rate_toman_per_star} تومان")
-    if body.enabled and not noapay_payment.noapay_payment_available(db):
-        raise HTTPException(status_code=400, detail="ابتدا کلید API، رمز وب‌هوک و نرخ تبدیل NoapayBot را تنظیم کن. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
+    if body.enabled:
+        _key_ok = bool(noapay_payment.resolve_api_key(db))
+        _secret_ok = bool(noapay_payment.resolve_webhook_secret(db))
+        _rate_ok = noapay_payment.resolve_rate(db) > 0
+        if not (_key_ok and _secret_ok and _rate_ok and API_BASE_URL):
+            raise HTTPException(status_code=400, detail="ابتدا کلید API، رمز وب‌هوک و نرخ تبدیل NoapayBot را تنظیم کن. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
     db.set_setting("noapay_payment_enabled", "1" if body.enabled else "0")
     return {"status": "ok"}
 
