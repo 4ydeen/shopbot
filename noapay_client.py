@@ -13,6 +13,7 @@
 
 import logging
 
+import asyncio
 import aiohttp
 
 NOAPAY_BASE_URL = "https://noapay.mirname.xyz/api/v1"
@@ -62,7 +63,7 @@ async def _request(method: str, api_key: str, path: str, json_body: dict = None,
                 except Exception:
                     data = {}
                 status = resp.status
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning("خطای شبکه در ارتباط با NoapayBot: %s", e)
         raise NoapayError(f"خطای شبکه در ارتباط با درگاه پرداخت: {e}")
 

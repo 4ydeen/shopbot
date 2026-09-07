@@ -69,6 +69,7 @@ import hmac
 import json
 import logging
 
+import asyncio
 import aiohttp
 
 logger = logging.getLogger("payment_engine")
@@ -210,7 +211,7 @@ async def _http_request(method: str, url: str, headers: dict, body_type: str, bo
                         f"درگاه با خطا پاسخ داد (HTTP {resp.status}): {text[:300]}"
                     )
                 return data
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         raise PaymentEngineError(f"اتصال به درگاه ناموفق بود: {e}")
 
 

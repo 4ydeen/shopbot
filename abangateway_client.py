@@ -11,6 +11,7 @@
 
 import logging
 
+import asyncio
 import aiohttp
 
 ABANGATEWAY_BASE_URL = "https://abangateway.ir/api/v1"
@@ -58,7 +59,7 @@ async def _request(method: str, api_key: str, path: str, json_body: dict = None)
                 except Exception:
                     data = {}
                 status = resp.status
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning("خطای شبکه در ارتباط با آبان گیت وی: %s", e)
         raise AbanGatewayError(f"خطای شبکه در ارتباط با درگاه پرداخت: {e}")
 

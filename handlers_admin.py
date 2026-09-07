@@ -22,7 +22,7 @@ from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.filters import Command, StateFilter
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
 import keyboards as kb
 from database import Database, MENU_BUTTON_META
@@ -6129,13 +6129,26 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         success, failed = 0, 0
         sent_targets = []
         for uid in user_ids:
-            try:
-                sent = await bot.copy_message(uid, from_chat_id=chat_id, message_id=message_id)
-                success += 1
-                if seconds > 0:
-                    sent_targets.append((uid, sent.message_id))
-            except Exception:
-                failed += 1
+            # قبلاً بدون sleep/retry بین ارسال‌ها بود: برای لیست‌های بزرگ خیلی سریع
+            # به محدودیت flood تلگرام می‌خورد و از همان‌جا به بعد اکثر پیام‌ها با
+            # TelegramRetryAfter رد می‌شدند (چون فقط except Exception بی‌قید-وشرط
+            # می‌گرفت و شمرده می‌شد failed، بدون صبر/تلاش مجدد) - از دید ادمین این
+            # دقیقاً همان «هنگ‌کردن/کرش پیام همگانی» بود، چون هم اکثر ارسال‌ها ناموفق
+            # می‌ماندند و هم کل حلقه به‌خاطر همین خطاهای پشت‌سرهم به‌شدت کند می‌شد.
+            for _attempt in range(3):
+                try:
+                    sent = await bot.copy_message(uid, from_chat_id=chat_id, message_id=message_id)
+                    success += 1
+                    if seconds > 0:
+                        sent_targets.append((uid, sent.message_id))
+                    break
+                except TelegramRetryAfter as e:
+                    await asyncio.sleep(e.retry_after + 1)
+                    continue
+                except Exception:
+                    failed += 1
+                    break
+            await asyncio.sleep(0.05)
         for uid, mid in sent_targets:
             await schedule_message_autodelete(db, uid, mid, seconds)
         label = _duration_label_fa(seconds) if seconds > 0 else "بدون حذف خودکار"
