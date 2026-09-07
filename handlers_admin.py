@@ -45,6 +45,7 @@ from reseller_auto_provision import provision_auto_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from renewal_engine import execute_renewal, RenewalError
 from states import (
+    AdminCreateDiscount,
     AdminAddCategory,
     AdminAddProduct,
     AdminEditProduct,
