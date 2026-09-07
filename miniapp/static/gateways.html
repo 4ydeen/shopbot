@@ -5,63 +5,190 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>درگاه‌های پرداخت سفارشی</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0a0e17; --card:#131a29; --border:#1f2937; --text:#e5e7eb; --muted:#9ca3af;
-    --accent:#3b82f6; --danger:#ef4444; --ok:#22c55e; --input:#0f1522;
+    --bg-0:#070b12; --bg-1:#0c1220; --card:#111a2b; --card-2:#0d1524;
+    --border:#1e2c42; --border-soft:#182338;
+    --text:#e8edf7; --muted:#8b96ab; --muted-2:#6b7690;
+    --accent:#22c58b; --accent-2:#17e3a3; --accent-soft:rgba(34,197,139,.14);
+    --blue:#4f8cff; --danger:#ff5470; --danger-soft:rgba(255,84,112,.14);
+    --ok:#22c58b; --ok-soft:rgba(34,197,139,.14);
+    --input:#0a101c; --radius:16px; --radius-sm:10px;
+    --shadow-card: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 30px -16px rgba(0,0,0,.6);
   }
   *{box-sizing:border-box}
-  body{background:var(--bg);color:var(--text);font-family:Tahoma,sans-serif;margin:0;padding:16px;font-size:14px}
-  h2{font-size:18px;margin:4px 0 16px}
-  h3{font-size:15px;margin:0 0 10px;color:var(--accent)}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
-  .row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-  .row > *{flex:1;min-width:110px}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  input[type=text],input[type=number],select,textarea{
-    width:100%;background:var(--input);border:1px solid var(--border);color:var(--text);
-    border-radius:8px;padding:8px;font-family:inherit;font-size:13px;direction:ltr;text-align:left
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(900px 500px at 15% -10%, rgba(34,197,139,.10), transparent 60%),
+      radial-gradient(700px 500px at 110% 10%, rgba(79,140,255,.08), transparent 55%),
+      var(--bg-0);
+    color:var(--text);
+    font-family:'Vazirmatn',Tahoma,sans-serif;
+    margin:0; padding:16px 14px 90px;
+    font-size:14px; line-height:1.7;
+    -webkit-font-smoothing:antialiased;
   }
-  textarea{min-height:70px;resize:vertical;font-family:monospace;font-size:12px}
-  .kv-row{display:flex;gap:6px;margin-bottom:6px}
+  ::selection{background:var(--accent-soft)}
+  a{color:var(--accent-2)}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .back-btn{
+    display:inline-flex;align-items:center;gap:6px;color:var(--text);text-decoration:none;
+    font-size:12.5px;font-weight:600;background:var(--card);border:1px solid var(--border);
+    padding:7px 12px;border-radius:999px;transition:.15s ease;
+  }
+  .back-btn:hover{border-color:var(--accent);color:var(--accent-2)}
+  .back-btn svg{width:14px;height:14px;transform:scaleX(-1)}
+
+  .page-head{margin:6px 2px 18px}
+  .page-head h2{
+    font-size:20px;margin:0 0 6px;font-weight:800;letter-spacing:-.2px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .page-head .icon-badge{
+    display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;
+    border-radius:11px;background:linear-gradient(150deg,var(--accent) 0%,var(--blue) 130%);
+    font-size:16px;box-shadow:0 6px 18px -8px rgba(34,197,139,.55);
+  }
+  .page-head p.muted{margin:0;max-width:60ch}
+
+  h3{font-size:14.5px;margin:0 0 12px;color:var(--text);font-weight:700;
+     display:flex;align-items:center;gap:7px}
+  h3::before{content:"";width:3px;height:15px;border-radius:3px;
+     background:linear-gradient(180deg,var(--accent),var(--blue));display:inline-block}
+
+  .card{
+    background:linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px; margin-bottom:14px; box-shadow:var(--shadow-card);
+  }
+
+  .row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .row > *{flex:1;min-width:130px}
+  label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px;font-weight:600;letter-spacing:.1px}
+
+  input[type=text],input[type=number],select,textarea{
+    width:100%;background:var(--input);border:1px solid var(--border-soft);color:var(--text);
+    border-radius:var(--radius-sm);padding:10px 11px;font-family:inherit;font-size:13px;
+    direction:ltr;text-align:left;transition:.15s ease;
+  }
+  input::placeholder,textarea::placeholder{color:var(--muted-2)}
+  input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{
+    outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);
+  }
+  select{appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238b96ab' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:left 10px center;padding-left:30px;
+  }
+  textarea{min-height:74px;resize:vertical;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;line-height:1.6}
+
+  .kv-row{display:flex;gap:6px;margin-bottom:7px;align-items:center}
   .kv-row input{flex:1}
   .kv-row button{flex:0 0 auto}
+  .kv-row .toggle{background:var(--input);border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+     padding:8px 10px;white-space:nowrap;margin-bottom:0}
+
   button{
-    background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;
-    cursor:pointer;font-size:13px;font-family:inherit
+    background:linear-gradient(150deg,var(--accent) 0%, #12b586 100%);color:#04140e;border:none;
+    border-radius:var(--radius-sm);padding:10px 16px;cursor:pointer;font-size:13px;font-weight:700;
+    font-family:inherit;transition:.15s ease;box-shadow:0 8px 18px -10px rgba(34,197,139,.6);
   }
-  button.secondary{background:#374151}
-  button.danger{background:var(--danger)}
-  button.small{padding:5px 9px;font-size:12px}
-  .toggle{display:flex;align-items:center;gap:6px}
-  .gw-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px}
-  .badge{font-size:11px;padding:2px 8px;border-radius:20px}
-  .badge.on{background:rgba(34,197,94,.15);color:var(--ok)}
-  .badge.off{background:rgba(239,68,68,.15);color:var(--danger)}
-  .muted{color:var(--muted);font-size:12px}
-  .msg{padding:10px;border-radius:8px;margin-bottom:10px;font-size:13px}
-  .msg.ok{background:rgba(34,197,94,.12);color:var(--ok)}
-  .msg.err{background:rgba(239,68,68,.12);color:var(--danger)}
-  details summary{cursor:pointer;color:var(--accent);margin:10px 0 6px;font-size:13px}
-  .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-  .hint{font-size:11px;color:var(--muted);margin-top:2px}
-  code{background:var(--input);padding:1px 5px;border-radius:4px;font-size:11px}
+  button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+  button:active{transform:translateY(0);filter:brightness(.97)}
+  button.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);box-shadow:none}
+  button.secondary:hover{border-color:var(--accent);color:var(--accent-2)}
+  button.danger{background:linear-gradient(150deg,var(--danger) 0%,#c8304a 100%);color:#fff;box-shadow:0 8px 18px -10px rgba(255,84,112,.55)}
+  button.small{padding:6px 11px;font-size:12px;border-radius:9px}
+
+  /* toggle switches (real checkboxes underneath, styled as sliders) */
+  .toggle{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .toggle input[type=checkbox]{
+    appearance:none;-webkit-appearance:none;width:38px;height:22px;border-radius:999px;
+    background:var(--input);border:1px solid var(--border-soft);position:relative;cursor:pointer;
+    flex:0 0 auto;transition:.2s ease;
+  }
+  .toggle input[type=checkbox]::after{
+    content:"";position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;
+    background:var(--muted-2);transition:.2s ease;
+  }
+  .toggle input[type=checkbox]:checked{background:var(--accent-soft);border-color:var(--accent)}
+  .toggle input[type=checkbox]:checked::after{background:var(--accent);right:18px}
+  .toggle label{margin:0;font-size:12.5px;color:var(--text);font-weight:600;cursor:pointer}
+
+  .gw-item{
+    display:flex;justify-content:space-between;align-items:center;padding:12px 14px;
+    background:var(--card-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+    margin-bottom:9px;transition:.15s ease;
+  }
+  .gw-item:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .gw-item b{font-size:13.5px}
+
+  .badge{font-size:10.5px;padding:3px 10px;border-radius:20px;font-weight:700;margin-inline-start:6px;
+     display:inline-flex;align-items:center;gap:4px}
+  .badge::before{content:"";width:6px;height:6px;border-radius:50%;display:inline-block}
+  .badge.on{background:var(--ok-soft);color:var(--ok)}
+  .badge.on::before{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .badge.off{background:var(--danger-soft);color:var(--danger)}
+  .badge.off::before{background:var(--danger)}
+
+  .muted{color:var(--muted);font-size:12.5px}
+  .msg{padding:11px 13px;border-radius:var(--radius-sm);margin-bottom:12px;font-size:13px;font-weight:600;
+     border:1px solid transparent;animation:msgIn .18s ease}
+  @keyframes msgIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+  .msg.ok{background:var(--ok-soft);color:var(--ok);border-color:rgba(34,197,139,.3)}
+  .msg.err{background:var(--danger-soft);color:var(--danger);border-color:rgba(255,84,112,.3)}
+
+  details{margin-bottom:8px;border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+     background:rgba(255,255,255,.012);overflow:hidden}
+  details summary{
+    cursor:pointer;color:var(--text);margin:0;font-size:13px;font-weight:700;list-style:none;
+    padding:12px 14px;display:flex;align-items:center;justify-content:space-between;
+  }
+  details summary::-webkit-details-marker{display:none}
+  details summary::after{content:"›";font-size:20px;color:var(--muted);transform:rotate(90deg);
+     transition:transform .18s ease;line-height:0}
+  details[open] summary::after{transform:rotate(-90deg)}
+  details[open] summary{border-bottom:1px solid var(--border-soft)}
+  details > summary + *{padding:14px}
+  details.guide summary{color:var(--accent-2)}
+  details.guide .card{margin:0;box-shadow:none;background:transparent;border:none;padding:0}
+
+  .actions{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.6}
+  code{background:var(--input);border:1px solid var(--border-soft);padding:1px 6px;border-radius:5px;
+     font-size:11px;color:var(--accent-2);font-family:ui-monospace,monospace}
+
+  form > details{margin-top:2px}
+  #list.card{padding:12px}
+  #list .muted{padding:6px 2px;display:block}
 </style>
 </head>
 <body>
-<a href="#" onclick="history.back();return false;" style="color:var(--accent);text-decoration:none;font-size:13px">← بازگشت</a>
-<h2>🔌 درگاه‌های پرداخت سفارشی</h2>
-<p class="muted">هر درگاهی که یک HTTP API داشته باشد را همین‌جا، بدون نوشتن کد، وصل کن.
-از پلیس‌هولدرهایی مثل <code>{amount}</code>, <code>{order_id}</code>, <code>{callback_url}</code>,
-<code>{webhook_url}</code> و هر فیلد اعتبارنامه (مثلاً <code>{api_key}</code>) داخل URL/هدر/بدنه استفاده کن.</p>
+<div class="topbar">
+  <a href="#" class="back-btn" onclick="history.back();return false;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+    بازگشت
+  </a>
+</div>
 
-<details style="margin-bottom:14px">
+<div class="page-head">
+  <h2><span class="icon-badge">🔌</span> درگاه‌های پرداخت سفارشی</h2>
+  <p class="muted">هر درگاهی که یک HTTP API داشته باشد را همین‌جا، بدون نوشتن کد، وصل کن.
+  از پلیس‌هولدرهایی مثل <code>{amount}</code>, <code>{order_id}</code>, <code>{callback_url}</code>,
+  <code>{webhook_url}</code> و هر فیلد اعتبارنامه (مثلاً <code>{api_key}</code>) داخل URL/هدر/بدنه استفاده کن.</p>
+</div>
+
+<details class="guide">
   <summary>📖 راهنمای افزودن درگاه جدید (این رو با عکس مستندات API درگاه به هوش‌مصنوعی بده)</summary>
-  <div class="card" style="margin-top:8px">
+  <div class="card">
     <p class="muted">این متن رو همراه با عکس/متن مستندات API درگاه پرداخت موردنظر به یه چت‌بات
     (مثل Claude یا ChatGPT) بده و بگو: «طبق این راهنما فرم رو برام پر کن». پلیس‌هولدرهای
     قابل استفاده تو URL / هدر / بدنه‌ی درخواست:</p>
-    <ul style="margin:6px 0;padding-inline-start:18px;line-height:2">
+    <ul style="margin:8px 0;padding-inline-start:18px;line-height:2">
       <li><code>{amount}</code> / <code>{amount_toman}</code> — مبلغ (تومان)</li>
       <li><code>{order_id}</code> — شناسه‌ی داخلی سفارش</li>
       <li><code>{description}</code> — توضیح سفارش</li>
@@ -89,26 +216,30 @@
 </details>
 
 <div id="msgBox"></div>
+<h3 style="margin:18px 2px 10px">درگاه‌های ثبت‌شده</h3>
 <div id="list" class="card"><div class="muted">در حال بارگذاری...</div></div>
 
-<div class="card">
+<div class="card" style="margin-top:18px">
   <h3 id="formTitle">➕ افزودن درگاه جدید</h3>
   <form id="gwForm">
     <input type="hidden" id="gwId">
     <div class="row">
       <div><label>نام نمایشی</label><input type="text" id="f_name" placeholder="مثلاً زرین‌پال" required></div>
       <div><label>کلید یکتا (انگلیسی)</label><input type="text" id="f_key" placeholder="zarinpal" required></div>
-      <div class="toggle" style="flex:0 0 auto;align-self:flex-end;padding-bottom:8px">
-        <input type="checkbox" id="f_enabled"><label style="margin:0" for="f_enabled">فعال</label>
+      <div class="toggle" style="flex:0 0 auto;align-self:flex-end;margin-bottom:8px;background:var(--input);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:8px 10px">
+        <input type="checkbox" id="f_enabled"><label for="f_enabled">فعال</label>
       </div>
     </div>
 
     <details open><summary>🔑 اعتبارنامه (API Key و مشابه)</summary>
-      <div id="credRows"></div>
-      <button type="button" class="secondary small" onclick="addCredRow()">+ فیلد جدید</button>
+      <div>
+        <div id="credRows"></div>
+        <button type="button" class="secondary small" onclick="addCredRow()">+ فیلد جدید</button>
+      </div>
     </details>
 
     <details><summary>📨 ساخت فاکتور (Create Invoice)</summary>
+      <div>
       <div class="row">
         <div><label>Method</label>
           <select id="cr_method"><option>POST</option><option>GET</option></select>
@@ -120,21 +251,23 @@
       </div>
       <label>Headers (هر خط: <code>Key: Value</code>)</label>
       <textarea id="cr_headers" placeholder="Authorization: Bearer {api_key}"></textarea>
-      <label>Body (JSON)</label>
+      <label style="margin-top:8px">Body (JSON)</label>
       <textarea id="cr_body" placeholder='{"amount": "{amount}", "callback": "{callback_url}", "order_id": "{order_id}"}'></textarea>
-      <div class="row">
+      <div class="row" style="margin-top:8px">
         <div><label>مسیر لینک پرداخت در پاسخ</label><input type="text" id="cr_resp_url" placeholder="data.link"></div>
         <div><label>مسیر شناسه‌ی تراکنش در پاسخ</label><input type="text" id="cr_resp_txn" placeholder="data.id"></div>
       </div>
       <p class="hint">مسیر یعنی محل فیلد داخل JSON پاسخ، مثلاً برای <code>{"data":{"id":"x"}}</code> بنویس <code>data.id</code></p>
       <div class="row" style="margin-top:8px">
-        <div class="toggle"><input type="checkbox" id="req_customer_phone"><label style="margin:0" for="req_customer_phone">این درگاه به شماره موبایل مشتری نیاز دارد</label></div>
+        <div class="toggle"><input type="checkbox" id="req_customer_phone"><label for="req_customer_phone">این درگاه به شماره موبایل مشتری نیاز دارد</label></div>
       </div>
-      <p class="hint">اگه فعال کنی، قبل از ساخت فاکتور از مشتری خواسته می‌شه با دکمه‌ی تلگرامی «اشتراک‌گذاری شماره موبایل» شماره‌اش رو بفرسته. دو پلیس‌هولدر همیشه در دسترس‌اند: <code>{customer_user_id}</code> (آیدی عددی تلگرام مشتری، خودکار و بدون نیاز به این گزینه) و <code>{customer_phone}</code> (فقط با فعال بودن این گزینه پر می‌شه، وگرنه خالیه) — می‌تونی توی URL/Headers/Body همین بخش ازشون استفاده کنی.</p>
+      <p class="hint">اگه فعال کنی، قبل از ساخت فاکتور از مشتری خواسته می‌شه با دکمه‌ی تلگرامی «اشتراک‌گذاری شماره موبایل» شماره‌اش رو بفرسته. دو پلیس‌هولدر همیشه در دسترس‌اند: <code>{customer_phone}</code> (فقط با فعال بودن این گزینه پر می‌شه، وگرنه خالیه) و <code>{customer_user_id}</code> (آیدی عددی تلگرام مشتری، خودکار و بدون نیاز به این گزینه) — می‌تونی توی URL/Headers/Body همین بخش ازشون استفاده کنی.</p>
+      </div>
     </details>
 
     <details><summary>✅ استعلام پرداخت (Verify) — برای درگاه‌هایی که کاربر را برمی‌گردانند</summary>
-      <div class="toggle"><input type="checkbox" id="v_enabled"><label style="margin:0" for="v_enabled">فعال باشد</label></div>
+      <div>
+      <div class="toggle"><input type="checkbox" id="v_enabled"><label for="v_enabled">فعال باشد</label></div>
       <div class="row">
         <div><label>Method</label><select id="v_method"><option>POST</option><option>GET</option></select></div>
         <div style="flex:3"><label>URL</label><input type="text" id="v_url" placeholder="https://gateway.example.com/api/verify"></div>
@@ -142,18 +275,20 @@
       </div>
       <label>Headers</label>
       <textarea id="v_headers" placeholder="Authorization: Bearer {api_key}"></textarea>
-      <label>Body (JSON) — از {query.X} برای پارامترهای بازگشتی درگاه استفاده کن</label>
+      <label style="margin-top:8px">Body (JSON) — از {query.X} برای پارامترهای بازگشتی درگاه استفاده کن</label>
       <textarea id="v_body" placeholder='{"authority": "{query.Authority}", "amount": "{amount}"}'></textarea>
-      <div class="row">
+      <div class="row" style="margin-top:8px">
         <div><label>مسیر وضعیت در پاسخ</label><input type="text" id="v_resp_status" placeholder="data.code"></div>
         <div><label>مقادیر موفق (با کاما)</label><input type="text" id="v_resp_success" placeholder="100,101"></div>
         <div><label>مسیر مبلغ پرداختی در پاسخ (اختیاری)</label><input type="text" id="v_resp_amount" placeholder="data.amount"></div>
       </div>
       <p class="hint">اگه «مسیر مبلغ» رو پر کنی، مبلغ برگشتی از درگاه با مبلغ واقعی فاکتور مقایسه می‌شه تا با پرداخت کمتر، سفارش تایید نشه.</p>
+      </div>
     </details>
 
     <details><summary>📡 وب‌هوک (Webhook) — برای درگاه‌هایی که سرور به سرور خبر می‌دهند</summary>
-      <div class="toggle"><input type="checkbox" id="w_enabled"><label style="margin:0" for="w_enabled">فعال باشد</label></div>
+      <div>
+      <div class="toggle"><input type="checkbox" id="w_enabled"><label for="w_enabled">فعال باشد</label></div>
       <label>روش احراز هویت وب‌هوک</label>
       <select id="w_auth_mode">
         <option value="none">بدون احراز (فقط اتکا به شناسه‌ی تراکنش)</option>
@@ -161,7 +296,7 @@
         <option value="query_secret">رمز ثابت در query string</option>
         <option value="hmac_sha256">امضای HMAC-SHA256</option>
       </select>
-      <div class="row">
+      <div class="row" style="margin-top:8px">
         <div><label>نام هدر (برای رمز/امضا)</label><input type="text" id="w_header_name" placeholder="X-Signature"></div>
         <div><label>نام پارامتر query (برای رمز)</label><input type="text" id="w_query_param" placeholder="secret"></div>
         <div><label>کدام فیلد اعتبارنامه = رمز</label><input type="text" id="w_secret_field" placeholder="webhook_secret"></div>
@@ -176,6 +311,7 @@
         <div><label>تحمل اختلاف مبلغ (٪)</label><input type="number" id="amount_tolerance" min="0" step="0.1" value="1"></div>
       </div>
       <p class="hint" id="w_none_warn" style="display:none;color:var(--danger)">⚠️ بدون احراز هویت وب‌هوک، حتماً «مسیر مبلغ در بدنه» رو پر کن؛ وگرنه هرکی txn رو حدس بزنه می‌تونه سفارش خودش رو جعلاً پرداخت‌شده اعلام کنه.</p>
+      </div>
     </details>
 
     <div class="actions">
