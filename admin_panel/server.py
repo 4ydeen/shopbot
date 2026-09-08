@@ -41,6 +41,7 @@ from pydantic import BaseModel
 
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, resolve_db_path, API_BASE_URL, RESELLER_DBS_DIR
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
+import button_registry
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
 from admin_panel.config_delivery_web import deliver_config_to_user_web
@@ -3269,6 +3270,58 @@ def api_menu_layout_set(body: MenuLayoutBody, admin=Depends(require_permission("
     db.set_menu_row_breaks(body.breaks)
     _apply_menu_button_toggles(body.buttons)
     db.log_admin_action(admin["id"], "menu_order_change", f"چیدمان منوی ربات تغییر کرد (پنل وب - {admin['username']})", "setting", "menu_order")
+    return {"ok": True}
+
+
+# --------------------------------------------------- تب مستقل «دکمه‌های ربات» --
+# رجیستری عمومی کاستوم‌سازی دکمه‌ها (button_registry.py): پنل مدیریت، مسیر
+# خرید، حساب کاربری، روش‌های پرداخت + درگاه‌های سفارشی. منوی اصلی بات از قبل
+# ویرایشگر مخصوص خودش را دارد (بالاتر: /api/settings/menu-order|menu-layout)
+# و عمداً اینجا تکرار نشده.
+
+
+@app.get("/api/buttons")
+def api_buttons_registry(admin=Depends(require_permission("settings"))):
+    return button_registry.build_registry(db)
+
+
+class ButtonItemUpdateBody(BaseModel):
+    group: str
+    key: str
+    text: Optional[str] = None
+    style: Optional[str] = None
+
+
+@app.post("/api/buttons/item")
+def api_buttons_update_item(body: ButtonItemUpdateBody, admin=Depends(require_permission("settings"))):
+    try:
+        button_registry.update_item(db, body.group, body.key, text=body.text, style=body.style)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.log_admin_action(
+        admin["id"], "button_customize",
+        f"دکمه‌ی «{body.key}» در گروه «{body.group}» ویرایش شد (پنل وب - {admin['username']})",
+        "setting", f"{body.group}:{body.key}",
+    )
+    return {"ok": True}
+
+
+class ButtonOrderUpdateBody(BaseModel):
+    group: str
+    order: list[str]
+
+
+@app.post("/api/buttons/order")
+def api_buttons_update_order(body: ButtonOrderUpdateBody, admin=Depends(require_permission("settings"))):
+    try:
+        button_registry.update_order(db, body.group, body.order)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.log_admin_action(
+        admin["id"], "button_reorder",
+        f"ترتیب گروه «{body.group}» تغییر کرد (پنل وب - {admin['username']})",
+        "setting", body.group,
+    )
     return {"ok": True}
 
 
