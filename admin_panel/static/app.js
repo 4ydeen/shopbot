@@ -124,6 +124,7 @@ const ICONS = {
   revenue: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>',
   check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
   empty: '<path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"></path>',
+  buttons: '<rect x="3" y="4" width="7" height="7" rx="2"></rect><rect x="14" y="4" width="7" height="7" rx="2"></rect><rect x="3" y="15" width="7" height="7" rx="2"></rect><rect x="14" y="15" width="7" height="7" rx="2"></rect>',
 };
 const svg = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
 const fmt = n => (n === null || n === undefined) ? '—' : Number(n).toLocaleString('fa-IR');
@@ -350,6 +351,7 @@ const NAV = [
 
   // تنظیمات و سیستم — نگهداری، دسترسی و پیکربندی
   { key: 'settings', label: 'تنظیمات و برندینگ', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
+  { key: 'buttons', label: 'دکمه‌های ربات', icon: 'buttons', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'salessettings', label: 'تنظیمات فروش', icon: 'settings', role: 'settings', section: 'تنظیمات و سیستم' },
   { key: 'webadmins', label: 'کاربران پنل', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
   { key: 'tgadmins', label: 'ادمین‌های ربات', icon: 'webadmins', role: 'owner', section: 'تنظیمات و سیستم' },
@@ -790,6 +792,7 @@ async function renderPage(tab) {
       case 'panels': return renderPanels();
       case 'system': return renderSystem();
       case 'settings': return renderSettings();
+      case 'buttons': return renderButtons();
       case 'salessettings': return renderSalesSettings();
       case 'banners': return renderBanners();
       case 'logs': return renderLogs();
@@ -5406,6 +5409,157 @@ async function saveMenuOrder() {
   } finally {
     btn.disabled = false; btn.textContent = prevTxt;
   }
+}
+
+/* ================================================== bot buttons tab === */
+// تب مستقل «دکمه‌های ربات»: کاستوم‌سازی متن/رنگ/ترتیب همه‌ی دکمه‌های بات
+// (به‌جز منوی اصلی که ویرایشگر مخصوص خودش را بالاتر دارد). ساختار داده از
+// GET /api/buttons می‌آید و هر گروه با یک کارت مستقل رندر می‌شود.
+let BTN_REGISTRY = null; // { groups: [...], style_options: [...] }
+let btnDragState = null;
+
+function btnStyleSelectHtml(item, groupKey) {
+  if (!item.has_style) return '';
+  const opts = (BTN_REGISTRY.style_options || []).map(o =>
+    `<option value="${esc(o.value)}" ${o.value === (item.style || '') ? 'selected' : ''}>${esc(o.label)}</option>`
+  ).join('');
+  return `<select class="input btn-style-select" style="max-width:130px" data-group="${esc(groupKey)}" data-key="${esc(item.key)}">${opts}</select>`;
+}
+
+function btnTextInputHtml(item, groupKey) {
+  if (!item.has_text) return '';
+  return `<input class="input btn-text-input" style="flex:1;min-width:160px" type="text" value="${esc(item.text || '')}" data-group="${esc(groupKey)}" data-key="${esc(item.key)}" placeholder="متن دکمه">`;
+}
+
+function btnRowHtml(group, item, idx) {
+  const drag = group.reorderable
+    ? `<span class="menu-order-drag-handle" data-group="${esc(group.key)}" data-idx="${idx}">⠿</span>`
+    : `<span style="width:20px;display:inline-block"></span>`;
+  return `
+    <div class="menu-order-row" data-group="${esc(group.key)}" data-idx="${idx}" data-key="${esc(item.key)}">
+      ${drag}
+      <span class="menu-order-label" style="flex:none;min-width:120px">${esc(item.label)}</span>
+      ${btnTextInputHtml(item, group.key)}
+      ${btnStyleSelectHtml(item, group.key)}
+    </div>`;
+}
+
+function btnGroupCardHtml(group) {
+  const rows = group.items.map((item, idx) => btnRowHtml(group, item, idx)).join('');
+  return `
+    <div class="card" style="margin-bottom:18px" data-group-card="${esc(group.key)}">
+      <div class="card-head">
+        <h3>${esc(group.label)}</h3>
+        <button class="btn btn-primary btn-sm" data-save-group="${esc(group.key)}">ذخیره</button>
+      </div>
+      ${group.note ? `<span class="card-sub">${esc(group.note)}</span>` : ''}
+      <div class="menu-order-list" data-group-list="${esc(group.key)}" style="margin-top:12px">${rows || '<div class="empty-state">آیتمی نیست</div>'}</div>
+    </div>`;
+}
+
+function onBtnDragStart(e) {
+  e.preventDefault();
+  const groupKey = e.currentTarget.dataset.group;
+  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
+  const rows = $$('.menu-order-row', list);
+  const startIdx = Number(e.currentTarget.dataset.idx);
+  const row = rows[startIdx];
+  row.classList.add('dragging');
+  btnDragState = { groupKey, startIdx, currentIdx: startIdx };
+
+  const onContextMenu = (ctxEvt) => ctxEvt.preventDefault();
+  document.body.classList.add('menu-order-dragging-lock');
+  document.addEventListener('contextmenu', onContextMenu);
+
+  const onMove = (moveEvt) => {
+    if (!btnDragState) return;
+    moveEvt.preventDefault();
+    const target = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
+    const overRow = target && target.closest('.menu-order-row');
+    rows.forEach(r => r.classList.remove('drag-over'));
+    if (overRow && overRow !== row && overRow.dataset.group === groupKey) {
+      overRow.classList.add('drag-over');
+      btnDragState.currentIdx = Number(overRow.dataset.idx);
+    }
+  };
+  const onUp = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('contextmenu', onContextMenu);
+    document.body.classList.remove('menu-order-dragging-lock');
+    if (btnDragState && btnDragState.currentIdx !== btnDragState.startIdx) {
+      const group = BTN_REGISTRY.groups.find(g => g.key === groupKey);
+      const { startIdx: s, currentIdx: c } = btnDragState;
+      const [moved] = group.items.splice(s, 1);
+      group.items.splice(c, 0, moved);
+    }
+    btnDragState = null;
+    renderButtonGroupList(groupKey);
+  };
+  document.addEventListener('pointermove', onMove, { passive: false });
+  document.addEventListener('pointerup', onUp);
+}
+
+function renderButtonGroupList(groupKey) {
+  const group = BTN_REGISTRY.groups.find(g => g.key === groupKey);
+  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
+  if (!group || !list) return;
+  list.innerHTML = group.items.map((item, idx) => btnRowHtml(group, item, idx)).join('');
+  wireButtonGroupList(groupKey);
+}
+
+function wireButtonGroupList(groupKey) {
+  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
+  if (!list) return;
+  $$('.menu-order-drag-handle', list).forEach(h => h.addEventListener('pointerdown', onBtnDragStart));
+  $$('.btn-text-input', list).forEach(inp => inp.addEventListener('input', () => {
+    const group = BTN_REGISTRY.groups.find(g => g.key === inp.dataset.group);
+    const item = group.items.find(i => i.key === inp.dataset.key);
+    if (item) item.text = inp.value;
+  }));
+  $$('.btn-style-select', list).forEach(sel => sel.addEventListener('change', () => {
+    const group = BTN_REGISTRY.groups.find(g => g.key === sel.dataset.group);
+    const item = group.items.find(i => i.key === sel.dataset.key);
+    if (item) item.style = sel.value;
+  }));
+}
+
+async function saveButtonGroup(groupKey) {
+  const group = BTN_REGISTRY.groups.find(g => g.key === groupKey);
+  const btn = document.querySelector(`[data-save-group="${groupKey}"]`);
+  if (!group || !btn) return;
+  btn.disabled = true;
+  const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
+  try {
+    if (group.reorderable) {
+      await apiPost('/buttons/order', { group: group.key, order: group.items.map(i => i.key) });
+    }
+    const itemCalls = group.items
+      .filter(i => i.has_text || i.has_style)
+      .map(i => apiPost('/buttons/item', {
+        group: group.key, key: i.key,
+        text: i.has_text ? i.text : undefined,
+        style: i.has_style ? i.style : undefined,
+      }));
+    await Promise.all(itemCalls);
+    toast('ذخیره شد.');
+  } catch (e) {
+    handleErr(e);
+  } finally {
+    btn.disabled = false; btn.textContent = prevTxt;
+  }
+}
+
+async function renderButtons() {
+  BTN_REGISTRY = await apiGet('/buttons');
+  const html = `
+    <div class="card" style="margin-bottom:18px">
+      <span class="card-sub">متن، رنگ و جای هر دکمه‌ی بات (پنل مدیریت، مسیر خرید، حساب کاربری من، روش‌های پرداخت و درگاه‌های سفارشی) از همین‌جا قابل تغییر است. رنگ فقط بین حالت‌های پیش‌فرض/آبی/سبز/قرمز قابل انتخابه، چون محدودیت خود تلگرامه. برای چیدمان منوی اصلی بات به تب «تنظیمات و برندینگ» برو.</span>
+    </div>
+    ${BTN_REGISTRY.groups.map(g => btnGroupCardHtml(g)).join('')}`;
+  setContent(html);
+  BTN_REGISTRY.groups.forEach(g => wireButtonGroupList(g.key));
+  $$('[data-save-group]', content()).forEach(b => b.addEventListener('click', () => saveButtonGroup(b.dataset.saveGroup)));
 }
 
 /* ============================================================ gateways === */
