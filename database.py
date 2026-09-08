@@ -264,19 +264,19 @@ BUILTIN_PAYMENT_METHODS = [
 # toggle_key: نام تنظیمی که فعال/غیرفعال بودن دکمه را کنترل می‌کند (None یعنی همیشه نمایش داده می‌شود)
 # admin_only: اگر True فقط برای ادمین‌ها نمایش داده می‌شود
 MENU_BUTTON_META = {
-    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": "miniapp_enabled", "admin_only": False, "has_text": False, "has_style": False},
-    "btn_buy": {"label": "دکمه خرید کانفیگ", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True},
-    "btn_my_orders": {"label": "دکمه حساب کاربری من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True},
-    "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True},
-    "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True},
+    "miniapp": {"label": "دکمه مینی‌اپ فروشگاه", "toggle_key": "miniapp_enabled", "admin_only": False, "has_text": False, "has_style": False, "default_text": None},
+    "btn_buy": {"label": "دکمه خرید کانفیگ", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🛒 خرید کانفیگ"},
+    "btn_test": {"label": "دکمه کانفیگ تست", "toggle_key": "test_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧪 کانفیگ تست رایگان"},
+    "btn_my_orders": {"label": "دکمه حساب کاربری من", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧾 حساب کاربری من"},
+    "btn_referral": {"label": "دکمه زیرمجموعه‌گیری", "toggle_key": "referral_button_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🤝 زیرمجموعه‌گیری من"},
+    "btn_wheel": {"label": "دکمه گردونه شانس", "toggle_key": "wheel_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🎡 گردونه شانس"},
+    "btn_contact": {"label": "دکمه ارتباط با پشتیبانی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "📞 ارتباط با پشتیبانی"},
+    "btn_admin_panel": {"label": "دکمه پنل مدیریت", "toggle_key": None, "admin_only": True, "has_text": True, "has_style": True, "default_text": "⚙️ پنل مدیریت"},
     # btn_reseller_panel بر اساس وضعیت کاربر (نماینده بودن/نبودن) به‌صورت پویا نمایش
     # داده می‌شود، نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارد ولی مثل
     # بقیه‌ی دکمه‌ها متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی است.
-    "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True},
-    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True},
+    "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧑‍💼 پنل نمایندگی"},
+    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🏪 درخواست نمایندگی سطح ۲"},
 }
 # دکمه‌های داخل «حساب کاربری» و صفحه‌ی جزئیات هر سرویس: هرکدام با یک تنظیم
 # جدا فعال/غیرفعال می‌شوند (پیش‌فرض همه فعال). کلید -> (برچسب برای ادمین، مقدار پیش‌فرض)
@@ -298,6 +298,38 @@ ACCOUNT_TOGGLE_KEYS = [
     ("svc_show_history", "📜 دکمه «تاریخچه سرویس»", "1"),
     ("svc_show_inquiry", "🔍 دکمه «استعلام»", "1"),
 ]
+
+# ---------------------------------------------------------------------------
+# رجیستری سراسری «کاستوم‌سازی دکمه‌ها» (پنل وب، تب مستقل «دکمه‌ها»)
+# هر گروه یعنی یک نقطه از بات که چند دکمه‌ی کنار هم دارد؛ داخل هر گروه:
+# متن (اگر has_text)، رنگ (اگر has_style) و ترتیب هر آیتم قابل ذخیره‌سازی است.
+# افزودن یک دکمه‌ی جدید به بات یعنی فقط یک ورودی به این دیکشنری‌ها اضافه شود؛
+# تب پنل وب و APIهای آن بدون تغییر، آیتم جدید را خودکار نشان می‌دهند.
+# ---------------------------------------------------------------------------
+
+PAYMENT_METHOD_META = {
+    "card": {"label": "کارت‌به‌کارت (ارسال رسید)", "default_text": "💳 کارت‌به‌کارت (ارسال رسید)"},
+    "card_auto": {"label": "کارت‌به‌کارت خودکار (تاییدپیامکی)", "default_text": "💳 کارت‌به‌کارت (تایید خودکار پیامکی)"},
+    "abangateway": {"label": "آبان‌گیت‌وی", "default_text": "💳 پرداخت خودکار کارت‌به‌کارت (تایید آنی)"},
+    "noapay": {"label": "NoapayBot (استارز تلگرام)", "default_text": "⭐ NoapayBot - استارز تلگرام (تایید آنی)"},
+    "crypto": {"label": "ارز دیجیتال (Plisio)", "default_text": "🪙 پرداخت با ارز دیجیتال (تایید آنی)"},
+}
+DEFAULT_PAYMENT_METHOD_ORDER = ["card", "card_auto", "abangateway", "noapay", "crypto"]
+
+ACCOUNT_HUB_META = {
+    "acct_orders": {"label": "سرویس‌ها و سفارش‌های من", "default_text": "📦 سرویس‌ها و سفارش‌های من"},
+    "acct_referral": {"label": "زیرمجموعه‌گیری من", "default_text": "🤝 زیرمجموعه‌گیری من"},
+    "acct_wallet": {"label": "کیف پول من", "default_text": "👛 کیف پول من"},
+}
+DEFAULT_ACCOUNT_HUB_ORDER = ["acct_orders", "acct_referral", "acct_wallet"]
+
+BUYFLOW_META = {
+    "btn_custom_config": {"label": "ساخت کانفیگ شخصی", "default_text": "🛠 ساخت کانفیگ شخصی"},
+    "btn_buy_continue": {"label": "ادامه و ارسال رسید", "default_text": "✅ ادامه و ارسال رسید"},
+    "btn_enter_code": {"label": "وارد کردن کد تخفیف", "default_text": "🎟 وارد کردن کد تخفیف"},
+    "btn_buy_back": {"label": "بازگشت (مسیر خرید)", "default_text": "⬅️ بازگشت"},
+}
+DEFAULT_BUYFLOW_CONFIRM_ORDER = ["btn_buy_continue", "btn_enter_code"]
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 
 DEFAULT_MENU_ORDER = [
@@ -1408,6 +1440,36 @@ class Database:
         import json
         clean = [k for k in keys if k in DEFAULT_MENU_ORDER]
         self.set_setting("main_menu_row_breaks", json.dumps(clean, ensure_ascii=False))
+
+    # -----------------------------------------------------------------------
+    # ترتیب سفارشی عمومی برای هر «گروه» دکمه (رجیستری کاستوم‌سازی دکمه‌ها).
+    # هر گروه با یک نام (مثلاً "payment_methods" یا "admin_items__daily") و
+    # لیست کلیدهای معتبر همان گروه شناسایی می‌شود؛ خودِ ترتیب به‌صورت JSON در
+    # همان جدول settings ذخیره می‌شود - کلیدهای نامعتبر/حذف‌شده فیلتر و
+    # کلیدهای جدیدی که بعداً اضافه شده‌اند (valid_keys) به انتها اضافه می‌شوند.
+    # -----------------------------------------------------------------------
+
+    def get_custom_order(self, group: str, valid_keys: list) -> list:
+        import json
+        raw = self.get_setting(f"btncustom_order__{group}", "")
+        order = []
+        if raw:
+            try:
+                order = [k for k in json.loads(raw) if k in valid_keys]
+            except (ValueError, TypeError):
+                order = []
+        for k in valid_keys:
+            if k not in order:
+                order.append(k)
+        return order
+
+    def set_custom_order(self, group: str, order: list, valid_keys: list):
+        import json
+        clean = [k for k in order if k in valid_keys]
+        for k in valid_keys:
+            if k not in clean:
+                clean.append(k)
+        self.set_setting(f"btncustom_order__{group}", json.dumps(clean, ensure_ascii=False))
 
     # -----------------------------------------------------------------------
     # بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ

@@ -248,10 +248,12 @@ def categories_kb(db, categories, is_main_bot: bool = True) -> InlineKeyboardMar
     rows = []
     custom_enabled = db.get_setting("custom_config_enabled", "0") == "1" or db.count_active_custom_config_products() > 0
     if db.is_full_access_bot(is_main_bot) and custom_enabled:
-        rows.append([_styled_inline(db, "🛠 ساخت کانفیگ شخصی", "custom_config_start", "btn_custom_config_style")])
+        text = db.get_setting("btn_custom_config_text", "🛠 ساخت کانفیگ شخصی")
+        rows.append([_styled_inline(db, text, "custom_config_start", "btn_custom_config_style")])
     for cat in categories:
         rows.append([_styled_inline(db, f"📁 {cat['name']}", f"cat:{cat['id']}", "btn_cat_select_style")])
-    rows.append([_styled_inline(db, "⬅️ بازگشت", "back_main", "btn_buy_back_style")])
+    back_text = db.get_setting("btn_buy_back_text", "⬅️ بازگشت")
+    rows.append([_styled_inline(db, back_text, "back_main", "btn_buy_back_style")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -270,8 +272,24 @@ def products_kb(db, products, category_id) -> InlineKeyboardMarkup:
                 )
             ]
         )
-    rows.append([_styled_inline(db, "⬅️ بازگشت به دسته‌بندی‌ها", "back_categories", "btn_buy_back_style")])
+    back_text = db.get_setting("btn_buy_back_text", "⬅️ بازگشت به دسته‌بندی‌ها")
+    rows.append([_styled_inline(db, back_text, "back_categories", "btn_buy_back_style")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# دو دکمه‌ی «ادامه و ارسال رسید» و «وارد کردن کد تخفیف» با هم در یک صفحه
+# ظاهر می‌شوند و ترتیبشان از تب «دکمه‌ها»ی پنل وب قابل جابجایی است؛ دکمه‌ی
+# بازگشت همیشه ثابت و آخرین ردیف می‌ماند.
+_PRODUCT_CONFIRM_BUILDERS = {
+    "btn_buy_continue": lambda db, product_id, quantity: _styled_inline(
+        db, db.get_setting("btn_buy_continue_text", "✅ ادامه و ارسال رسید"),
+        f"buy_start:{product_id}:{quantity}", "btn_buy_continue_style",
+    ),
+    "btn_enter_code": lambda db, product_id, quantity: _styled_inline(
+        db, db.get_setting("btn_enter_code_text", "🎟 وارد کردن کد تخفیف"),
+        f"enter_code:{product_id}:{quantity}", "btn_enter_code_style",
+    ),
+}
 
 
 def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1) -> InlineKeyboardMarkup:
@@ -285,12 +303,12 @@ def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1) -> I
     if quantity < max_qty:
         qty_row.append(InlineKeyboardButton(text="➕", callback_data=f"qty_inc:{product_id}:{quantity}"))
 
-    rows = [
-        qty_row,
-        [_styled_inline(db, "✅ ادامه و ارسال رسید", f"buy_start:{product_id}:{quantity}", "btn_buy_continue_style")],
-        [_styled_inline(db, "🎟 وارد کردن کد تخفیف", f"enter_code:{product_id}:{quantity}", "btn_enter_code_style")],
-        [_styled_inline(db, "⬅️ بازگشت", "back_categories", "btn_buy_back_style")],
-    ]
+    order = db.get_custom_order("buyflow_confirm", list(_PRODUCT_CONFIRM_BUILDERS.keys()))
+    back_text = db.get_setting("btn_buy_back_text", "⬅️ بازگشت")
+    rows = [qty_row]
+    for key in order:
+        rows.append([_PRODUCT_CONFIRM_BUILDERS[key](db, product_id, quantity)])
+    rows.append([_styled_inline(db, back_text, "back_categories", "btn_buy_back_style")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -447,14 +465,23 @@ def service_detail_kb(db, cb_id: str, kind: str, deletable: bool, show_links: bo
 # حالا همه یک ورودی واحد دارند)
 # ---------------------------------------------------------------------------
 
+_ACCOUNT_HUB_CALLBACKS = {
+    "acct_orders": ("acct_show_orders", "acct:orders"),
+    "acct_referral": ("acct_show_referral", "acct:referral"),
+    "acct_wallet": ("acct_show_wallet", "acct:wallet"),
+}
+
+
 def account_hub_kb(db) -> InlineKeyboardMarkup:
+    from database import ACCOUNT_HUB_META, DEFAULT_ACCOUNT_HUB_ORDER
     rows = []
-    if db.get_setting("acct_show_orders", "1") == "1":
-        rows.append([InlineKeyboardButton(text="📦 سرویس‌ها و سفارش‌های من", callback_data="acct:orders")])
-    if db.get_setting("acct_show_referral", "1") == "1":
-        rows.append([InlineKeyboardButton(text="🤝 زیرمجموعه‌گیری من", callback_data="acct:referral")])
-    if db.get_setting("acct_show_wallet", "1") == "1":
-        rows.append([InlineKeyboardButton(text="👛 کیف پول من", callback_data="acct:wallet")])
+    order = db.get_custom_order("account_hub", DEFAULT_ACCOUNT_HUB_ORDER)
+    for key in order:
+        toggle_key, callback_data = _ACCOUNT_HUB_CALLBACKS[key]
+        if db.get_setting(toggle_key, "1") != "1":
+            continue
+        text = db.get_setting(f"{key}_text", ACCOUNT_HUB_META[key]["default_text"])
+        rows.append([_styled_inline(db, text, callback_data, f"{key}_style")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت به منوی اصلی", callback_data="acct:main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -557,6 +584,8 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
     بیشتر باشد حذف می‌شود. allowed_methods: در صورت ارسال (لیست کلیدها یا None برای
     «همه مجاز»)، فقط دکمه‌ی روش‌های مجاز برای محصول/آیتم جاری نمایش داده می‌شود."""
 
+    from database import PAYMENT_METHOD_META, DEFAULT_PAYMENT_METHOD_ORDER
+
     def _ok(method_key: str) -> bool:
         if allowed_methods is not None and method_key not in allowed_methods:
             return False
@@ -566,20 +595,38 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
                 return False
         return True
 
+    # هر روش استاتیک به شرط فعال بودنش (پارامترهای ورودی) در دسترس است؛
+    # درگاه‌های سفارشی هم با کلید "customgw:<id>" وارد همان لیست ترتیب می‌شوند
+    # تا ادمین بتواند جای همه‌ی روش‌های پرداخت را با هم، از تب «دکمه‌ها»ی پنل
+    # وب، جابه‌جا کند.
+    static_enabled = {
+        "card": card_to_card_enabled, "card_auto": card_auto_enabled,
+        "abangateway": abangateway_enabled, "noapay": noapay_enabled, "crypto": crypto_enabled,
+    }
+    gw_by_key = {f"customgw:{gw['id']}": gw for gw in (custom_gateways or [])}
+    valid_keys = list(DEFAULT_PAYMENT_METHOD_ORDER) + list(gw_by_key.keys())
+    order = db.get_custom_order("payment_methods", valid_keys) if db is not None else valid_keys
+
+    def _btn(db, text, callback_data, style_key):
+        return _styled_inline(db, text, callback_data, style_key) if db is not None else InlineKeyboardButton(text=text, callback_data=callback_data)
+
     rows = []
-    if card_to_card_enabled and _ok("card"):
-        rows.append([InlineKeyboardButton(text="💳 کارت‌به‌کارت (ارسال رسید)", callback_data="pay_card2card")])
-    if card_auto_enabled and _ok("card_auto"):
-        rows.append([InlineKeyboardButton(text="💳 کارت‌به‌کارت (تایید خودکار پیامکی)", callback_data="pay_card_auto")])
-    if abangateway_enabled and _ok("abangateway"):
-        rows.append([InlineKeyboardButton(text="💳 پرداخت خودکار کارت‌به‌کارت (تایید آنی)", callback_data="pay_abangateway")])
-    if noapay_enabled and _ok("noapay"):
-        rows.append([InlineKeyboardButton(text="⭐ NoapayBot - استارز تلگرام (تایید آنی)", callback_data="pay_noapay")])
-    if crypto_enabled and _ok("crypto"):
-        rows.append([InlineKeyboardButton(text="🪙 پرداخت با ارز دیجیتال (تایید آنی)", callback_data="pay_crypto")])
-    for gw in (custom_gateways or []):
-        if _ok(f"custom:{gw['key']}"):
-            rows.append([InlineKeyboardButton(text=f"💠 {gw['name']} (تایید آنی)", callback_data=f"pay_customgw:{gw['id']}")])
+    static_cb = {"card": "pay_card2card", "card_auto": "pay_card_auto", "abangateway": "pay_abangateway",
+                 "noapay": "pay_noapay", "crypto": "pay_crypto"}
+    for key in order:
+        if key in PAYMENT_METHOD_META:
+            if not static_enabled.get(key) or not _ok(key):
+                continue
+            default_text = PAYMENT_METHOD_META[key]["default_text"]
+            text = db.get_setting(f"paymeth_{key}_text", default_text) if db is not None else default_text
+            rows.append([_btn(db, text, static_cb[key], f"paymeth_{key}_style")])
+        elif key in gw_by_key:
+            gw = gw_by_key[key]
+            if not _ok(f"custom:{gw['key']}"):
+                continue
+            default_text = f"💠 {gw['name']} (تایید آنی)"
+            text = db.get_setting(f"paymeth_customgw_{gw['id']}_text", default_text) if db is not None else default_text
+            rows.append([_btn(db, text, f"pay_customgw:{gw['id']}", f"paymeth_customgw_{gw['id']}_style")])
     rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1014,15 +1061,24 @@ def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
     return True
 
 
+def _ordered_admin_categories(db):
+    """ترتیب دسته‌های پنل مدیریت را بر اساس چیدمان سفارشی (تب «دکمه‌ها» در
+    پنل وب) برمی‌گرداند؛ اگر کاستوم‌سازی نشده باشد، ترتیب پیش‌فرض کد حفظ می‌شود."""
+    by_key = {c[0]: c for c in ADMIN_PANEL_CATEGORIES}
+    order = db.get_custom_order("admin_categories", list(by_key.keys()))
+    return [by_key[k] for k in order if k in by_key]
+
+
 def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     """کیبورد سطح اول پنل مدیریت: فقط دسته‌ها نمایش داده می‌شوند، نه هر ۲۶ آیتم."""
     rows = []
     current_row = []
-    for cat_key, cat_label, item_keys in ADMIN_PANEL_CATEGORIES:
+    for cat_key, cat_label, item_keys in _ordered_admin_categories(db):
         visible_items = [k for k in item_keys if _is_item_visible(db, k, is_main_bot)]
         if not visible_items:
             continue
-        current_row.append(InlineKeyboardButton(text=cat_label, callback_data=f"adm_cat:{cat_key}"))
+        label = db.get_setting(f"catlbl_{cat_key}", cat_label)
+        current_row.append(_styled_inline(db, label, f"adm_cat:{cat_key}", f"catlbl_{cat_key}_style"))
         if len(current_row) == 2:
             rows.append(current_row)
             current_row = []
@@ -1033,17 +1089,20 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
 
 
 def admin_category_kb(db, is_main_bot: bool, cat_key: str) -> InlineKeyboardMarkup:
-    """زیرمنوی یک دسته: آیتم‌های همان دسته با چیدمان دو ستونه + بازگشت."""
-    item_keys = next((items for key, _, items in ADMIN_PANEL_CATEGORIES if key == cat_key), [])
+    """زیرمنوی یک دسته: آیتم‌های همان دسته با چیدمان دو ستونه + بازگشت.
+    ترتیب آیتم‌ها و متن هرکدام از تب «دکمه‌ها»ی پنل وب قابل کاستوم‌سازی است."""
+    default_item_keys = next((items for key, _, items in ADMIN_PANEL_CATEGORIES if key == cat_key), [])
+    item_keys = db.get_custom_order(f"admin_items__{cat_key}", default_item_keys)
     rows = []
     current_row = []
     for key in item_keys:
-        if not _is_item_visible(db, key, is_main_bot):
+        if key not in default_item_keys or not _is_item_visible(db, key, is_main_bot):
             continue
         label, callback_data = _admin_item_label_and_cb(key)
         if key in _EXTRA_PANEL_ITEM_LABELS:
             current_row.append(InlineKeyboardButton(text=label, callback_data=callback_data))
         else:
+            label = db.get_setting(f"{key}_label", label)
             current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
         if len(current_row) == 2:
             rows.append(current_row)
