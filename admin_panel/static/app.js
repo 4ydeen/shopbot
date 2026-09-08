@@ -263,7 +263,8 @@ async function api(path, opts = {}) {
     headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+  const isAuthEndpoint = path === '/login' || path === '/setup';
+  if (res.status === 401 && !isAuthEndpoint) { showLogin(); throw new Error('unauthorized'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { const err = new Error(formatApiError(data.detail)); err.status = res.status; throw err; }
   return data;
