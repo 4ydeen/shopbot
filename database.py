@@ -1805,6 +1805,19 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE web_admins SET password_hash=? WHERE id=?", (password_hash, admin_id))
 
+    def set_web_admin_username(self, admin_id: int, new_username: str) -> bool:
+        """یوزرنیم یک حساب پنل را تغییر می‌دهد. اگر یوزرنیم جدید قبلاً توسط
+        حساب دیگری استفاده شده باشد False برمی‌گردد و تغییری اعمال نمی‌شود."""
+        new_username = new_username.strip().lower()
+        with self._get_conn() as conn:
+            clash = conn.execute(
+                "SELECT id FROM web_admins WHERE username=? AND id!=?", (new_username, admin_id)
+            ).fetchone()
+            if clash:
+                return False
+            conn.execute("UPDATE web_admins SET username=? WHERE id=?", (new_username, admin_id))
+            return True
+
     def set_web_admin_role(self, admin_id: int, role: str) -> bool:
         if role not in ("admin", "mid", "support"):
             return False

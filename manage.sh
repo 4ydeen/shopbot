@@ -316,6 +316,20 @@ MSG_FA[prompt_username]="یوزرنیم: "
 MSG_EN[prompt_password]="Password (min 8 characters): "
 MSG_FA[prompt_password]="پسورد (حداقل ۸ کاراکتر): "
 
+# change_admin_panel_credentials
+MSG_EN[no_panel_admins_found]="⛔️ No admin panel accounts found yet. Run option 13 (setup admin panel) first."
+MSG_FA[no_panel_admins_found]="⛔️ هنوز هیچ حساب پنلی ساخته نشده. اول گزینه ۱۳ (نصب/تنظیم پنل مدیریت) را بزن."
+MSG_EN[existing_admins_header]="👤 Existing panel accounts:"
+MSG_FA[existing_admins_header]="👤 حساب‌های موجود پنل:"
+MSG_EN[prompt_current_username]="Current username: "
+MSG_FA[prompt_current_username]="یوزرنیم فعلی: "
+MSG_EN[prompt_new_username]="New username (leave empty to keep it unchanged): "
+MSG_FA[prompt_new_username]="یوزرنیم جدید (خالی بگذار تا همان قبلی بماند): "
+MSG_EN[prompt_new_password]="New password (min 8 characters): "
+MSG_FA[prompt_new_password]="پسورد جدید (حداقل ۸ کاراکتر): "
+MSG_EN[change_admin_creds_cancelled]="Current username or new password is empty, cancelled."
+MSG_FA[change_admin_creds_cancelled]="یوزرنیم فعلی یا پسورد جدید خالی است، لغو شد."
+
 # remove_miniapp
 MSG_EN[remove_miniapp_warn]="⚠️ This will remove the Mini App service and its nginx config (the SSL certificate is kept)."
 MSG_FA[remove_miniapp_warn]="⚠️ این کار سرویس و کانفیگ nginx مینی‌اپ را حذف می‌کند (گواهی SSL نگه داشته می‌شود)."
@@ -466,6 +480,8 @@ MSG_EN[menu_21]="Restore backup from another server (new server migration wizard
 MSG_FA[menu_21]="بازیابی بکاپ از سرور دیگر (ویزارد انتقال به سرور جدید)"
 MSG_EN[menu_22]="Bot update mode (Polling / Webhook)"
 MSG_FA[menu_22]="حالت دریافت آپدیت بات (Polling / Webhook)"
+MSG_EN[menu_23]="Change admin panel username/password"
+MSG_FA[menu_23]="تغییر نام کاربری و رمز عبور پنل مدیریت وب"
 MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_EN[menu_0]="Exit"
@@ -1226,6 +1242,58 @@ update_admin_panel() {
 }
 
 # ---------------------------------------------------------------------------
+# Action: change an existing admin panel account's username/password
+# عملیات: تغییر یوزرنیم/پسورد یکی از حساب‌های موجود پنل مدیریت وب
+# ---------------------------------------------------------------------------
+change_admin_panel_credentials() {
+    if [ ! -f "$INSTALL_DIR/main.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
+        return
+    fi
+    if [ ! -d "$INSTALL_DIR/admin_panel" ]; then
+        echo -e "${RED}$(t panel_dir_missing)${RESET}"
+        return
+    fi
+
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+
+    local EXISTING_ADMINS
+    EXISTING_ADMINS=$(python3 -c "
+from config import DB_PATH
+from database import Database
+db = Database(DB_PATH)
+for r in db.list_web_admins():
+    print(f\"  - {r['username']} ({r['role']})\")
+" 2>/dev/null)
+
+    if [ -z "$EXISTING_ADMINS" ]; then
+        echo -e "${RED}$(t no_panel_admins_found)${RESET}"
+        deactivate
+        return
+    fi
+
+    echo -e "${CYAN}$(t existing_admins_header)${RESET}"
+    echo "$EXISTING_ADMINS"
+    echo ""
+
+    read -rp "$(t prompt_current_username)" CUR_USER
+    read -rp "$(t prompt_new_username)" NEW_USER
+    [ -z "$NEW_USER" ] && NEW_USER="$CUR_USER"
+    read -rsp "$(t prompt_new_password)" NEW_PASS
+    echo ""
+
+    if [ -z "$CUR_USER" ] || [ -z "$NEW_PASS" ]; then
+        echo -e "${RED}$(t change_admin_creds_cancelled)${RESET}"
+        deactivate
+        return
+    fi
+
+    python3 -m admin_panel.change_admin "$CUR_USER" "$NEW_USER" "$NEW_PASS"
+    deactivate
+}
+
+# ---------------------------------------------------------------------------
 # Action: full standalone admin panel removal
 # عملیات: حذف کامل پنل مدیریت وب مستقل
 # ---------------------------------------------------------------------------
@@ -1710,6 +1778,7 @@ while true; do
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${YELLOW}[21]${RESET} » ${GREEN}$(t menu_21)${RESET}"
     echo -e "${YELLOW}[22]${RESET} » ${GREEN}$(t menu_22)${RESET}"
+    echo -e "${YELLOW}[23]${RESET} » ${GREEN}$(t menu_23)${RESET}"
     echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
     echo -e "${MAGENTA}[L]${RESET} » ${GREEN}$(t menu_lang)${RESET}"
     echo -e "${RED}[0]${RESET} » ${GREEN}$(t menu_0)${RESET}"
@@ -1740,6 +1809,7 @@ while true; do
         20) list_service_domains; pause ;;
         21) restore_backup_cli; pause ;;
         22) setup_bot_mode; pause ;;
+        23) change_admin_panel_credentials; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
