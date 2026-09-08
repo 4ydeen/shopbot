@@ -1289,7 +1289,7 @@ for r in db.list_web_admins():
         return
     fi
 
-    python3 -m admin_panel.change_admin "$CUR_USER" "$NEW_USER" "$NEW_PASS"
+    python3 -m change_admin "$CUR_USER" "$NEW_USER" "$NEW_PASS"
     deactivate
 }
 
