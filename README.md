@@ -165,8 +165,8 @@
 
 ## 📲 Mini App
 
-<details open>
-<summary><strong>جزئیات (برای بستن کلیک کن)</strong></summary>
+<details>
+<summary><strong>جزئیات (کلیک کن برای باز شدن)</strong></summary>
 
 پوشه‌ی `miniapp/` شامل یک اپلیکیشن کامل تلگرام (Telegram Mini App) با دو بخش مجزا است: **فروشگاه کاربر** و **پنل مدیریت وب کامل**.
 
@@ -200,8 +200,8 @@
 
 ## 🖥️ پنل مدیریت وب مستقل (`admin_panel`)
 
-<details open>
-<summary><strong>جزئیات (برای بستن کلیک کن)</strong></summary>
+<details>
+<summary><strong>جزئیات (کلیک کن برای باز شدن)</strong></summary>
 
 علاوه بر پنل مدیریتِ داخل بات و پنل مدیریتِ داخل Mini App، پروژه یک **پنل مدیریت وب کاملاً مستقل و جدا از تلگرام** هم دارد (پوشه‌ی `admin_panel/`) که می‌تواند حتی بدون باز بودن بات هم روی دامنه‌ی اختصاصی خودش بالا بماند:
 
@@ -245,8 +245,8 @@ python -m admin_panel.generate_vapid_keys
 
 ## 📱 اپ اندروید مدیریت
 
-<details open>
-<summary><strong>جزئیات (برای بستن کلیک کن)</strong></summary>
+<details>
+<summary><strong>جزئیات (کلیک کن برای باز شدن)</strong></summary>
 
 پروژه یک **API اختصاصی برای اپ بومی اندروید مدیریت** هم دارد که همین پنل وب مستقل ارائه می‌کند (endpointهای `/api/app/*` در `admin_panel/server.py` + `admin_panel/mobile_auth.py` + `fcm_client.py`). خودِ اپ اندروید در ریپوی جداگانه‌ای توسعه داده می‌شود؛ این بخش از بک‌اند فقط زیرساخت لازم برای آن را فراهم می‌کند:
 
