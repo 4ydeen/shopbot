@@ -2348,6 +2348,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         for o in db.get_user_orders(user_tg_id):
             if o["status"] == "rejected":
                 continue
+            if o["is_renewal"]:
+                # سفارش‌های «تمدید سرویس» فقط یک رکورد داخلی برای پرداخت‌اند
+                # (product_id=0 سنتینل، بدون کانفیگ/محصول واقعی مال خودشان)؛
+                # نتیجه‌ی تمدید همین حالا روی خودِ سرویس هدف (renewal_target_*)
+                # اعمال شده و همان‌جا با حجم/انقضای به‌روزشده دیده می‌شود، پس
+                # اینجا دوباره به‌عنوان یک آیتم جدا و ناقص («نامشخص») نشان داده
+                # نمی‌شود.
+                continue
             order_ts = o["created_at"] or ""
             if o["is_custom_config"]:
                 # نسخه‌ی تاییدشده‌ی کانفیگ شخصی از جدول custom_configs (پایین‌تر)
