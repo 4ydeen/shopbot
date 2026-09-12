@@ -424,6 +424,12 @@ def api_orders(auth=Depends(get_verified_user)):
     custom_order_ids = {cc["order_id"] for cc in db.get_custom_configs_for_user(tg_id) if cc["order_id"]}
     result = []
     for o in orders:
+        if o["is_renewal"]:
+            # سفارش «تمدید سرویس» فقط رکورد داخلی پرداخت است (product_id=0
+            # سنتینل، بدون کانفیگ مال خودش)؛ نتیجه‌ی تمدید همین حالا روی سرویس
+            # هدف اعمال شده، پس اینجا به‌عنوان یک سفارش جدا و ناقص («نامشخص»)
+            # نشان داده نمی‌شود.
+            continue
         if o["status"] == "approved" and not o["is_custom_config"] and o["id"] in custom_order_ids:
             continue
         if o["is_custom_config"]:
