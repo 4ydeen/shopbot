@@ -16,24 +16,26 @@
 
 ## فهرست مطالب
 
-- [📖 معرفی](#-معرفی)
-- [✨ امکانات](#-امکانات)
-- [🧠 دستیار پشتیبانی هوش مصنوعی](#-دستیار-پشتیبانی-هوش-مصنوعی)
-- [💳 درگاه‌های پرداخت پشتیبانی‌شده](#-درگاههای-پرداخت-پشتیبانیشده)
-- [📲 Mini App](#-mini-app)
-- [🖥️ پنل مدیریت وب مستقل (`admin_panel`)](#️-پنل-مدیریت-وب-مستقل-admin_panel)
-- [📱 اپ اندروید مدیریت](#-اپ-اندروید-مدیریت)
-- [🔌 پنل‌های VPN پشتیبانی‌شده](#-پنلهای-vpn-پشتیبانیشده)
-- [🖥️ پیش‌نیازها](#️-پیشنیازها)
-- [🚀 نصب خودکار (یک‌خطی، پیشنهادی)](#-نصب-خودکار-یکخطی-پیشنهادی)
-- [🛠 نصب دستی](#-نصب-دستی)
-- [⚙️ متغیرهای محیطی (.env)](#️-متغیرهای-محیطی-env)
-- [🧰 مدیریت بات (`manage.sh`)](#-مدیریت-بات-managesh)
-- [🗂 ساختار پروژه](#-ساختار-پروژه)
-- [🧪 تکنولوژی‌های استفاده‌شده](#-تکنولوژیهای-استفادهشده)
-- [🤝 مشارکت و لایسنس](#-مشارکت-contributing)
+- [📖 معرفی](#intro)
+- [✨ امکانات](#features)
+- [🧠 دستیار پشتیبانی هوش مصنوعی](#ai-support)
+- [💳 درگاه‌های پرداخت پشتیبانی‌شده](#payment-gateways)
+- [📲 Mini App](#miniapp)
+- [🖥️ پنل مدیریت وب مستقل (`admin_panel`)](#admin-panel)
+- [📱 اپ اندروید مدیریت](#android-app)
+- [🔌 پنل‌های VPN پشتیبانی‌شده](#vpn-panels)
+- [🖥️ پیش‌نیازها](#prerequisites)
+- [🚀 نصب خودکار (یک‌خطی، پیشنهادی)](#auto-install)
+- [🛠 نصب دستی](#manual-install)
+- [⚙️ متغیرهای محیطی (.env)](#env-vars)
+- [🧰 مدیریت بات (`manage.sh`)](#manage-sh)
+- [🗂 ساختار پروژه](#project-structure)
+- [🧪 تکنولوژی‌های استفاده‌شده](#tech-stack)
+- [🤝 مشارکت و لایسنس](#contributing)
 
 ---
+
+<a id="intro"></a>
 
 ## 📖 معرفی
 
@@ -48,6 +50,8 @@
   - `USDT-TRX (TRC20):` `TBm712Gdcbfp3Tkv1CpNgfwUfKuFNn8iWE`
 
 ---
+
+<a id="features"></a>
 
 ## ✨ امکانات
 
@@ -125,6 +129,8 @@
 
 ---
 
+<a id="ai-support"></a>
+
 ## 🧠 دستیار پشتیبانی هوش مصنوعی
 
 یک لایه‌ی هوشمند که قبل از رسیدن پیام کاربر به ادمین انسانی، سوالات تکراری و قابل‌پاسخ‌گویی خودکار را جواب می‌دهد:
@@ -139,6 +145,8 @@
 
 ---
 
+<a id="payment-gateways"></a>
+
 ## 💳 درگاه‌های پرداخت پشتیبانی‌شده
 
 | روش پرداخت | نوع تایید | توضیح |
@@ -152,6 +160,8 @@
 | 🧩 موتور درگاه پرداخت سفارشی/پویا (Generic Gateway) | خودکار، بدون کد | ادمین بدون نوشتن حتی یک خط کد، هر درگاهی با HTTP API را از پنل تعریف می‌کند: آدرس API، هدر/بدنه با پلیس‌هولدر (`{amount}`, `{callback_url}`, `{api_key}`)، مسیر خواندن پاسخ (شبیه JSONPath)، و وب‌هوک با چند حالت احراز هویت (`header_secret`, `query_secret`, `hmac_sha256`) |
 
 همه‌ی درگاه‌های خودکار مستقل از هم عمل می‌کنند و می‌توان چند تا را هم‌زمان فعال نگه داشت.
+
+<a id="miniapp"></a>
 
 ## 📲 Mini App
 
@@ -186,6 +196,8 @@
 
 </details>
 
+<a id="admin-panel"></a>
+
 ## 🖥️ پنل مدیریت وب مستقل (`admin_panel`)
 
 <details open>
@@ -206,7 +218,7 @@
 - 📢 ارسال پیام همگانی (Broadcast)
 - 🗄️ دریافت بکاپ فوری و بازیابی دیتابیس
 - 🔔 **اعلان Push در مرورگر (Web Push / VAPID)** — اطلاع‌رسانی سفارش/تیکت/شارژ جدید حتی وقتی تب پنل بسته باشد، با فاصله‌ی زمانی بررسی قابل‌تنظیم از خود پنل
-- 📱 **مدیریت اپ اندروید** — ساخت/کپی/لغو توکن دسترسی (PAT) برای اتصال اپ بومی اندروید، مستقیم از تب «اپ موبایل» داخل تنظیمات (جزئیات کامل در بخش [اپ اندروید مدیریت](#-اپ-اندروید-مدیریت))
+- 📱 **مدیریت اپ اندروید** — ساخت/کپی/لغو توکن دسترسی (PAT) برای اتصال اپ بومی اندروید، مستقیم از تب «اپ موبایل» داخل تنظیمات (جزئیات کامل در بخش [اپ اندروید مدیریت](#android-app))
 - 📝 لاگ کامل فعالیت ادمین‌های پنل وب
 
 ### راه‌اندازی
@@ -229,6 +241,8 @@ python -m admin_panel.generate_vapid_keys
 
 </details>
 
+<a id="android-app"></a>
+
 ## 📱 اپ اندروید مدیریت
 
 <details open>
@@ -245,6 +259,8 @@ python -m admin_panel.generate_vapid_keys
 - 🔕 امکان روشن/خاموش کردن اعلان‌ها به‌تفکیک هر بخش (سفارش‌ها، تیکت‌ها، کاربران و ...)
 
 </details>
+
+<a id="vpn-panels"></a>
 
 ## 🔌 پنل‌های VPN پشتیبانی‌شده
 
@@ -266,6 +282,8 @@ python -m admin_panel.generate_vapid_keys
 
 </details>
 
+<a id="prerequisites"></a>
+
 ## 🖥️ پیش‌نیازها
 
 | مورد | حداقل نسخه |
@@ -277,6 +295,8 @@ python -m admin_panel.generate_vapid_keys
 > ⚠️ **نکته امنیتی مهم:** هرگز توکن بات یا فایل `.env` خودت را در جای عمومی (گیت‌هاب، چت، فوروم) قرار نده. اگر توکنی به‌اشتباه منتشر شد، فوراً از طریق [@BotFather](https://t.me/BotFather) با دستور `/revoke` توکن جدید بگیر.
 
 ---
+
+<a id="auto-install"></a>
 
 ## 🚀 نصب خودکار (یک‌خطی، پیشنهادی)
 
@@ -304,11 +324,13 @@ sudo systemctl restart v2raybot    # ری‌استارت
 sudo systemctl stop v2raybot       # توقف
 ```
 
-برای آپدیت بات در آینده، کافیست همان دستور نصب یک‌خطی بالا را دوباره اجرا کنی (idempotent است و اطلاعات `.env` را دست‌نخورده نگه می‌دارد)، یا از [پنل مدیریت متنی (`manage.sh`)](#-مدیریت-بات-managesh) استفاده کنی.
+برای آپدیت بات در آینده، کافیست همان دستور نصب یک‌خطی بالا را دوباره اجرا کنی (idempotent است و اطلاعات `.env` را دست‌نخورده نگه می‌دارد)، یا از [پنل مدیریت متنی (`manage.sh`)](#manage-sh) استفاده کنی.
 
 </details>
 
 ---
+
+<a id="manual-install"></a>
 
 ## 🛠 نصب دستی
 
@@ -360,11 +382,13 @@ python main.py
 nohup python main.py > bot.log 2>&1 &
 ```
 
-بهترین روش برای پروداکشن، ساخت یک سرویس `systemd` است (که [نصب خودکار](#-نصب-خودکار-یکخطی-پیشنهادی) این کار را خودش انجام می‌دهد).
+بهترین روش برای پروداکشن، ساخت یک سرویس `systemd` است (که [نصب خودکار](#auto-install) این کار را خودش انجام می‌دهد).
 
-> 💡 بعد از نصب دستی هم می‌توانی مدیریت روزمره‌ی بات را با [پنل مدیریت متنی (`manage.sh`)](#-مدیریت-بات-managesh) انجام دهی.
+> 💡 بعد از نصب دستی هم می‌توانی مدیریت روزمره‌ی بات را با [پنل مدیریت متنی (`manage.sh`)](#manage-sh) انجام دهی.
 
 </details>
+
+<a id="env-vars"></a>
 
 ## ⚙️ متغیرهای محیطی (.env)
 
@@ -399,6 +423,8 @@ nohup python main.py > bot.log 2>&1 &
 
 ---
 
+<a id="manage-sh"></a>
+
 ## 🧰 مدیریت بات (`manage.sh`)
 
 یک پنل متنی رنگی و تعاملی برای مدیریت کامل بات بدون نیاز به یادآوری دستورات:
@@ -424,7 +450,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 | 10 | نصب/تنظیم Mini App (خودکار: دامنه + SSL + سرویس) |
 | 11 | حذف Mini App |
 | 12 | آپدیت Mini App |
-| 13 | نصب/تنظیم [پنل مدیریت وب مستقل](#️-پنل-مدیریت-وب-مستقل-admin_panel) (خودکار: دامنه + SSL + سرویس) |
+| 13 | نصب/تنظیم [پنل مدیریت وب مستقل](#admin-panel) (خودکار: دامنه + SSL + سرویس) |
 | 14 | حذف پنل مدیریت وب |
 | 15 | آپدیت پنل مدیریت وب |
 | 16 | ساخت خودکار کلید VAPID (اعلان Push پنل مدیریت) |
@@ -432,6 +458,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 </details>
 
 ---
+
+<a id="project-structure"></a>
 
 ## 🗂 ساختار پروژه
 
@@ -475,8 +503,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 | `geo_scan.py` | اسکن لینک ساب مادر، geolocate سرورها و تست سلامت پروتکل‌محور برای نمایش روی نقشه |
 | `reseller_auto_provision.py` | تحویل خودکار محصولات «اعتبار حجمی» با ساخت کاربر مستقیم روی پنل برای بات‌های نمایندگی |
 | `fcm_client.py` | کلاینت Firebase Cloud Messaging (HTTP v1) برای Push اپ اندروید مدیریت |
-| `panel_providers/` | لایه‌ی مستقل اتصال به پنل‌های VPN — [جزئیات](#-پنلهای-vpn-پشتیبانیشده) |
-| `admin_panel/` | [پنل مدیریت وب کاملاً مستقل](#️-پنل-مدیریت-وب-مستقل-admin_panel) (`server.py` بک‌اند FastAPI + endpointهای اپ موبایل، `mobile_auth.py` صدور توکن PAT، `create_admin.py` ساخت حساب owner، `security.py` هش پسورد/نشست، `webpush.py` + `generate_vapid_keys.py` اعلان Push مرورگر، `telegram_notify.py`، `config_delivery_web.py`) |
+| `panel_providers/` | لایه‌ی مستقل اتصال به پنل‌های VPN — [جزئیات](#vpn-panels) |
+| `admin_panel/` | [پنل مدیریت وب کاملاً مستقل](#admin-panel) (`server.py` بک‌اند FastAPI + endpointهای اپ موبایل، `mobile_auth.py` صدور توکن PAT، `create_admin.py` ساخت حساب owner، `security.py` هش پسورد/نشست، `webpush.py` + `generate_vapid_keys.py` اعلان Push مرورگر، `telegram_notify.py`، `config_delivery_web.py`) |
 | `miniapp/` | Mini App (بک‌اند FastAPI + فرانت‌اند + پنل مدیریت وب) |
 | `install.sh` | اسکریپت نصب/آپدیت خودکار یک‌خطی |
 | `manage.sh` | پنل مدیریت متنی تعاملی |
@@ -486,6 +514,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 </details>
 
 ---
+
+<a id="tech-stack"></a>
 
 ## 🧪 تکنولوژی‌های استفاده‌شده
 
@@ -504,6 +534,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 | کنترل نسخه | Git / GitHub |
 
 ---
+
+<a id="contributing"></a>
 
 ## 🤝 مشارکت (Contributing)
 
