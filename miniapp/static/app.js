@@ -1122,6 +1122,7 @@ function orderCard(o, opts = {}) {
         <button class="btn small outline" data-svc-action="rename" data-svc-id="${o.custom_config_id}">✏️ تغییر نام</button>
         ${o.duration_days > 0 ? `<button class="btn small outline" data-svc-action="autorenew" data-svc-id="${o.custom_config_id}" data-svc-state="${o.auto_renew ? 1 : 0}">${o.auto_renew ? "🔄 تمدید خودکار: فعال" : "🔄 تمدید خودکار: غیرفعال"}</button>` : ""}
         <button class="btn small outline" data-svc-action="transfer" data-svc-id="${o.custom_config_id}">👤 انتقال</button>
+        <button class="btn small outline" data-svc-action="renew_full" data-svc-id="${o.custom_config_id}">🔄 تمدید کامل سرویس</button>
         <button class="btn small outline" data-svc-action="cut" data-svc-id="${o.custom_config_id}">🚫 قطع دسترسی و لینک جدید</button>
         <button class="btn small outline" data-svc-action="history" data-svc-id="${o.custom_config_id}">📜 تاریخچه</button>
       </div>
@@ -1159,6 +1160,96 @@ function showServiceHistoryOverlay(rows) {
   document.getElementById("svc-hist-close-btn").onclick = () => overlay.remove();
 }
 
+// «تمدید کامل سرویس» - انتخاب پلن (فقط پلن‌های همان پنل VPN) و سپس مسیر
+// پرداخت مشترک (کیف‌پول/کارت/کریپتو/درگاه‌ها)، معادل svc_renew:full در بات.
+async function openRenewFullOverlay(customConfigId, onChanged) {
+  const overlay = document.createElement("div");
+  overlay.className = "simple-overlay";
+  overlay.innerHTML = `<div class="card"><div class="state-msg"><span class="ic">◌</span>در حال دریافت پلن‌ها...</div></div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const card = overlay.querySelector(".card");
+
+  try {
+    const plans = await api(`/api/custom-configs/${customConfigId}/renewal-full-plans`);
+    if (!plans.length) {
+      card.innerHTML = `
+        <div class="state-msg"><span class="ic">◌</span>در حال حاضر پلن تمدیدی روی همین پنل VPN تعریف نشده.</div>
+        <button class="btn outline small" id="renew-full-close-btn" style="width:100%;margin-top:12px">بستن</button>
+      `;
+      document.getElementById("renew-full-close-btn").onclick = () => overlay.remove();
+      return;
+    }
+    card.innerHTML = `
+      <h3 style="margin-bottom:10px"><span class="ic">🔄</span>تمدید کامل سرویس</h3>
+      <div class="hint-text" style="margin-bottom:10px">یکی از پلن‌های زیر را برای اعمال روی همین سرویس انتخاب کنید:</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${plans.map((p) => `
+          <button class="btn outline renew-full-plan-btn" data-plan-id="${p.id}">
+            ${escHtml(p.name)} — ${fmt(p.volume_gb)} گیگ / ${fmt(p.duration_days)} روز — ${fmt(p.price)} تومان
+          </button>
+        `).join("")}
+      </div>
+      <button class="btn outline small" id="renew-full-close-btn" style="width:100%;margin-top:12px">انصراف</button>
+    `;
+    document.getElementById("renew-full-close-btn").onclick = () => overlay.remove();
+    card.querySelectorAll(".renew-full-plan-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        card.querySelectorAll(".renew-full-plan-btn").forEach((b) => { b.disabled = true; });
+        try {
+          const result = await api(`/api/custom-configs/${customConfigId}/renew-full`, {
+            method: "POST", body: JSON.stringify({ product_id: parseInt(btn.dataset.planId, 10) }),
+          });
+          if (result.status === "approved") {
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+            card.innerHTML = `
+              <div class="state-msg"><span class="ic">✅</span>تمدید با موفقیت انجام شد.</div>
+              <button class="btn small" id="renew-full-done-btn" style="width:100%;margin-top:12px">باشه</button>
+            `;
+            document.getElementById("renew-full-done-btn").onclick = () => { overlay.remove(); if (onChanged) onChanged(); };
+          } else {
+            card.innerHTML = `
+              <h3 style="margin-bottom:10px"><span class="ic">💳</span>پرداخت تمدید سرویس</h3>
+              <div id="renew-full-payment-box"></div>
+            `;
+            const customGateways = await fetchCustomGateways(result.final_price, null);
+            renderReceiptCard(document.getElementById("renew-full-payment-box"), {
+              amount: result.final_price,
+              cardNumber: result.card_number,
+              cardHolder: result.card_holder,
+              cardToCardEnabled: result.card_to_card_enabled,
+              successText: "رسید ارسال شد. پس از تایید ادمین، تمدید روی همین سرویس اعمال می‌شود.",
+              sendReceipt: async (file) => {
+                const fd = new FormData();
+                fd.append("photo", file);
+                await apiUpload(`/api/orders/${result.order_id}/receipt`, fd);
+              },
+              cryptoEnabled: result.crypto_enabled,
+              createCryptoInvoice: async () => api(`/api/orders/${result.order_id}/crypto-invoice`, { method: "POST" }),
+              cardAutoEnabled: result.card_to_card_auto_enabled,
+              createCardAutoInvoice: async () => api(`/api/orders/${result.order_id}/card-auto-invoice`, { method: "POST" }),
+              checkCardAutoStatus: async (invoiceId) => api(`/api/card-auto-invoice/${invoiceId}/status`),
+              noapayEnabled: result.noapay_enabled,
+              createNoapayInvoice: async () => api(`/api/orders/${result.order_id}/noapay-invoice`, { method: "POST" }),
+              abangatewayEnabled: result.abangateway_enabled,
+              createAbangatewayInvoice: async () => api(`/api/orders/${result.order_id}/abangateway-invoice`, { method: "POST" }),
+              blupalEnabled: result.blupal_enabled,
+              createBlupalInvoice: async () => api(`/api/orders/${result.order_id}/blupal-invoice`, { method: "POST" }),
+              customGateways,
+              createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
+            });
+          }
+        } catch (e3) {
+          notify(e3.message);
+          card.querySelectorAll(".renew-full-plan-btn").forEach((b) => { b.disabled = false; });
+        }
+      };
+    });
+  } catch (e2) {
+    card.innerHTML = `<div class="state-msg error"><span class="ic">⚠️</span>${escHtml(e2.message)}</div>`;
+  }
+}
+
 function wireServiceActionButtons(root, onChanged) {
   root.querySelectorAll("[data-svc-action]").forEach((el) => {
     el.onclick = async () => {
@@ -1185,6 +1276,9 @@ function wireServiceActionButtons(root, onChanged) {
         } else if (action === "history") {
           const rows = await api(`/api/custom-configs/${id}/history`);
           showServiceHistoryOverlay(rows);
+          return;
+        } else if (action === "renew_full") {
+          openRenewFullOverlay(id, onChanged);
           return;
         }
         if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
