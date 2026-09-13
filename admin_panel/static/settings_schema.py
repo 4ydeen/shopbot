@@ -32,16 +32,6 @@ SETTINGS_FORM_SECTIONS = [
                     {"key": "after_buy_text", "label": "متن راهنمای پرداخت (بعد از انتخاب محصول)", "type": "textarea"},
                 ],
             },
-            {
-                "title": "🎨 رنگ دکمه‌های مسیر خرید",
-                "fields": [
-                    {"key": "btn_cat_select_style", "label": "رنگ دکمه‌های انتخاب دسته‌بندی", "type": "color"},
-                    {"key": "btn_product_select_style", "label": "رنگ دکمه‌های انتخاب محصول", "type": "color"},
-                    {"key": "btn_buy_continue_style", "label": "رنگ دکمه «ادامه و ارسال رسید»", "type": "color"},
-                    {"key": "btn_enter_code_style", "label": "رنگ دکمه «وارد کردن کد تخفیف»", "type": "color"},
-                    {"key": "btn_buy_back_style", "label": "رنگ دکمه‌های بازگشت در مسیر خرید", "type": "color"},
-                ],
-            },
         ],
     },
     {
