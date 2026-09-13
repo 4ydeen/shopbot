@@ -891,6 +891,7 @@ def api_app_config(admin=Depends(get_current_admin)):
             "id": "topups", "title": "شارژ کیف‌پول", "icon": "wallet", "screen": "list",
             "section": "عملیات مالی",
             "source": "/api/topups", "item_id_field": "id",
+            "receipt_source": "/api/topups/{id}/receipt-base64",
             "fields": [
                 {"key": "id", "label": "#", "type": "text"},
                 {"key": "amount", "label": "مبلغ", "type": "currency"},
@@ -2108,6 +2109,7 @@ def api_topups(status: str = "pending", admin=Depends(get_current_admin)):
         t = dict(t)
         user = row_to_dict(db.get_user(t["user_id"]))
         t["username"] = user["username"] if user else None
+        t["has_receipt"] = bool(t.get("receipt_file_id"))
         out.append(t)
     return out
 
@@ -2122,6 +2124,19 @@ async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
         raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
     content, content_type = result
     return Response(content=content, media_type=content_type)
+
+
+@app.get("/api/topups/{topup_id}/receipt-base64")
+async def api_topup_receipt_base64(topup_id: int, admin=Depends(get_current_admin)):
+    """نسخه‌ی JSON/base64 رسید، مخصوص اپ موبایل (مشابه /api/orders/{id}/receipt-base64)."""
+    topup = (await asyncio.to_thread(db.get_topup, topup_id))
+    if not topup or not topup["receipt_file_id"]:
+        raise HTTPException(404, "رسیدی برای این شارژ ثبت نشده است.")
+    result = await fetch_telegram_file(_bot_token(), topup["receipt_file_id"])
+    if not result:
+        raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
+    content, content_type = result
+    return {"content_type": content_type, "data_base64": base64.b64encode(content).decode("ascii")}
 
 
 @app.post("/api/topups/{topup_id}/approve")
