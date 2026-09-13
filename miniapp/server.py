@@ -700,6 +700,28 @@ async def api_custom_config_cut_access(custom_config_id: int, auth=Depends(get_v
 # پلن‌هایی که روی همان پنل VPN این سرویس ساخته شده‌اند پیشنهاد می‌شوند (نه
 # پلن‌هایی با همان حجم اولیه، چون بعد از هر تمدید حجم/زمان سرویس تغییر
 # می‌کند ولی پنل آن ثابت می‌ماند - همان دلیلی که در خود بات هم اصلاح شد).
+def _early_renewal_discount_percent(db, cc) -> int:
+    """درصد تخفیف تمدید کامل زودهنگام برای این سرویس - فقط اگر ادمین فعال
+    کرده باشد و تا انقضای واقعی سرویس حداکثر N روزِ تنظیم‌شده مانده باشد؛
+    عیناً هم‌تراز با منطق cb_service_renew_pick در handlers_user.py."""
+    settings = db.get_early_full_renewal_discount_settings()
+    if not settings["enabled"]:
+        return 0
+    expires_at_raw = cc["expires_at"] if "expires_at" in cc.keys() else None
+    if not expires_at_raw:
+        return 0
+    try:
+        exp_dt = datetime.fromisoformat(str(expires_at_raw).replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        days_left = (exp_dt - datetime.now(timezone.utc)).total_seconds() / 86400
+    except (ValueError, TypeError):
+        return 0
+    if 0 <= days_left <= settings["days_before"]:
+        return settings["percent"]
+    return 0
+
+
 @app.get("/api/custom-configs/{custom_config_id}/renewal-full-plans")
 def api_custom_config_renewal_full_plans(custom_config_id: int, auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
@@ -707,13 +729,18 @@ def api_custom_config_renewal_full_plans(custom_config_id: int, auth=Depends(get
     cc = _owned_custom_config_or_404(db, custom_config_id, tg_id)
     all_products = [p for p in db.get_all_products() if p["is_auto_provision"] and p["is_active"]]
     products = [p for p in all_products if p["provision_server_id"] == cc["panel_server_id"]]
-    return [
-        {
-            "id": p["id"], "name": p["name"], "price": p["price"],
+    discount_percent = _early_renewal_discount_percent(db, cc)
+    result = []
+    for p in products:
+        price = p["price"]
+        final_price = round(price * (100 - discount_percent) / 100) if discount_percent else price
+        result.append({
+            "id": p["id"], "name": p["name"], "price": final_price,
+            "original_price": price if discount_percent else None,
+            "discount_percent": discount_percent or None,
             "volume_gb": p["auto_provision_volume_gb"], "duration_days": p["duration_days"],
-        }
-        for p in products
-    ]
+        })
+    return result
 
 
 class RenewFullBody(BaseModel):
@@ -738,6 +765,9 @@ async def api_custom_config_renew_full(custom_config_id: int, body: RenewFullBod
     add_volume = product["auto_provision_volume_gb"]
     add_days = product["duration_days"]
     price = product["price"]
+    discount_percent = _early_renewal_discount_percent(db, cc)
+    if discount_percent:
+        price = round(price * (100 - discount_percent) / 100)
 
     wallet_credit = db.get_wallet_credit(tg_id)
     wallet_used = min(wallet_credit, price)
@@ -1081,29 +1111,74 @@ async def api_referral(auth=Depends(get_verified_user)):
 # هشدار انقضا
 # ---------------------------------------------------------------------------
 
+def _compute_connect_status(settings: dict, info: dict, assigned_at_raw) -> Optional[dict]:
+    """وضعیت نمایشیِ اتصال/عدم‌اتصال برای کارت سرویس در میناپ - هم‌تراز با
+    منطق connect_alerts.py (تشخیص از روی مصرف زنده‌ی Subscription)، ولی صرفاً
+    برای نمایش است: نه پیامی ارسال می‌کند و نه چیزی در دیتابیس ثبت می‌کند.
+    اگر ادمین هیچ‌کدام از دو هشدار را فعال نکرده باشد یا اطلاعات مصرف در
+    دسترس نباشد، None برمی‌گردد (یعنی بجی‌ای نمایش داده نشود)."""
+    if not (settings["connect_enabled"] or settings["no_connect_enabled"]):
+        return None
+    if not info.get("ok"):
+        return None
+
+    used_bytes = (info.get("upload") or 0) + (info.get("download") or 0)
+    used_gb = used_bytes / (1024 ** 3)
+    connect_threshold_bytes = settings["connect_threshold_mb"] * (1024 ** 2)
+
+    if used_bytes >= connect_threshold_bytes:
+        return {"state": "connected", "used_gb": used_gb}
+
+    hours_passed = None
+    if assigned_at_raw:
+        try:
+            assigned_dt = datetime.fromisoformat(str(assigned_at_raw).replace("Z", "+00:00"))
+            if assigned_dt.tzinfo is None:
+                assigned_dt = assigned_dt.replace(tzinfo=timezone.utc)
+            hours_passed = (datetime.now(timezone.utc) - assigned_dt).total_seconds() / 3600
+        except (ValueError, TypeError):
+            hours_passed = None
+
+    if settings["no_connect_enabled"] and hours_passed is not None and hours_passed >= settings["no_connect_hours"]:
+        return {"state": "not_connected", "used_gb": used_gb}
+
+    return {"state": "pending", "used_gb": used_gb}
+
+
 @app.get("/api/sub-info")
 async def api_sub_info(link: str = Query(...), auth=Depends(get_verified_user)):
     tg_id, db, _ = auth
     orders = db.get_user_orders(tg_id)
     owns_link = False
+    assigned_at_raw = None
     for o in orders:
         configs = db.get_order_configs(o["id"]) if o["status"] == "approved" else []
         if configs:
-            if any(c["link"] == link for c in configs):
+            match = next((c for c in configs if c["link"] == link), None)
+            if match:
                 owns_link = True
+                assigned_at_raw = match["assigned_at"]
                 break
         else:
             cfg = db.get_config_by_id(o["config_id"]) if o["config_id"] else None
             if cfg and cfg["link"] == link:
                 owns_link = True
+                assigned_at_raw = cfg["assigned_at"]
                 break
     if not owns_link:
         custom_configs = db.get_custom_configs_for_user(tg_id)
-        owns_link = any(c["subscription_url"] == link for c in custom_configs)
+        match = next((c for c in custom_configs if c["subscription_url"] == link), None)
+        if match:
+            owns_link = True
+            assigned_at_raw = match["created_at"]
     if not owns_link:
         raise HTTPException(status_code=403, detail="forbidden")
 
     info = await fetch_sub_info(link)
+    connect_status = _compute_connect_status(db.get_connect_alert_settings(), info, assigned_at_raw)
+    if connect_status:
+        info = dict(info)
+        info["connect_status"] = connect_status
     return info
 
 
@@ -5002,6 +5077,68 @@ def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(req
     db.set_setting("renewal_reminder_days_before", str(body.days_before))
     db.set_setting("renewal_discount_percent", str(body.discount_percent))
     db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
+    return {"status": "ok"}
+
+
+class ConnectAlertSettingsUpdate(BaseModel):
+    connect_enabled: bool = False
+    connect_threshold_mb: float = 1
+    connect_text: str = ""
+    no_connect_enabled: bool = False
+    no_connect_hours: int = 24
+    no_connect_threshold_mb: float = 1
+    no_connect_text: str = ""
+
+
+@app.get("/api/admin/settings/connect-alert")
+def api_admin_get_connect_alert_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return db.get_connect_alert_settings()
+
+
+@app.post("/api/admin/settings/connect-alert")
+def api_admin_set_connect_alert_settings(body: ConnectAlertSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.connect_threshold_mb <= 0 or body.no_connect_threshold_mb <= 0:
+        raise HTTPException(status_code=400, detail="آستانه‌ی مصرف باید بزرگ‌تر از صفر باشد.")
+    if body.no_connect_hours <= 0:
+        raise HTTPException(status_code=400, detail="مهلت هشدار عدم‌اتصال باید بزرگ‌تر از صفر باشد.")
+    if not body.connect_text.strip() or not body.no_connect_text.strip():
+        raise HTTPException(status_code=400, detail="متن پیام‌ها نمی‌توانند خالی باشند.")
+    db.set_connect_alert_settings(
+        connect_enabled=body.connect_enabled,
+        connect_threshold_mb=body.connect_threshold_mb,
+        connect_text=body.connect_text,
+        no_connect_enabled=body.no_connect_enabled,
+        no_connect_hours=body.no_connect_hours,
+        no_connect_threshold_mb=body.no_connect_threshold_mb,
+        no_connect_text=body.no_connect_text,
+    )
+    db.log_admin_action(auth[0], "setting_change", "connect alert settings updated (میناپ)", "setting", "connect_alert")
+    return {"status": "ok"}
+
+
+class EarlyRenewalDiscountSettingsUpdate(BaseModel):
+    enabled: bool = False
+    days_before: int = 5
+    percent: int = 10
+
+
+@app.get("/api/admin/settings/early-renewal-discount")
+def api_admin_get_early_renewal_discount_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return db.get_early_full_renewal_discount_settings()
+
+
+@app.post("/api/admin/settings/early-renewal-discount")
+def api_admin_set_early_renewal_discount_settings(body: EarlyRenewalDiscountSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    if body.days_before <= 0:
+        raise HTTPException(status_code=400, detail="تعداد روز باید بزرگ‌تر از صفر باشد.")
+    if not (0 < body.percent <= 100):
+        raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+    db.set_early_full_renewal_discount_settings(body.enabled, body.days_before, body.percent)
+    db.log_admin_action(auth[0], "setting_change", "early renewal discount settings updated (میناپ)", "setting", "early_renewal_discount")
     return {"status": "ok"}
 
 
