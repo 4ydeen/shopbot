@@ -1147,13 +1147,9 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "welcome_text", "label": "متن خوش‌آمدگویی", "type": "textarea"},
                     {"key": "contact_text", "label": "متن ارتباط با پشتیبانی", "type": "textarea"},
                     {"key": "after_buy_text", "label": "متن راهنمای پرداخت", "type": "textarea"},
-                ]}, {"title": "رنگ دکمه‌های خرید", "fields": [
-                    {"key": "btn_cat_select_style", "label": "دکمه انتخاب دسته‌بندی", "type": "text"},
-                    {"key": "btn_product_select_style", "label": "دکمه انتخاب محصول", "type": "text"},
-                    {"key": "btn_buy_continue_style", "label": "دکمه ادامه و ارسال رسید", "type": "text"},
-                    {"key": "btn_enter_code_style", "label": "دکمه کد تخفیف", "type": "text"},
-                    {"key": "btn_buy_back_style", "label": "دکمه‌های بازگشت خرید", "type": "text"},
                 ]}]}
+                # نکته: رنگ دکمه‌های مسیر خرید (انتخاب دسته/محصول/ادامه/کد تخفیف/بازگشت)
+                # دیگر اینجا نیست؛ برای یکپارچه‌سازی به تب «دکمه‌های ربات» منتقل شد.
             ],
         })
         # نسخه‌ی native تنظیمات پرداخت و مالی؛ همان کلیدهایی که در پنل وب زیر
@@ -1628,8 +1624,12 @@ def _mask_key_lines(raw: str) -> str:
 
 
 class AiSupportSettingsBody(BaseModel):
-    enabled: bool = True
-    provider: str = "auto"
+    # Optional: این تنظیمات از ۴ کارت جدا (عمومی/Gemini/Groq/OpenRouter) روی
+    # همین یک endpoint ذخیره می‌شوند؛ هر کارت فقط فیلدهای خودش را می‌فرستد.
+    # با مقدار پیش‌فرض غیر-None، ذخیره‌ی مثلاً کارت Gemini به‌غلط enabled/provider
+    # را به پیش‌فرض برمی‌گرداند.
+    enabled: Optional[bool] = None
+    provider: Optional[str] = None
     gemini_model: str = ""
     groq_model: str = ""
     openrouter_model: str = ""
@@ -1657,10 +1657,12 @@ def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
 
 @app.post("/api/settings/ai-support")
 def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(require_permission("settings"))):
-    if body.provider not in ai_support.PROVIDER_LABELS:
+    if body.provider is not None and body.provider not in ai_support.PROVIDER_LABELS:
         raise HTTPException(400, "مسیر انتخاب مدل نامعتبر است.")
-    db.set_setting("ai_support_enabled", "1" if body.enabled else "0")
-    db.set_setting("ai_provider", body.provider)
+    if body.enabled is not None:
+        db.set_setting("ai_support_enabled", "1" if body.enabled else "0")
+    if body.provider is not None:
+        db.set_setting("ai_provider", body.provider)
     if body.gemini_model:
         db.set_setting("gemini_model", body.gemini_model)
     if body.groq_model:
@@ -4184,13 +4186,18 @@ def api_set_volume_reminder_settings(body: VolumeReminderSettingsBody, admin=Dep
 
 
 class ConnectAlertSettingsBody(BaseModel):
-    connect_enabled: bool = False
-    connect_threshold_mb: float = 1
-    connect_text: str = ""
-    no_connect_enabled: bool = False
-    no_connect_hours: int = 24
-    no_connect_threshold_mb: float = 1
-    no_connect_text: str = ""
+    # همه‌ی فیلدها Optional هستند چون این تنظیمات از دو کارت جدا (اپ native:
+    # «هشدار اتصال» و «هشدار عدم‌اتصال») روی همین یک endpoint ذخیره می‌شوند؛
+    # هر کارت فقط فیلدهای خودش را می‌فرستد. اگر این‌ها مقدار پیش‌فرض غیر-None
+    # داشته باشند، ذخیره‌ی یک کارت مقدار واقعی کارت دیگر را با پیش‌فرض/خالی
+    # رونویسی می‌کند (و حتی می‌تواند به‌غلط خطای «متن خالی» بدهد).
+    connect_enabled: Optional[bool] = None
+    connect_threshold_mb: Optional[float] = None
+    connect_text: Optional[str] = None
+    no_connect_enabled: Optional[bool] = None
+    no_connect_hours: Optional[int] = None
+    no_connect_threshold_mb: Optional[float] = None
+    no_connect_text: Optional[str] = None
 
 
 @app.get("/api/settings/connect-alert")
@@ -4200,21 +4207,17 @@ def api_get_connect_alert_settings(admin=Depends(require_permission("settings"))
 
 @app.post("/api/settings/connect-alert")
 def api_set_connect_alert_settings(body: ConnectAlertSettingsBody, admin=Depends(require_permission("settings"))):
-    if body.connect_threshold_mb <= 0 or body.no_connect_threshold_mb <= 0:
+    if body.connect_threshold_mb is not None and body.connect_threshold_mb <= 0:
         raise HTTPException(400, "آستانه‌ی مصرف باید بزرگ‌تر از صفر باشد.")
-    if body.no_connect_hours <= 0:
+    if body.no_connect_threshold_mb is not None and body.no_connect_threshold_mb <= 0:
+        raise HTTPException(400, "آستانه‌ی مصرف باید بزرگ‌تر از صفر باشد.")
+    if body.no_connect_hours is not None and body.no_connect_hours <= 0:
         raise HTTPException(400, "مهلت هشدار عدم‌اتصال باید بزرگ‌تر از صفر باشد.")
-    if not body.connect_text.strip() or not body.no_connect_text.strip():
-        raise HTTPException(400, "متن پیام‌ها نمی‌توانند خالی باشند.")
-    db.set_connect_alert_settings(
-        connect_enabled=body.connect_enabled,
-        connect_threshold_mb=body.connect_threshold_mb,
-        connect_text=body.connect_text,
-        no_connect_enabled=body.no_connect_enabled,
-        no_connect_hours=body.no_connect_hours,
-        no_connect_threshold_mb=body.no_connect_threshold_mb,
-        no_connect_text=body.no_connect_text,
-    )
+    if body.connect_text is not None and not body.connect_text.strip():
+        raise HTTPException(400, "متن پیام نمی‌تواند خالی باشد.")
+    if body.no_connect_text is not None and not body.no_connect_text.strip():
+        raise HTTPException(400, "متن پیام نمی‌تواند خالی باشد.")
+    db.set_connect_alert_settings(**body.dict(exclude_none=True))
     db.log_admin_action(admin["id"], "setting_change", "connect alert settings updated (پنل وب)", "setting", "connect_alert")
     return {"ok": True}
 
