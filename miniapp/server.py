@@ -696,6 +696,85 @@ async def api_custom_config_cut_access(custom_config_id: int, auth=Depends(get_v
     return {"status": "ok", "subscription_url": result.subscription_url}
 
 
+# «تمدید کامل سرویس» - معادل svc_renew:full / svc_renew_pick در ربات اصلی؛ فقط
+# پلن‌هایی که روی همان پنل VPN این سرویس ساخته شده‌اند پیشنهاد می‌شوند (نه
+# پلن‌هایی با همان حجم اولیه، چون بعد از هر تمدید حجم/زمان سرویس تغییر
+# می‌کند ولی پنل آن ثابت می‌ماند - همان دلیلی که در خود بات هم اصلاح شد).
+@app.get("/api/custom-configs/{custom_config_id}/renewal-full-plans")
+def api_custom_config_renewal_full_plans(custom_config_id: int, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    _require_svc_feature(db, "svc_show_renew_full")
+    cc = _owned_custom_config_or_404(db, custom_config_id, tg_id)
+    all_products = [p for p in db.get_all_products() if p["is_auto_provision"] and p["is_active"]]
+    products = [p for p in all_products if p["provision_server_id"] == cc["panel_server_id"]]
+    return [
+        {
+            "id": p["id"], "name": p["name"], "price": p["price"],
+            "volume_gb": p["auto_provision_volume_gb"], "duration_days": p["duration_days"],
+        }
+        for p in products
+    ]
+
+
+class RenewFullBody(BaseModel):
+    product_id: int
+
+
+@app.post("/api/custom-configs/{custom_config_id}/renew-full")
+async def api_custom_config_renew_full(custom_config_id: int, body: RenewFullBody, auth=Depends(get_verified_user)):
+    tg_id, db, _ = auth
+    _require_svc_feature(db, "svc_show_renew_full")
+    cc = _owned_custom_config_or_404(db, custom_config_id, tg_id)
+    product = db.get_product(body.product_id)
+    if not product or not product["is_auto_provision"] or not product["is_active"]:
+        raise HTTPException(status_code=400, detail="این پلن یافت نشد.")
+    if product["provision_server_id"] != cc["panel_server_id"]:
+        raise HTTPException(status_code=400, detail="این پلن روی پنل این سرویس تعریف نشده است.")
+
+    user_row = db.get_user(tg_id)
+    if user_row and user_row["is_blocked"]:
+        raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
+
+    add_volume = product["auto_provision_volume_gb"]
+    add_days = product["duration_days"]
+    price = product["price"]
+
+    wallet_credit = db.get_wallet_credit(tg_id)
+    wallet_used = min(wallet_credit, price)
+    if wallet_used > 0:
+        db.add_wallet_credit(tg_id, -wallet_used)
+
+    order_id = db.create_renewal_order(
+        tg_id, "custom", cc["id"], "full", add_volume, add_days, price, wallet_used,
+    )
+    order = db.get_order(order_id)
+
+    try:
+        if order["final_price"] <= 0:
+            try:
+                result_text = await execute_renewal(db, order)
+            except RenewalError as e:
+                db.reject_order(order_id)
+                raise HTTPException(status_code=409, detail=str(e))
+            db.approve_renewal_order(order_id)
+            return {"status": "approved", "order_id": order_id, "message": result_text}
+
+        return {
+            "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
+            "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
+            **_payment_flags(db, order["final_price"], None),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger("miniapp").exception(
+            "خطای غیرمنتظره در تمدید کامل سرویس (سفارش #%s) برای کاربر %s؛ سفارش رد و مبلغ کیف پول (در صورت وجود) بازگردانده شد.",
+            order_id, tg_id,
+        )
+        db.reject_order(order_id)
+        raise HTTPException(status_code=500, detail="خطای غیرمنتظره‌ای رخ داد. مبلغ کسرشده (در صورت وجود) به کیف پول شما بازگردانده شد.")
+
+
 # ---------------------------------------------------------------------------
 # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN) - معادل CustomConfigFlow ربات؛
 # قبلاً این‌جا فقط GET/DELETE بود (کاربر فقط می‌توانست کانفیگ‌های ساخته‌شده در
