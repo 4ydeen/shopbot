@@ -699,18 +699,16 @@ async function renderHome() {
       <div class="card">
         ${allActive.length === 0
           ? `<div class="state-msg"><span class="ic">◌</span>هنوز سرویسی ندارید.<br><span style="font-size:11.5px">از فروشگاه یک سرویس بخرید تا اینجا نمایش داده شود.</span></div>`
-          : allActive.map(orderCard).join("")}
+          : allActive.map(serviceCompactRow).join("")}
       </div>
     `;
     content.querySelectorAll(".quick-item[data-nav]").forEach((el) => {
       el.onclick = () => switchTab(el.dataset.nav);
     });
     wirePromoCarousel(content);
-    allActive.filter((o) => o.link).forEach((o) => {
-      const links = (o.links && o.links.length) ? o.links : [o.link];
-      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    content.querySelectorAll("[data-svc-row]").forEach((el) => {
+      el.onclick = () => openServiceDetail(el.dataset.svcRow);
     });
-    wireAddToAppButtons(content);
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
@@ -909,11 +907,30 @@ function referralCard(r) {
 
 let servicesFilter = "all"; // all | active | expired | inactive
 let servicesQuery = "";
+// نمایش لیست سرویس‌ها همیشه به‌صورت ردیف‌های فشرده است؛ کلیک روی هر ردیف
+// وارد صفحه‌ی جزئیات همان یک سرویس می‌شود (لینک/QR/دکمه‌های مدیریت آنجاست،
+// نه زیر هر ردیف در لیست) - level: "list" | "detail"
+let servicesView = { level: "list", key: null };
+// وقتی از تب «خانه» روی یک سرویس زده می‌شود، همین کلید نگه داشته می‌شود تا
+// enterServicesTab() به‌جای ریست‌کردن، مستقیم صفحه‌ی جزئیات همان سرویس را باز کند.
+let pendingServiceDetailKey = null;
 
 function enterServicesTab() {
   servicesFilter = "all";
   servicesQuery = "";
+  if (pendingServiceDetailKey != null) {
+    servicesView = { level: "detail", key: pendingServiceDetailKey };
+    pendingServiceDetailKey = null;
+  } else {
+    servicesView = { level: "list", key: null };
+  }
   renderServices();
+}
+
+// از هر جای دیگر برنامه (مثلاً تب خانه) برای باز کردن مستقیم جزئیات یک سرویس.
+function openServiceDetail(key) {
+  pendingServiceDetailKey = key;
+  switchTab("services");
 }
 
 function serviceStatusKey(o) {
@@ -922,6 +939,29 @@ function serviceStatusKey(o) {
     if (new Date(o.expires_at) < new Date()) return "expired";
   }
   return "active";
+}
+
+// ردیف فشرده‌ی یک سرویس برای لیست‌ها (تب سرویس‌ها و بخش «سرویس‌های من» در
+// خانه) - فقط نام/وضعیت، بدون لینک/QR/دکمه؛ با کلیک وارد جزئیات می‌شود.
+function serviceCompactRow(o) {
+  const key = serviceStatusKey(o);
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
+  const badgeClass = key === "active" ? "approved" : key === "expired" ? "pending" : "rejected";
+  const badgeLabel = key === "active" ? `فعال تا ${exp}`
+    : key === "expired" ? "منقضی‌شده"
+    : (o.status === "pending" ? "در انتظار تایید" : "رد‌شده");
+  return `
+    <div class="list-row" data-svc-row="${o.id}">
+      <div class="list-row-main">
+        <div class="list-row-ic line">${ICON_SHIELD}</div>
+        <div class="list-row-text">
+          <div class="list-row-title">${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</div>
+          <div class="list-row-sub"><span class="badge ${badgeClass}">${badgeLabel}</span></div>
+        </div>
+      </div>
+      <span class="list-row-chev">‹</span>
+    </div>
+  `;
 }
 
 async function renderServices() {
@@ -948,6 +988,33 @@ async function renderServices() {
     }));
     const all = [...orders, ...customCards];
 
+    // --- سطح جزئیات: فقط همان یک سرویس با لینک/QR/دکمه‌های مدیریت ---
+    if (servicesView.level === "detail") {
+      const item = all.find((o) => String(o.id) === String(servicesView.key));
+      if (item) {
+        const body = serviceStatusKey(item) === "active" ? orderCard(item, { deletable: true }) : serviceInactiveRow(item);
+        content.innerHTML = `
+          <button class="btn outline small" id="back-to-services-list" style="width:auto;margin-bottom:12px">→ بازگشت به سرویس‌ها</button>
+          <div class="card">${body}</div>
+        `;
+        document.getElementById("back-to-services-list").onclick = () => {
+          servicesView = { level: "list", key: null };
+          renderServices();
+        };
+        if (serviceStatusKey(item) === "active" && item.link) {
+          const links = (item.links && item.links.length) ? item.links : [item.link];
+          links.forEach((link, idx) => loadSubInfo(`${item.id}-${idx}`, link));
+        }
+        wireAddToAppButtons(content);
+        wireDeleteConfigButtons(content, () => { servicesView = { level: "list", key: null }; renderServices(); });
+        wireServiceActionButtons(content, renderServices);
+        return;
+      }
+      // سرویس دیگر پیدا نشد (مثلاً حذف شده) → برگرد به لیست
+      servicesView = { level: "list", key: null };
+    }
+
+    // --- سطح لیست: فقط ردیف‌های فشرده، کلیک روی هرکدام وارد جزئیات می‌شود ---
     const FILTERS = [
       { key: "all", label: "همه" },
       { key: "active", label: "فعال" },
@@ -969,7 +1036,7 @@ async function renderServices() {
       <div id="services-list">
         ${filtered.length === 0
           ? `<div class="state-msg"><span class="ic">◌</span>سرویسی یافت نشد.</div>`
-          : `<div class="card">${filtered.map((o) => serviceStatusKey(o) === "active" ? orderCard(o, { deletable: true }) : serviceInactiveRow(o)).join("")}</div>`}
+          : `<div class="card">${filtered.map(serviceCompactRow).join("")}</div>`}
       </div>
     `;
 
@@ -980,14 +1047,9 @@ async function renderServices() {
     content.querySelectorAll(".chip[data-filter]").forEach((el) => {
       el.onclick = () => { servicesFilter = el.dataset.filter; renderServices(); };
     });
-
-    filtered.filter((o) => serviceStatusKey(o) === "active" && o.link).forEach((o) => {
-      const links = (o.links && o.links.length) ? o.links : [o.link];
-      links.forEach((link, idx) => loadSubInfo(`${o.id}-${idx}`, link));
+    content.querySelectorAll("[data-svc-row]").forEach((el) => {
+      el.onclick = () => { servicesView = { level: "detail", key: el.dataset.svcRow }; renderServices(); };
     });
-    wireAddToAppButtons(content);
-    wireDeleteConfigButtons(content, renderServices);
-    wireServiceActionButtons(content, renderServices);
   } catch (e) {
     content.innerHTML = errorState(e.message);
   }
