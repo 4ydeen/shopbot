@@ -1335,6 +1335,22 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "discount_percent", "label": "درصد تخفیف", "type": "number"},
                     {"key": "discount_expiry_hours", "label": "اعتبار کد (ساعت)", "type": "number"},
                 ]},
+                {"title": "هشدار اتصال به کانفیگ", "load_url": "/api/settings/connect-alert", "submit_url": "/api/settings/connect-alert", "fields": [
+                    {"key": "connect_enabled", "label": "فعال", "type": "bool"},
+                    {"key": "connect_threshold_mb", "label": "آستانه‌ی مصرف (مگابایت)", "type": "number"},
+                    {"key": "connect_text", "label": "متن پیام (از {used_gb} می‌توانید استفاده کنید)", "type": "textarea"},
+                ]},
+                {"title": "هشدار عدم‌اتصال به کانفیگ", "load_url": "/api/settings/connect-alert", "submit_url": "/api/settings/connect-alert", "fields": [
+                    {"key": "no_connect_enabled", "label": "فعال", "type": "bool"},
+                    {"key": "no_connect_hours", "label": "مهلت بعد از فعال‌سازی (ساعت)", "type": "number"},
+                    {"key": "no_connect_threshold_mb", "label": "آستانه‌ی مصرف (مگابایت)", "type": "number"},
+                    {"key": "no_connect_text", "label": "متن پیام (از {used_gb} می‌توانید استفاده کنید)", "type": "textarea"},
+                ]},
+                {"title": "تخفیف تمدید کامل زودهنگام", "load_url": "/api/settings/early-renewal-discount", "submit_url": "/api/settings/early-renewal-discount", "fields": [
+                    {"key": "enabled", "label": "فعال", "type": "bool"},
+                    {"key": "days_before", "label": "حداکثر روز مانده به انقضا", "type": "number"},
+                    {"key": "percent", "label": "درصد تخفیف", "type": "number"},
+                ]},
                 {"title": "عضویت اجباری", "load_url": "/api/settings/force-join", "submit_url": "/api/settings/force-join", "fields": [
                     {"key": "enabled", "label": "فعال", "type": "bool"},
                     {"key": "channel", "label": "آیدی کانال", "type": "text"},
@@ -4164,6 +4180,64 @@ def api_set_volume_reminder_settings(body: VolumeReminderSettingsBody, admin=Dep
     db.set_setting("volume_discount_percent", str(body.discount_percent))
     db.set_setting("volume_discount_expiry_hours", str(body.discount_expiry_hours))
     db.log_admin_action(admin["id"], "setting_change", "volume reminder settings updated (پنل وب)", "setting", "volume_reminder")
+    return {"ok": True}
+
+
+class ConnectAlertSettingsBody(BaseModel):
+    connect_enabled: bool = False
+    connect_threshold_mb: float = 1
+    connect_text: str = ""
+    no_connect_enabled: bool = False
+    no_connect_hours: int = 24
+    no_connect_threshold_mb: float = 1
+    no_connect_text: str = ""
+
+
+@app.get("/api/settings/connect-alert")
+def api_get_connect_alert_settings(admin=Depends(require_permission("settings"))):
+    return db.get_connect_alert_settings()
+
+
+@app.post("/api/settings/connect-alert")
+def api_set_connect_alert_settings(body: ConnectAlertSettingsBody, admin=Depends(require_permission("settings"))):
+    if body.connect_threshold_mb <= 0 or body.no_connect_threshold_mb <= 0:
+        raise HTTPException(400, "آستانه‌ی مصرف باید بزرگ‌تر از صفر باشد.")
+    if body.no_connect_hours <= 0:
+        raise HTTPException(400, "مهلت هشدار عدم‌اتصال باید بزرگ‌تر از صفر باشد.")
+    if not body.connect_text.strip() or not body.no_connect_text.strip():
+        raise HTTPException(400, "متن پیام‌ها نمی‌توانند خالی باشند.")
+    db.set_connect_alert_settings(
+        connect_enabled=body.connect_enabled,
+        connect_threshold_mb=body.connect_threshold_mb,
+        connect_text=body.connect_text,
+        no_connect_enabled=body.no_connect_enabled,
+        no_connect_hours=body.no_connect_hours,
+        no_connect_threshold_mb=body.no_connect_threshold_mb,
+        no_connect_text=body.no_connect_text,
+    )
+    db.log_admin_action(admin["id"], "setting_change", "connect alert settings updated (پنل وب)", "setting", "connect_alert")
+    return {"ok": True}
+
+
+class EarlyRenewalDiscountBody(BaseModel):
+    enabled: bool = False
+    days_before: int = 5
+    percent: int = 10
+
+
+@app.get("/api/settings/early-renewal-discount")
+def api_get_early_renewal_discount_settings(admin=Depends(require_permission("settings"))):
+    return db.get_early_full_renewal_discount_settings()
+
+
+@app.post("/api/settings/early-renewal-discount")
+def api_set_early_renewal_discount_settings(body: EarlyRenewalDiscountBody, admin=Depends(require_permission("settings"))):
+    if body.days_before <= 0:
+        raise HTTPException(400, "تعداد روز باید بزرگ‌تر از صفر باشد.")
+    if not (0 < body.percent <= 100):
+        raise HTTPException(400, "درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+    db.set_early_full_renewal_discount_settings(body.enabled, body.days_before, body.percent)
+    db.log_admin_action(admin["id"], "setting_change", "early renewal discount settings updated (پنل وب)", "setting", "early_renewal_discount")
     return {"ok": True}
 
 
