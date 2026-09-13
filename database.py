@@ -3039,7 +3039,16 @@ class Database:
             ).fetchall()
 
             total_users = conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
-            active_configs_c = conn.execute("SELECT COUNT(*) c FROM configs WHERE is_used=1").fetchone()["c"]
+            # کارت «کانفیگ‌های فعال» در داشبورد: قبلاً فقط جدول configs (انبار
+            # کانفیگ ثابت) را می‌شمرد و custom_configs (کانفیگ‌های ساخته‌شده
+            # مستقیم روی پنل‌های Marzban/3X-UI/Hiddify/... که امروز اکثر
+            # فروشگاه‌ها فقط از همین روش استفاده می‌کنند) را نادیده می‌گرفت؛
+            # به همین دلیل همیشه صفر یا عددی خیلی کمتر از واقعیت نشان می‌داد.
+            active_configs_c = conn.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM configs WHERE is_used=1) + "
+                "(SELECT COUNT(*) FROM custom_configs WHERE status='active' AND source != 'test') AS c"
+            ).fetchone()["c"]
             open_tickets_c = conn.execute(
                 "SELECT COUNT(*) c FROM tickets WHERE status IN ('open','answered')"
             ).fetchone()["c"]
