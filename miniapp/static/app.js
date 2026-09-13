@@ -1180,13 +1180,16 @@ async function openRenewFullOverlay(customConfigId, onChanged) {
       document.getElementById("renew-full-close-btn").onclick = () => overlay.remove();
       return;
     }
+    const hasDiscount = plans.some((p) => p.discount_percent);
     card.innerHTML = `
       <h3 style="margin-bottom:10px"><span class="ic">🔄</span>تمدید کامل سرویس</h3>
+      ${hasDiscount ? `<div class="hint-text" style="margin-bottom:10px">🎁 چون سرویس شما به انقضا نزدیک است، تخفیف تمدید زودهنگام روی این پلن‌ها اعمال شده!</div>` : ""}
       <div class="hint-text" style="margin-bottom:10px">یکی از پلن‌های زیر را برای اعمال روی همین سرویس انتخاب کنید:</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         ${plans.map((p) => `
           <button class="btn outline renew-full-plan-btn" data-plan-id="${p.id}">
-            ${escHtml(p.name)} — ${fmt(p.volume_gb)} گیگ / ${fmt(p.duration_days)} روز — ${fmt(p.price)} تومان
+            ${escHtml(p.name)} — ${fmt(p.volume_gb)} گیگ / ${fmt(p.duration_days)} روز —
+            ${p.discount_percent ? `<s class="hint-text">${fmt(p.original_price)}</s> ${fmt(p.price)} تومان (🎁 ${p.discount_percent}٪ تخفیف)` : `${fmt(p.price)} تومان`}
           </button>
         `).join("")}
       </div>
@@ -1516,6 +1519,22 @@ function fmtGB(bytes) {
   return (bytes / (1024 ** 3)).toFixed(2);
 }
 
+// بجی وضعیت اتصال/عدم‌اتصال روی کارت سرویس - از روی connect_status که
+// سمت سرور (میناپ) طبق تنظیمات ادمین محاسبه شده؛ اگر ادمین این هشدار را
+// فعال نکرده باشد یا اطلاعات مصرف در دسترس نباشد، سرور اصلاً این کلید را
+// برنمی‌گرداند و اینجا چیزی نمایش داده نمی‌شود.
+function connectStatusBadgeHtml(connectStatus) {
+  if (!connectStatus) return "";
+  const map = {
+    connected: { cls: "approved", icon: "✅", label: "متصل شده" },
+    not_connected: { cls: "rejected", icon: "⚠️", label: "هنوز متصل نشده" },
+    pending: { cls: "pending", icon: "◌", label: "در انتظار اتصال" },
+  };
+  const m = map[connectStatus.state];
+  if (!m) return "";
+  return `<div class="sub-info-row"><span>وضعیت اتصال</span><span class="badge ${m.cls}">${m.icon} ${m.label}</span></div>`;
+}
+
 async function loadSubInfo(orderId, link) {
   const box = document.getElementById(`sub-info-${orderId}`);
   if (!box) return;
@@ -1546,7 +1565,7 @@ async function loadSubInfo(orderId, link) {
       const daysLeft = Math.max(0, Math.ceil((expDate - new Date()) / 86400000));
       expiryHtml = `<div class="sub-info-row"><span>انقضا</span><b>${toJalaliStr(expDate)} (${daysLeft} روز مانده)</b></div>`;
     }
-    box.innerHTML = usageHtml + expiryHtml;
+    box.innerHTML = connectStatusBadgeHtml(info.connect_status) + usageHtml + expiryHtml;
   } catch (e) {
     if (box.isConnected) box.innerHTML = `<div class="sub-info-error">⚠️ اطلاعات مصرف در دسترس نیست</div>`;
   }
@@ -5165,11 +5184,13 @@ async function renderAdminSalesSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(4);
   try {
-    const [referral, wheel, renewal, volumeRem, discounts, allProducts, allCategories] = await Promise.all([
+    const [referral, wheel, renewal, volumeRem, connectAlert, earlyRenewal, discounts, allProducts, allCategories] = await Promise.all([
       api("/api/admin/settings/referral"),
       api("/api/admin/settings/wheel"),
       api("/api/admin/settings/renewal"),
       api("/api/admin/settings/volume-reminder"),
+      api("/api/admin/settings/connect-alert"),
+      api("/api/admin/settings/early-renewal-discount"),
       api("/api/admin/discounts"),
       api("/api/admin/products/all").catch(() => []),
       api("/api/admin/categories").catch(() => []),
@@ -5262,6 +5283,21 @@ async function renderAdminSalesSection() {
       </div>
 
       <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎁 تخفیف تمدید کامل زودهنگام</div>
+        <p class="hint-text">وقتی کاربر از «حساب من» بخواهد سرویس ساخته‌شده روی پنل را کامل تمدید کند، اگر تا انقضای واقعی سرویس حداکثر N روز مانده باشد، این تخفیف به‌صورت خودکار و بدون نیاز به کد تخفیف روی قیمت پلن اعمال می‌شود.</p>
+        <div class="field-switch-row">
+          <span>تخفیف تمدید زودهنگام فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="erd-enabled" ${earlyRenewal.enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">حداکثر چند روز مانده به انقضا، تخفیف اعمال شود</label>
+        <input class="input" id="erd-days" type="number" placeholder="مثال: 5" value="${earlyRenewal.days_before}" style="margin-bottom:10px" />
+        <label class="field-label">درصد تخفیف (۱ تا ۱۰۰)</label>
+        <input class="input" id="erd-percent" type="number" placeholder="مثال: 10" value="${earlyRenewal.percent}" style="margin-bottom:4px" />
+        <div class="field-error" id="erd-error"></div>
+        <button class="btn" id="erd-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
         <div class="eyebrow" style="margin-top:0">📉 یادآوری اتمام حجم</div>
         <p class="hint-text">وقتی حجم مصرفی کاربر به آستانه‌ی تعیین‌شده برسد، پیام یادآوری همراه با کد تخفیف تشویقی برای تمدید فرستاده می‌شود. این یادآوری مستقل از یادآوری تاریخ انقضاست و برای کانفیگ‌های با حجم نامحدود اعمال نمی‌شود.</p>
         <div class="field-switch-row">
@@ -5283,6 +5319,33 @@ async function renderAdminSalesSection() {
         <input class="input" id="vol-discount-expiry" type="number" placeholder="مثال: 24" value="${volumeRem.discount_expiry_hours}" style="margin-bottom:4px" />
         <div class="field-error" id="vol-error"></div>
         <button class="btn" id="vol-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">📶 هشدار اتصال / عدم‌اتصال به کانفیگ</div>
+        <p class="hint-text">چون پنل‌های VPN وضعیت آنلاین/آفلاین لحظه‌ای گزارش نمی‌دهند، «اتصال» از روی شروع مصرف سرویس تشخیص داده می‌شود. در متن پیام‌ها می‌توانید از {used_gb} و {threshold_gb} استفاده کنید.</p>
+
+        <div class="field-switch-row">
+          <span>هشدار «متصل شد» فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ca-connect-enabled" ${connectAlert.connect_enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">آستانه‌ی تشخیص اتصال (مگابایت مصرف)</label>
+        <input class="input" id="ca-connect-threshold" type="number" step="0.1" placeholder="مثال: 1" value="${connectAlert.connect_threshold_mb}" style="margin-bottom:10px" />
+        <label class="field-label">متن پیام هشدار اتصال</label>
+        <textarea class="input" id="ca-connect-text" rows="2" style="margin-bottom:14px">${escHtml(connectAlert.connect_text)}</textarea>
+
+        <div class="field-switch-row">
+          <span>هشدار «هنوز متصل نشده» فعال باشد</span>
+          <label class="switch"><input type="checkbox" id="ca-no-connect-enabled" ${connectAlert.no_connect_enabled ? "checked" : ""} /><span class="switch-slider"></span></label>
+        </div>
+        <label class="field-label">چند ساعت بعد از فعال‌سازی سرویس، بدون اتصال بررسی شود</label>
+        <input class="input" id="ca-no-connect-hours" type="number" placeholder="مثال: 24" value="${connectAlert.no_connect_hours}" style="margin-bottom:10px" />
+        <label class="field-label">آستانه‌ی مصرف برای «بدون اتصال» (مگابایت)</label>
+        <input class="input" id="ca-no-connect-threshold" type="number" step="0.1" placeholder="مثال: 1" value="${connectAlert.no_connect_threshold_mb}" style="margin-bottom:10px" />
+        <label class="field-label">متن پیام هشدار عدم‌اتصال</label>
+        <textarea class="input" id="ca-no-connect-text" rows="2" style="margin-bottom:4px">${escHtml(connectAlert.no_connect_text)}</textarea>
+        <div class="field-error" id="ca-error"></div>
+        <button class="btn" id="ca-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
 
       <div class="card">
@@ -5437,6 +5500,28 @@ async function renderAdminSalesSection() {
       } catch (e) { errBox.textContent = e.message; }
     };
 
+    document.getElementById("erd-save").onclick = async () => {
+      const errBox = document.getElementById("erd-error");
+      errBox.textContent = "";
+      const daysRaw = document.getElementById("erd-days").value.trim();
+      const percentRaw = document.getElementById("erd-percent").value.trim();
+      if (!daysRaw || !percentRaw) { errBox.textContent = "همه‌ی کادرها باید پر شوند."; return; }
+      const days = Number(daysRaw), percent = Number(percentRaw);
+      if (isNaN(days) || days <= 0) { errBox.textContent = "تعداد روز باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(percent) || percent <= 0 || percent > 100) { errBox.textContent = "درصد تخفیف باید عددی بین ۱ تا ۱۰۰ باشد."; return; }
+      try {
+        await api("/api/admin/settings/early-renewal-discount", {
+          method: "POST",
+          body: JSON.stringify({
+            enabled: document.getElementById("erd-enabled").checked,
+            days_before: days, percent,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات تخفیف تمدید زودهنگام ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
     document.getElementById("vol-save").onclick = async () => {
       const errBox = document.getElementById("vol-error");
       errBox.textContent = "";
@@ -5463,6 +5548,40 @@ async function renderAdminSalesSection() {
         });
         tg.HapticFeedback.notificationOccurred("success");
         notify("تنظیمات یادآوری اتمام حجم ذخیره شد.");
+      } catch (e) { errBox.textContent = e.message; }
+    };
+
+    document.getElementById("ca-save").onclick = async () => {
+      const errBox = document.getElementById("ca-error");
+      errBox.textContent = "";
+      const connectThresholdRaw = document.getElementById("ca-connect-threshold").value.trim();
+      const noConnectHoursRaw = document.getElementById("ca-no-connect-hours").value.trim();
+      const noConnectThresholdRaw = document.getElementById("ca-no-connect-threshold").value.trim();
+      const connectText = document.getElementById("ca-connect-text").value.trim();
+      const noConnectText = document.getElementById("ca-no-connect-text").value.trim();
+      if (!connectThresholdRaw || !noConnectHoursRaw || !noConnectThresholdRaw) { errBox.textContent = "همه‌ی کادرهای عددی باید پر شوند."; return; }
+      const connectThreshold = Number(connectThresholdRaw);
+      const noConnectHours = Number(noConnectHoursRaw);
+      const noConnectThreshold = Number(noConnectThresholdRaw);
+      if (isNaN(connectThreshold) || connectThreshold <= 0) { errBox.textContent = "آستانه‌ی تشخیص اتصال باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(noConnectHours) || noConnectHours <= 0) { errBox.textContent = "مهلت هشدار عدم‌اتصال باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (isNaN(noConnectThreshold) || noConnectThreshold <= 0) { errBox.textContent = "آستانه‌ی مصرف برای عدم‌اتصال باید عددی بزرگ‌تر از صفر باشد."; return; }
+      if (!connectText || !noConnectText) { errBox.textContent = "متن پیام‌ها نمی‌توانند خالی باشند."; return; }
+      try {
+        await api("/api/admin/settings/connect-alert", {
+          method: "POST",
+          body: JSON.stringify({
+            connect_enabled: document.getElementById("ca-connect-enabled").checked,
+            connect_threshold_mb: connectThreshold,
+            connect_text: connectText,
+            no_connect_enabled: document.getElementById("ca-no-connect-enabled").checked,
+            no_connect_hours: noConnectHours,
+            no_connect_threshold_mb: noConnectThreshold,
+            no_connect_text: noConnectText,
+          }),
+        });
+        tg.HapticFeedback.notificationOccurred("success");
+        notify("تنظیمات هشدار اتصال/عدم‌اتصال ذخیره شد.");
       } catch (e) { errBox.textContent = e.message; }
     };
 
