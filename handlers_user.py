@@ -3219,11 +3219,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         if mode == "full":
-            current_volume = item["custom"]["volume_gb"]
+            current_panel_id = item["custom"]["panel_server_id"]
             all_products = [p for p in (await asyncio.to_thread(db.get_all_products)) if p["is_auto_provision"] and p["is_active"]]
-            products = [p for p in all_products if p["auto_provision_volume_gb"] == current_volume]
+            # فقط پلن‌هایی که روی همان پنل VPN این سرویس ساخته شده‌اند نشان داده
+            # می‌شوند - نه پلن‌هایی با همان حجم اولیه؛ چون بعد از هر تمدید حجم/زمان
+            # سرویس تغییر می‌کند و دیگر با هیچ محصولی برابر نمی‌ماند، ولی پنل آن
+            # ثابت است.
+            products = [p for p in all_products if p["provision_server_id"] == current_panel_id]
             if not products:
-                await call.answer("در حال حاضر پلن تمدیدی متناسب با حجم این سرویس تعریف نشده.", show_alert=True)
+                await call.answer("در حال حاضر پلن تمدیدی روی همین پنل VPN تعریف نشده.", show_alert=True)
                 return
             await call.answer()
             await _safe_edit(
