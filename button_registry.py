@@ -106,12 +106,11 @@ def build_registry(db) -> dict:
         "reorderable": True, "supports_row_break": False,
         "items": [{
             "key": key, "label": dbmod.BUYFLOW_META[key]["label"],
-            "has_text": True, "has_style": True,
-            "text": db.get_setting(f"{key}_text", dbmod.BUYFLOW_META[key]["default_text"]),
-            "style": db.get_setting(f"{key}_style", ""),
+            "has_text": False, "has_style": False,
+            "text": None, "style": None,
             "row_break_before": None,
         } for key in confirm_order],
-        "note": "متن/رنگ این دو دکمه با گروه «مسیر خرید» بالا مشترک است؛ همین‌جا هم قابل تغییرند. دکمه‌ی «بازگشت» همیشه ردیف آخر ثابت می‌ماند.",
+        "note": "فقط ترتیب نمایش این دو دکمه اینجا مشخص می‌شود؛ متن و رنگشان در گروه «مسیر خرید» بالا ویرایش می‌شود. دکمه‌ی «بازگشت» همیشه ردیف آخر ثابت می‌ماند.",
     })
 
     # ------------------------------------------------------------ حساب کاربری من
@@ -207,7 +206,7 @@ def update_item(db, group: str, key: str, text: str = None, style: str = None):
             db.set_setting(f"catlbl_{key}", text)
         elif group.startswith("admin_items__"):
             db.set_setting(f"{key}_label", text)
-        elif group in ("buyflow", "account_hub", "buyflow_confirm"):
+        elif group in ("buyflow", "account_hub"):
             db.set_setting(f"{key}_text", text)
         elif group == "payment_methods":
             if key.startswith("customgw:"):
@@ -225,7 +224,7 @@ def update_item(db, group: str, key: str, text: str = None, style: str = None):
             db.set_setting(f"catlbl_{key}_style", style)
         elif group.startswith("admin_items__"):
             db.set_setting(f"{key}_style", style)
-        elif group in ("buyflow", "account_hub", "buyflow_confirm"):
+        elif group in ("buyflow", "account_hub"):
             db.set_setting(f"{key}_style", style)
         elif group == "payment_methods":
             if key.startswith("customgw:"):
