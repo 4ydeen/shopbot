@@ -192,6 +192,36 @@ async def _notify_admins(permission: str, payload: dict, category: str | None = 
             await asyncio.to_thread(db.delete_fcm_token, t)
 
 
+# برچسب نوع تمدید، برای ساخت متن پوش سفارش‌های تمدید سرویس - همان مقادیر
+# _RENEW_MODE_LABEL در handlers_user.py (اینجا هم لازم است چون آن دیکشنری
+# private ماژول بات است و این پردازه‌ی جدا نمی‌تواند مستقیم به آن دسترسی
+# داشته باشد).
+_RENEW_MODE_LABEL = {"full": "تمدید کامل سرویس", "volume": "تمدید حجم سرویس", "time": "تمدید زمان سرویس"}
+
+
+def _describe_order(o) -> tuple[str, str]:
+    """عنوان و توضیح نوعِ یک سفارش را برای متن پوش برمی‌گرداند - قبلاً پوش
+    موبایل برای هر سفارشی (تمدید سرویس، کانفیگ شخصی، یا خرید عادی) همیشه یک
+    متن یکسان و کلی می‌فرستاد («سفارش #N از فلانی») و هیچ نشانه‌ای نداشت که
+    مثلاً سفارش تمدید است یا برای کدام پلن - دقیقاً همان چیزی که پیام تلگرامی
+    ادمین (در handlers_user.py) از قبل نشان می‌دهد، اما پوش اپ اندروید نه."""
+    if o["is_renewal"]:
+        mode_label = _RENEW_MODE_LABEL.get(o["renewal_mode"], o["renewal_mode"] or "تمدید سرویس")
+        target_label = "کانفیگ شخصی" if o["renewal_target_kind"] == "custom" else "کانفیگ بانک (استخر)"
+        return (
+            "🔄 سفارش تمدید سرویس",
+            f"{mode_label} - {target_label} #{o['renewal_target_id']}",
+        )
+    if o["product_id"] == 0:
+        return ("🛠 سفارش کانفیگ شخصی", "کانفیگ شخصی")
+    product = None
+    try:
+        product = db.get_product(o["product_id"])
+    except Exception:
+        product = None
+    return ("🛒 سفارش جدید", (product["name"] if product else "") or "")
+
+
 _STUCK_METHOD_LABELS = {
     "abangateway": "آبان‌گیت‌وی",
     "blupal": "بلوپال",
@@ -284,9 +314,14 @@ async def _notifier_loop():
                     continue
                 user = (await asyncio.to_thread(db.get_user, o["user_id"]))
                 uname = (user["username"] if user else None) or o["user_id"]
+                title, kind_detail = await asyncio.to_thread(_describe_order, o)
+                body = f"سفارش #{o['id']} از {uname}"
+                if kind_detail:
+                    body += f" ({kind_detail})"
+                body += " - در انتظار بررسی است."
                 await _notify_admins("orders", {
-                    "title": "🛒 سفارش جدید",
-                    "body": f"سفارش #{o['id']} از {uname} در انتظار بررسی است.",
+                    "title": title,
+                    "body": body,
                     "tag": "orders",
                 })
             if new_orders:
