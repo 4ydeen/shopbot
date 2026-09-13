@@ -88,10 +88,17 @@ def build_registry(db) -> dict:
             "style": db.get_setting(f"{key}_style", ""),
             "row_break_before": None,
         })
+    for key, meta in dbmod.BUYFLOW_STYLE_ONLY_META.items():
+        bf_items.append({
+            "key": key, "label": meta["label"], "has_text": False, "has_style": True,
+            "text": None,
+            "style": db.get_setting(f"{key}_style", ""),
+            "row_break_before": None,
+        })
     groups.append({
-        "key": "buyflow", "label": "مسیر خرید — متن/رنگ دکمه‌های ثابت",
+        "key": "buyflow", "label": "مسیر خرید — متن/رنگ دکمه‌ها",
         "reorderable": False, "supports_row_break": False, "items": bf_items,
-        "note": "این دکمه‌ها هرکدام جای ثابتی در مسیر خرید دارند؛ فقط متن و رنگشان اینجا قابل تغییر است.",
+        "note": "این دکمه‌ها هرکدام جای ثابتی در مسیر خرید دارند. برای دکمه‌های انتخاب دسته‌بندی/محصول فقط رنگ قابل تغییر است (متنشان از نام دسته/محصول در دیتابیس می‌آید).",
     })
     confirm_order = db.get_custom_order("buyflow_confirm", dbmod.DEFAULT_BUYFLOW_CONFIRM_ORDER)
     groups.append({
@@ -167,7 +174,7 @@ def _group_valid_keys(db, group: str):
         cat_key = group.split("__", 1)[1]
         return next((items for k, _, items in kb.ADMIN_PANEL_CATEGORIES if k == cat_key), [])
     if group == "buyflow":
-        return list(dbmod.BUYFLOW_META.keys())
+        return list(dbmod.BUYFLOW_META.keys()) + list(dbmod.BUYFLOW_STYLE_ONLY_META.keys())
     if group == "buyflow_confirm":
         return list(dbmod.DEFAULT_BUYFLOW_CONFIRM_ORDER)
     if group == "account_hub":

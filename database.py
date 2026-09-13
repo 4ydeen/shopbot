@@ -348,6 +348,14 @@ BUYFLOW_META = {
     "btn_buy_back": {"label": "بازگشت (مسیر خرید)", "default_text": "⬅️ بازگشت"},
 }
 DEFAULT_BUYFLOW_CONFIRM_ORDER = ["btn_buy_continue", "btn_enter_code"]
+
+# دکمه‌های مسیر خرید که متنشان پویا/داینامیک است (نام دسته یا محصول از دیتابیس)
+# و بنابراین متن ثابتی برای ویرایش ندارند - فقط رنگشان از تب «دکمه‌های ربات»
+# قابل تغییر است (قبلاً در تب «تنظیمات و برندینگ» بودند، اینجا یکپارچه شدند).
+BUYFLOW_STYLE_ONLY_META = {
+    "btn_cat_select": {"label": "انتخاب دسته‌بندی"},
+    "btn_product_select": {"label": "انتخاب محصول"},
+}
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 
 DEFAULT_MENU_ORDER = [
