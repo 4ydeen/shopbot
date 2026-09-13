@@ -891,6 +891,7 @@ def api_app_config(admin=Depends(get_current_admin)):
             "id": "topups", "title": "شارژ کیف‌پول", "icon": "wallet", "screen": "list",
             "section": "عملیات مالی",
             "source": "/api/topups", "item_id_field": "id",
+            "detail_source": "/api/topups/{id}/full",
             "receipt_source": "/api/topups/{id}/receipt-base64",
             "fields": [
                 {"key": "id", "label": "#", "type": "text"},
@@ -2124,6 +2125,25 @@ async def api_topup_receipt(topup_id: int, admin=Depends(get_current_admin)):
         raise HTTPException(502, "دریافت رسید از تلگرام ناموفق بود.")
     content, content_type = result
     return Response(content=content, media_type=content_type)
+
+
+@app.get("/api/topups/{topup_id}/full")
+async def api_topup_full(topup_id: int, admin=Depends(get_current_admin)):
+    """جزئیات یک درخواست شارژ کیف‌پول برای صفحه‌ی جزئیات اپ موبایل (detail_source)،
+    مشابه /api/orders/{id}/full."""
+    topup = (await asyncio.to_thread(db.get_topup, topup_id))
+    if not topup:
+        raise HTTPException(404, "درخواست شارژ یافت نشد.")
+    t = dict(topup)
+    user = row_to_dict(db.get_user(t["user_id"])) if t.get("user_id") else None
+    return {
+        "status": t.get("status"),
+        "amount": t.get("amount"),
+        "username": (user or {}).get("username"),
+        "full_name": (user or {}).get("full_name"),
+        "created_at": t.get("created_at"),
+        "has_receipt": bool(t.get("receipt_file_id")),
+    }
 
 
 @app.get("/api/topups/{topup_id}/receipt-base64")
