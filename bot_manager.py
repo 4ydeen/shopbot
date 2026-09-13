@@ -30,6 +30,7 @@ from database import Database
 from handlers_user import create_user_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
+from connect_alerts import connect_alert_loop
 from backup import backup_loop
 from temp_messages import temp_message_cleanup_loop
 from force_join import ForceJoinMiddleware
@@ -264,6 +265,7 @@ class BotManager:
             task = asyncio.create_task(dp.start_polling(bot))
         await self._sync_menu_button(bot, db)
         reminder_task = asyncio.create_task(renewal_reminder_loop(bot, db))
+        connect_alert_task = asyncio.create_task(connect_alert_loop(bot, db))
         backup_task = asyncio.create_task(backup_loop(bot, db, db_path))
         # جلوگیری از فریز کل بات هنگام انقضای کش تنظیمات/ادمین‌ها (رجوع کنید
         # به توضیح داخل Database.cache_autorefresh_loop)
@@ -272,6 +274,7 @@ class BotManager:
 
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
+            "connect_alert_task": connect_alert_task,
             "backup_task": backup_task, "cache_refresh_task": cache_refresh_task,
             "temp_msg_task": temp_msg_task, "db_path": db_path,
         }
@@ -292,6 +295,13 @@ class BotManager:
             reminder_task.cancel()
             try:
                 await reminder_task
+            except Exception:
+                pass
+        connect_alert_task = inst.get("connect_alert_task")
+        if connect_alert_task:
+            connect_alert_task.cancel()
+            try:
+                await connect_alert_task
             except Exception:
                 pass
         backup_task = inst.get("backup_task")

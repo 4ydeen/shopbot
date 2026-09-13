@@ -1270,6 +1270,15 @@ class Database:
             # غیرفعال‌سازی اداری یک کانفیگ بانکی توسط ادمین (بدون حذف کامل)؛ وقتی
             # فعال باشد، لینک دیگر به کاربر (در بات/مینی‌اپ) نمایش داده نمی‌شود.
             ("configs", "is_disabled", "INTEGER DEFAULT 0"),
+            # هشدار اتصال / عدم‌اتصال به کانفیگ: یک‌بار برای هر سرویس ارسال
+            # می‌شوند (مثل renewal_reminder_sent/volume_reminder_sent).
+            # activated_at مبنای شمارش «N ساعت از فعال‌سازی» برای هشدار
+            # عدم‌اتصال است؛ برای configs از assigned_at موجود استفاده می‌شود،
+            # برای custom_configs از created_at موجود - نیازی به ستون جدید نیست.
+            ("configs", "connect_alert_sent", "INTEGER DEFAULT 0"),
+            ("configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
+            ("custom_configs", "connect_alert_sent", "INTEGER DEFAULT 0"),
+            ("custom_configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -4677,6 +4686,116 @@ class Database:
             code, percent=settings["discount_percent"], max_uses=1, expires_at=expires_at, source="volume_reminder"
         )
         return code, expires_at, settings["discount_percent"], settings["discount_expiry_hours"]
+
+    # -----------------------------------------------------------------------
+    # هشدار اتصال / عدم‌اتصال به کانفیگ
+    #
+    # چون هیچ‌کدام از پنل‌های VPN پشتیبانی‌شده وضعیت «آنلاین/آفلاین لحظه‌ای»
+    # واقعی (handshake) را گزارش نمی‌کنند، «اتصال» از روی تغییر مصرف
+    # (used_bytes) تشخیص داده می‌شود: اولین باری که مصرف سرویس از صفر (یا از
+    # آستانه‌ی تنظیم‌شده) بیشتر شود، یعنی کاربر متصل شده. «عدم‌اتصال» یعنی بعد
+    # از N ساعت از لحظه‌ی فعال‌سازی (assigned_at برای انبار کانفیگ،
+    # created_at برای کانفیگ‌های ساخته‌شده مستقیم روی پنل)، مصرف هنوز به
+    # آستانه نرسیده. متن پیام‌ها را ادمین تعیین می‌کند و می‌تواند از
+    # placeholder های {used_gb} و {threshold_gb} استفاده کند.
+    # -----------------------------------------------------------------------
+
+    def get_connect_alert_settings(self) -> dict:
+        return {
+            "connect_enabled": self.get_setting("connect_alert_enabled", "0") == "1",
+            "connect_threshold_mb": float(self.get_setting("connect_alert_threshold_mb", "1") or 1),
+            "connect_text": self.get_setting(
+                "connect_alert_text",
+                "✅ سرویس شما به کانفیگ متصل شد.",
+            ),
+            "no_connect_enabled": self.get_setting("no_connect_alert_enabled", "0") == "1",
+            "no_connect_hours": int(self.get_setting("no_connect_alert_hours", "24") or 24),
+            "no_connect_threshold_mb": float(self.get_setting("no_connect_alert_threshold_mb", "1") or 1),
+            "no_connect_text": self.get_setting(
+                "no_connect_alert_text",
+                "⚠️ هنوز به سرویس خریداری‌شده‌تان متصل نشده‌اید. برای راهنمای اتصال با پشتیبانی در تماس باشید.",
+            ),
+        }
+
+    def set_connect_alert_settings(self, **kwargs):
+        """کلیدهای مجاز: connect_enabled, connect_threshold_mb, connect_text,
+        no_connect_enabled, no_connect_hours, no_connect_threshold_mb, no_connect_text."""
+        key_map = {
+            "connect_enabled": ("connect_alert_enabled", lambda v: "1" if v else "0"),
+            "connect_threshold_mb": ("connect_alert_threshold_mb", str),
+            "connect_text": ("connect_alert_text", str),
+            "no_connect_enabled": ("no_connect_alert_enabled", lambda v: "1" if v else "0"),
+            "no_connect_hours": ("no_connect_alert_hours", lambda v: str(int(v))),
+            "no_connect_threshold_mb": ("no_connect_alert_threshold_mb", str),
+            "no_connect_text": ("no_connect_alert_text", str),
+        }
+        for field, value in kwargs.items():
+            if field not in key_map or value is None:
+                continue
+            setting_key, caster = key_map[field]
+            self.set_setting(setting_key, caster(value))
+
+    def get_configs_due_for_connect_check(self):
+        """کانفیگ‌های فعال بدون هشدار اتصال/عدم‌اتصال ارسال‌شده (انبار کانفیگ ثابت)."""
+        settings = self.get_connect_alert_settings()
+        if not (settings["connect_enabled"] or settings["no_connect_enabled"]):
+            return []
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, cf.assigned_at, "
+                "cf.connect_alert_sent, cf.no_connect_alert_sent, "
+                "p.name as product_name "
+                "FROM configs cf JOIN products p ON cf.product_id = p.id "
+                "WHERE cf.is_used=1 AND cf.assigned_user_id IS NOT NULL "
+                "AND (cf.connect_alert_sent=0 OR cf.no_connect_alert_sent=0) "
+                "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
+            ).fetchall()
+
+    def get_custom_configs_due_for_connect_check(self):
+        """معادل بالا برای کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN."""
+        settings = self.get_connect_alert_settings()
+        if not (settings["connect_enabled"] or settings["no_connect_enabled"]):
+            return []
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
+                "created_at as assigned_at, connect_alert_sent, no_connect_alert_sent, "
+                "COALESCE(display_name, username) as product_name "
+                "FROM custom_configs "
+                "WHERE status='active' AND source != 'test' "
+                "AND (connect_alert_sent=0 OR no_connect_alert_sent=0) "
+                "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
+            ).fetchall()
+
+    def mark_connect_alert_sent(self, config_id: int, is_custom: bool):
+        table = "custom_configs" if is_custom else "configs"
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE {table} SET connect_alert_sent=1 WHERE id=?", (config_id,))
+
+    def mark_no_connect_alert_sent(self, config_id: int, is_custom: bool):
+        table = "custom_configs" if is_custom else "configs"
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE {table} SET no_connect_alert_sent=1 WHERE id=?", (config_id,))
+
+    # -----------------------------------------------------------------------
+    # تخفیف تمدید کامل زودهنگام («حساب من» ← تمدید کامل سرویس)
+    #
+    # مستقل از تخفیف تشویقیِ یادآوری‌ها (renewal_discount_percent) است: این
+    # یکی به‌صورت خودکار و بدون نیاز به کد، در لحظه‌ی محاسبه‌ی قیمت «تمدید
+    # کامل» اعمال می‌شود، فقط اگر تا انقضای واقعی سرویس حداکثر N روز مانده باشد.
+    # -----------------------------------------------------------------------
+
+    def get_early_full_renewal_discount_settings(self) -> dict:
+        return {
+            "enabled": self.get_setting("early_renewal_discount_enabled", "0") == "1",
+            "days_before": int(self.get_setting("early_renewal_discount_days", "5") or 5),
+            "percent": int(self.get_setting("early_renewal_discount_percent", "10") or 10),
+        }
+
+    def set_early_full_renewal_discount_settings(self, enabled: bool, days_before: int, percent: int):
+        self.set_setting("early_renewal_discount_enabled", "1" if enabled else "0")
+        self.set_setting("early_renewal_discount_days", str(int(days_before)))
+        self.set_setting("early_renewal_discount_percent", str(int(percent)))
 
     # -----------------------------------------------------------------------
     # چت پشتیبانی (مینی‌اپ + بات، یکپارچه)

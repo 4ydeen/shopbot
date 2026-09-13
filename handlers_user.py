@@ -3324,6 +3324,28 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         target_kind = item["kind"]
         target_id = item["custom"]["id"] if target_kind == "custom" else item["config"]["id"]
         price = product["price"]
+        product_label = product["name"]
+
+        # تخفیف تمدید کامل زودهنگام: اگر ادمین فعال کرده باشد و تا انقضای
+        # واقعی این سرویس حداکثر N روز مانده باشد، به‌صورت خودکار و بدون
+        # نیاز به کد تخفیف روی قیمت پلن انتخاب‌شده اعمال می‌شود.
+        if mode == "full" and target_kind == "custom":
+            discount_settings = await asyncio.to_thread(db.get_early_full_renewal_discount_settings)
+            if discount_settings["enabled"]:
+                expires_at_raw = item["custom"]["expires_at"]
+                if expires_at_raw:
+                    try:
+                        exp_dt = datetime.fromisoformat(expires_at_raw)
+                        if exp_dt.tzinfo is None:
+                            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                        days_left = (exp_dt - datetime.now(timezone.utc)).total_seconds() / 86400
+                        if 0 <= days_left <= discount_settings["days_before"]:
+                            percent = discount_settings["percent"]
+                            price = round(price * (100 - percent) / 100)
+                            product_label = f"{product['name']} (تخفیف تمدید زودهنگام {percent}٪)"
+                    except (ValueError, TypeError):
+                        pass
+
         await call.answer()
 
         async def edit_fn(t, **kw):
@@ -3334,7 +3356,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         await _process_renewal_order(
             user_tg_id, cb_id, mode, target_kind, target_id,
-            add_volume, add_days, price, product["name"], state, edit_fn, send_fn,
+            add_volume, add_days, price, product_label, state, edit_fn, send_fn,
         )
 
     @router.callback_query(F.data == "pay_card2card", RenewalFlow.waiting_receipt)
