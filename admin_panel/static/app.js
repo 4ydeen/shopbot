@@ -3750,9 +3750,10 @@ function _val(root, key) { return $(`[data-fkey="${key}"]`, root)?.value; }
 function _num(root, key) { return Number(_val(root, key)) || 0; }
 
 async function renderSalesSettings() {
-  const [referral, wheel, renewal, volumeReminder, testConfig, testPlans, panelServers, forceJoin, stockAlert, products] = await Promise.all([
+  const [referral, wheel, renewal, volumeReminder, connectAlert, earlyRenewal, testConfig, testPlans, panelServers, forceJoin, stockAlert, products] = await Promise.all([
     apiGet('/settings/referral'), apiGet('/settings/wheel'),
-    apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/test-config'),
+    apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/connect-alert'),
+    apiGet('/settings/early-renewal-discount'), apiGet('/settings/test-config'),
     apiGet('/test-config/plans'), apiGet('/test-config/panel-servers-lite'),
     apiGet('/settings/force-join'), apiGet('/settings/stock-alert'), apiGet('/products'),
   ]);
@@ -3823,6 +3824,35 @@ async function renderSalesSettings() {
       <label class="field"><span>درصد تخفیف کد پیشنهادی</span><input class="input" data-fkey="volume_discount_percent" type="number" value="${volumeReminder.discount_percent}"></label>
       <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="volume_discount_expiry_hours" type="number" value="${volumeReminder.discount_expiry_hours}"></label>
       <button class="btn btn-primary btn-sm" id="save-volume">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🔌 هشدار اتصال / عدم‌اتصال به کانفیگ</h3>
+      <div class="card-sub" style="margin:8px 0 4px"><b>✅ هشدار اتصال</b></div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('connect_enabled', connectAlert.connect_enabled)}</label>
+      <label class="field"><span>آستانه‌ی مصرف (مگابایت) — از این مقدار به بعد «متصل» در نظر گرفته می‌شود</span>
+        <input class="input" data-fkey="connect_threshold_mb" type="number" step="0.1" value="${connectAlert.connect_threshold_mb}"></label>
+      <label class="field"><span>متن پیام (از {used_gb} می‌توانید استفاده کنید)</span>
+        <textarea class="input" data-fkey="connect_text" rows="3">${esc(connectAlert.connect_text || '')}</textarea></label>
+
+      <div class="card-sub" style="margin:16px 0 4px"><b>⚠️ هشدار عدم‌اتصال</b></div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('no_connect_enabled', connectAlert.no_connect_enabled)}</label>
+      <label class="field"><span>مهلت بعد از فعال‌سازی سرویس (ساعت)</span>
+        <input class="input" data-fkey="no_connect_hours" type="number" value="${connectAlert.no_connect_hours}"></label>
+      <label class="field"><span>آستانه‌ی مصرف (مگابایت) — زیر این مقدار یعنی هنوز متصل نشده</span>
+        <input class="input" data-fkey="no_connect_threshold_mb" type="number" step="0.1" value="${connectAlert.no_connect_threshold_mb}"></label>
+      <label class="field"><span>متن پیام (از {used_gb} می‌توانید استفاده کنید)</span>
+        <textarea class="input" data-fkey="no_connect_text" rows="3">${esc(connectAlert.no_connect_text || '')}</textarea></label>
+      <button class="btn btn-primary btn-sm" id="save-connect-alert" style="margin-top:8px">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🎁 تخفیف تمدید کامل زودهنگام</h3>
+      <div class="card-sub" style="margin-bottom:8px">اگر کاربر از «حساب من» تمدید کامل سرویس بزند و تا انقضای واقعی سرویسش حداکثر N روز مانده باشد، این تخفیف به‌صورت خودکار (بدون نیاز به کد) روی قیمت پلن اعمال می‌شود.</div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('early_renewal_enabled', earlyRenewal.enabled)}</label>
+      <label class="field"><span>حداکثر روز مانده به انقضا</span><input class="input" data-fkey="early_renewal_days" type="number" value="${earlyRenewal.days_before}"></label>
+      <label class="field"><span>درصد تخفیف</span><input class="input" data-fkey="early_renewal_percent" type="number" value="${earlyRenewal.percent}"></label>
+      <button class="btn btn-primary btn-sm" id="save-early-renewal">ذخیره</button>
     </div>
 
     <div class="card">
@@ -3909,6 +3939,32 @@ async function renderSalesSettings() {
         discount_percent: _num(root, 'volume_discount_percent'), discount_expiry_hours: _num(root, 'volume_discount_expiry_hours'),
       });
       toast('تنظیمات یادآوری حجمی ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-connect-alert').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/connect-alert', {
+        connect_enabled: _swOn(root, 'connect_enabled'),
+        connect_threshold_mb: _num(root, 'connect_threshold_mb'),
+        connect_text: _val(root, 'connect_text'),
+        no_connect_enabled: _swOn(root, 'no_connect_enabled'),
+        no_connect_hours: _num(root, 'no_connect_hours'),
+        no_connect_threshold_mb: _num(root, 'no_connect_threshold_mb'),
+        no_connect_text: _val(root, 'no_connect_text'),
+      });
+      toast('تنظیمات هشدار اتصال/عدم‌اتصال ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-early-renewal').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/early-renewal-discount', {
+        enabled: _swOn(root, 'early_renewal_enabled'),
+        days_before: _num(root, 'early_renewal_days'),
+        percent: _num(root, 'early_renewal_percent'),
+      });
+      toast('تنظیمات تخفیف تمدید زودهنگام ذخیره شد.');
     } catch (e) { handleErr(e); }
   });
 
