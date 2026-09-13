@@ -89,6 +89,8 @@ from states import (
     AdminWheelSettings,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
+    AdminConnectAlertSettings,
+    AdminEarlyRenewalDiscount,
     AdminStockAlertSettings,
     AdminMinAmountSettings,
     AdminCustomGatewayMinAmount,
@@ -4883,6 +4885,229 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         await message.answer(
             f"✅ اعتبار کد تخفیف تشویقی روی {text} ساعت تنظیم شد.", reply_markup=kb.volume_reminder_settings_kb(db)
+        )
+
+    # -------------------------------------------------------------------
+    # هشدار اتصال / عدم‌اتصال به کانفیگ
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_connect_alert_settings")
+    async def cb_admin_connect_alert_settings(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(
+            call, "🔌 هشدار اتصال/عدم‌اتصال به کانفیگ:", reply_markup=kb.connect_alert_settings_kb(db)
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_connect_toggle")
+    async def cb_admin_connect_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "connect_alert_enabled", "0"))
+        (await asyncio.to_thread(db.set_setting, "connect_alert_enabled", "0" if current == "1" else "1"))
+        await safe_edit(call, "🔌 هشدار اتصال/عدم‌اتصال به کانفیگ:", reply_markup=kb.connect_alert_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_no_connect_toggle")
+    async def cb_admin_no_connect_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "no_connect_alert_enabled", "0"))
+        (await asyncio.to_thread(db.set_setting, "no_connect_alert_enabled", "0" if current == "1" else "1"))
+        await safe_edit(call, "🔌 هشدار اتصال/عدم‌اتصال به کانفیگ:", reply_markup=kb.connect_alert_settings_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_connect_edit_threshold")
+    async def cb_admin_connect_edit_threshold(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminConnectAlertSettings.waiting_connect_threshold)
+        await safe_edit(call,
+            "از چند مگابایت مصرف به بعد، کاربر «متصل» در نظر گرفته شود؟ (عدد، مثلاً 1):",
+            reply_markup=kb.admin_back_kb("adm_connect_alert_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminConnectAlertSettings.waiting_connect_threshold)
+    async def process_connect_threshold(message: Message, state: FSMContext):
+        text = message.text.strip().replace(",", ".")
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+        except ValueError:
+            await message.answer("لطفاً یک عدد مثبت ارسال کنید (مثلاً 1 یا 0.5).")
+            return
+        (await asyncio.to_thread(db.set_setting, "connect_alert_threshold_mb", str(value)))
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه‌ی هشدار اتصال روی {value:g} مگابایت تنظیم شد.", reply_markup=kb.connect_alert_settings_kb(db)
+        )
+
+    @router.callback_query(F.data == "adm_connect_edit_text")
+    async def cb_admin_connect_edit_text(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminConnectAlertSettings.waiting_connect_text)
+        await safe_edit(call,
+            "متن پیام هشدار اتصال را بفرستید.\n"
+            "می‌توانید از {used_gb} (حجم مصرف‌شده به گیگابایت) استفاده کنید.\n\n"
+            "مثال: «✅ سرویس شما فعال شد و تا الان {used_gb} گیگ مصرف کرده‌اید.»",
+            reply_markup=kb.admin_back_kb("adm_connect_alert_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminConnectAlertSettings.waiting_connect_text)
+    async def process_connect_text(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("لطفاً یک متن معتبر ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "connect_alert_text", text))
+        await state.clear()
+        await message.answer("✅ متن هشدار اتصال ذخیره شد.", reply_markup=kb.connect_alert_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_no_connect_edit_hours")
+    async def cb_admin_no_connect_edit_hours(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminConnectAlertSettings.waiting_no_connect_hours)
+        await safe_edit(call,
+            "چند ساعت بعد از فعال‌سازی سرویس، اگر کاربر متصل نشده بود هشدار ارسال شود؟ (فقط عدد، مثلاً 24):",
+            reply_markup=kb.admin_back_kb("adm_connect_alert_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminConnectAlertSettings.waiting_no_connect_hours)
+    async def process_no_connect_hours(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "no_connect_alert_hours", text))
+        await state.clear()
+        await message.answer(
+            f"✅ مهلت هشدار عدم‌اتصال روی {text} ساعت تنظیم شد.", reply_markup=kb.connect_alert_settings_kb(db)
+        )
+
+    @router.callback_query(F.data == "adm_no_connect_edit_threshold")
+    async def cb_admin_no_connect_edit_threshold(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminConnectAlertSettings.waiting_no_connect_threshold)
+        await safe_edit(call,
+            "زیر چند مگابایت مصرف، کاربر «متصل نشده» در نظر گرفته شود؟ (عدد، مثلاً 1):",
+            reply_markup=kb.admin_back_kb("adm_connect_alert_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminConnectAlertSettings.waiting_no_connect_threshold)
+    async def process_no_connect_threshold(message: Message, state: FSMContext):
+        text = message.text.strip().replace(",", ".")
+        try:
+            value = float(text)
+            if value <= 0:
+                raise ValueError
+        except ValueError:
+            await message.answer("لطفاً یک عدد مثبت ارسال کنید (مثلاً 1 یا 0.5).")
+            return
+        (await asyncio.to_thread(db.set_setting, "no_connect_alert_threshold_mb", str(value)))
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه‌ی هشدار عدم‌اتصال روی {value:g} مگابایت تنظیم شد.",
+            reply_markup=kb.connect_alert_settings_kb(db),
+        )
+
+    @router.callback_query(F.data == "adm_no_connect_edit_text")
+    async def cb_admin_no_connect_edit_text(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminConnectAlertSettings.waiting_no_connect_text)
+        await safe_edit(call,
+            "متن پیام هشدار عدم‌اتصال را بفرستید.\n"
+            "می‌توانید از {used_gb} (حجم مصرف‌شده به گیگابایت) استفاده کنید.\n\n"
+            "مثال: «⚠️ هنوز به سرویس‌تان متصل نشده‌اید، برای راهنما با پشتیبانی در تماس باشید.»",
+            reply_markup=kb.admin_back_kb("adm_connect_alert_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminConnectAlertSettings.waiting_no_connect_text)
+    async def process_no_connect_text(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("لطفاً یک متن معتبر ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "no_connect_alert_text", text))
+        await state.clear()
+        await message.answer("✅ متن هشدار عدم‌اتصال ذخیره شد.", reply_markup=kb.connect_alert_settings_kb(db))
+
+    # -------------------------------------------------------------------
+    # تخفیف تمدید کامل زودهنگام
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_early_renewal_discount")
+    async def cb_admin_early_renewal_discount(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(
+            call, "🎁 تخفیف تمدید کامل زودهنگام:", reply_markup=kb.early_renewal_discount_kb(db)
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_early_renewal_toggle")
+    async def cb_admin_early_renewal_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "early_renewal_discount_enabled", "0"))
+        (await asyncio.to_thread(db.set_setting, "early_renewal_discount_enabled", "0" if current == "1" else "1"))
+        await safe_edit(call, "🎁 تخفیف تمدید کامل زودهنگام:", reply_markup=kb.early_renewal_discount_kb(db))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_early_renewal_edit_days")
+    async def cb_admin_early_renewal_edit_days(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminEarlyRenewalDiscount.waiting_days)
+        await safe_edit(call,
+            "اگر تا انقضای سرویس حداکثر چند روز مانده باشد، تمدید کامل شامل تخفیف شود؟ (فقط عدد، مثلاً 5):",
+            reply_markup=kb.admin_back_kb("adm_early_renewal_discount"),
+        )
+        await call.answer()
+
+    @router.message(AdminEarlyRenewalDiscount.waiting_days)
+    async def process_early_renewal_days(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح مثبت ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "early_renewal_discount_days", text))
+        await state.clear()
+        await message.answer(
+            f"✅ آستانه روی {text} روز قبل از انقضا تنظیم شد.", reply_markup=kb.early_renewal_discount_kb(db)
+        )
+
+    @router.callback_query(F.data == "adm_early_renewal_edit_percent")
+    async def cb_admin_early_renewal_edit_percent(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminEarlyRenewalDiscount.waiting_percent)
+        await safe_edit(call,
+            "چند درصد تخفیف روی قیمت تمدید کامل اعمال شود؟ (عددی بین 1 تا 100، مثلاً 10):",
+            reply_markup=kb.admin_back_kb("adm_early_renewal_discount"),
+        )
+        await call.answer()
+
+    @router.message(AdminEarlyRenewalDiscount.waiting_percent)
+    async def process_early_renewal_percent(message: Message, state: FSMContext):
+        text = message.text.strip()
+        if not text.isdigit() or not (0 < int(text) <= 100):
+            await message.answer("لطفاً یک عدد بین 1 تا 100 ارسال کنید.")
+            return
+        (await asyncio.to_thread(db.set_setting, "early_renewal_discount_percent", text))
+        await state.clear()
+        await message.answer(
+            f"✅ درصد تخفیف روی {text}٪ تنظیم شد.", reply_markup=kb.early_renewal_discount_kb(db)
         )
 
     # -------------------------------------------------------------------

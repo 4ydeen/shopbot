@@ -221,6 +221,18 @@ DEFAULT_SETTINGS = {
     "volume_discount_percent": "20",  # درصد تخفیف کد تشویقی اتمام حجم
     "volume_discount_expiry_hours": "24",  # اعتبار کد تشویقی اتمام حجم (ساعت)
     "adm_volume_reminder_settings_style": "success",
+    # هشدار اتصال / عدم‌اتصال به کانفیگ
+    "connect_alert_enabled": "0",
+    "connect_alert_threshold_mb": "1",
+    "no_connect_alert_enabled": "0",
+    "no_connect_alert_hours": "24",
+    "no_connect_alert_threshold_mb": "1",
+    "adm_connect_alert_settings_style": "success",
+    # تخفیف تمدید کامل زودهنگام
+    "early_renewal_discount_enabled": "0",
+    "early_renewal_discount_days": "5",
+    "early_renewal_discount_percent": "10",
+    "adm_early_renewal_discount_style": "success",
     # ساخت کانفیگ شخصی (اتصال مستقیم به پنل VPN)
     "custom_config_enabled": "0",
     "custom_config_min_gb": "5",       # حداقل حجم مجاز (گیگ)

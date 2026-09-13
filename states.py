@@ -272,6 +272,21 @@ class AdminVolumeReminderSettings(StatesGroup):
     waiting_discount_hours = State()
 
 
+class AdminConnectAlertSettings(StatesGroup):
+    """هشدار اتصال / عدم‌اتصال به کانفیگ."""
+    waiting_connect_threshold = State()
+    waiting_connect_text = State()
+    waiting_no_connect_hours = State()
+    waiting_no_connect_threshold = State()
+    waiting_no_connect_text = State()
+
+
+class AdminEarlyRenewalDiscount(StatesGroup):
+    """تخفیف خودکار تمدید کامل زودهنگام (حساب من ← تمدید کامل سرویس)."""
+    waiting_days = State()
+    waiting_percent = State()
+
+
 class AdminRestoreBackup(StatesGroup):
     waiting_file = State()
     waiting_confirm = State()

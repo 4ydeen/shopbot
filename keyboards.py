@@ -925,6 +925,8 @@ ADMIN_PANEL_ITEMS = [
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
     ("adm_volume_reminder_settings", "📉 یادآوری اتمام حجم", "adm_volume_reminder_settings"),
+    ("adm_connect_alert_settings", "🔌 هشدار اتصال/عدم‌اتصال کانفیگ", "adm_connect_alert_settings"),
+    ("adm_early_renewal_discount", "🎁 تخفیف تمدید کامل زودهنگام", "adm_early_renewal_discount"),
     ("adm_stock_alert_settings", "📦 آستانه‌ی هشدار موجودی", "adm_stock_alert_settings"),
     ("adm_custom_config_settings", "🛠 ساخت کانفیگ شخصی (پنل‌های VPN)", "adm_custom_config_settings"),
     ("adm_renewal_pricing", "💳 قیمت‌گذاری تمدید حجم/زمان", "adm_renewal_pricing"),
@@ -1015,6 +1017,8 @@ ADMIN_PANEL_CATEGORIES = [
     ("alerts", "🔔 یادآوری‌ها و هشدارها", [
         "adm_renewal_settings",
         "adm_volume_reminder_settings",
+        "adm_connect_alert_settings",
+        "adm_early_renewal_discount",
         "adm_stock_alert_settings",
         "adm_account_settings",
     ]),
@@ -2252,6 +2256,51 @@ def volume_reminder_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_volume_toggle")],
         [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_volume_edit_discount_percent")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد (ساعت)", callback_data="adm_volume_edit_discount_hours")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def connect_alert_settings_kb(db) -> InlineKeyboardMarkup:
+    s = db.get_connect_alert_settings()
+    connect_toggle = "🔴 غیرفعال کردن هشدار اتصال" if s["connect_enabled"] else "🟢 فعال کردن هشدار اتصال"
+    no_connect_toggle = "🔴 غیرفعال کردن هشدار عدم‌اتصال" if s["no_connect_enabled"] else "🟢 فعال کردن هشدار عدم‌اتصال"
+    rows = [
+        [InlineKeyboardButton(text="✅ — هشدار اتصال به کانفیگ —", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"وضعیت: {'🟢 فعال' if s['connect_enabled'] else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"📊 آستانه‌ی مصرف: {s['connect_threshold_mb']:g} مگابایت", callback_data="noop")],
+        [InlineKeyboardButton(text="✏️ تغییر آستانه", callback_data="adm_connect_edit_threshold")],
+        [InlineKeyboardButton(text="✏️ تغییر متن پیام", callback_data="adm_connect_edit_text")],
+        [InlineKeyboardButton(text=connect_toggle, callback_data="adm_connect_toggle")],
+        [InlineKeyboardButton(text="⚠️ — هشدار عدم‌اتصال به کانفیگ —", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"وضعیت: {'🟢 فعال' if s['no_connect_enabled'] else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"⏱ مهلت بعد از فعال‌سازی: {s['no_connect_hours']} ساعت", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"📊 آستانه‌ی مصرف: {s['no_connect_threshold_mb']:g} مگابایت", callback_data="noop")],
+        [InlineKeyboardButton(text="✏️ تغییر مهلت (ساعت)", callback_data="adm_no_connect_edit_hours")],
+        [InlineKeyboardButton(text="✏️ تغییر آستانه", callback_data="adm_no_connect_edit_threshold")],
+        [InlineKeyboardButton(text="✏️ تغییر متن پیام", callback_data="adm_no_connect_edit_text")],
+        [InlineKeyboardButton(text=no_connect_toggle, callback_data="adm_no_connect_toggle")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def early_renewal_discount_kb(db) -> InlineKeyboardMarkup:
+    s = db.get_early_full_renewal_discount_settings()
+    toggle_text = "🔴 غیرفعال کردن تخفیف" if s["enabled"] else "🟢 فعال کردن تخفیف"
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"📅 حداکثر روز مانده به انقضا: {s['days_before']} روز", callback_data="noop")],
+        [InlineKeyboardButton(text=f"🎁 درصد تخفیف: {s['percent']}٪", callback_data="noop")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm_early_renewal_toggle")],
+        [InlineKeyboardButton(text="✏️ تغییر تعداد روز", callback_data="adm_early_renewal_edit_days")],
+        [InlineKeyboardButton(text="✏️ تغییر درصد تخفیف", callback_data="adm_early_renewal_edit_percent")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:alerts")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
