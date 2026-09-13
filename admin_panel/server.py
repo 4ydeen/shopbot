@@ -1926,10 +1926,8 @@ async def api_order_full(order_id: int, admin=Depends(get_current_admin)):
     o = dict(order)
     product = row_to_dict(db.get_product(o["product_id"])) if o.get("product_id") else None
     user = row_to_dict(db.get_user(o["user_id"])) if o.get("user_id") else None
-    product_name = product["name"] if product else ("ساخت کانفیگ شخصی" if o.get("is_custom_config") else "-")
-    return {
+    result = {
         "status": o.get("status"),
-        "product_name": product_name,
         "quantity": o.get("quantity"),
         "amount": o.get("final_price"),
         "username": (user or {}).get("username"),
@@ -1937,6 +1935,22 @@ async def api_order_full(order_id: int, admin=Depends(get_current_admin)):
         "created_at": o.get("created_at"),
         "has_receipt": bool(o.get("receipt_file_id")),
     }
+    # سفارش تمدید سرویس با سفارش خرید عادی/کانفیگ شخصی فرق دارد: product_id
+    # آن سنتینل ۰ است (محصول واقعی ندارد)، پس جزئیاتش باید از ستون‌های
+    # renewal_* خودِ سفارش ساخته شود - وگرنه (باگ قبلی) اینجا فقط "-" نشان
+    # داده می‌شد و معلوم نبود اصلاً سفارش تمدید است یا برای کدام سرویس.
+    if o.get("is_renewal"):
+        mode_label = _RENEW_MODE_LABEL.get(o.get("renewal_mode"), o.get("renewal_mode") or "-")
+        target_label = "کانفیگ شخصی" if o.get("renewal_target_kind") == "custom" else "کانفیگ بانک (استخر)"
+        result["product_name"] = f"🔄 {mode_label}"
+        result["renewal_target"] = f"{target_label} #{o.get('renewal_target_id')}"
+        if o.get("renewal_add_volume_gb"):
+            result["renewal_add_volume_gb"] = f"{o['renewal_add_volume_gb']} گیگابایت"
+        if o.get("renewal_add_days"):
+            result["renewal_add_days"] = f"{o['renewal_add_days']} روز"
+    else:
+        result["product_name"] = product["name"] if product else ("ساخت کانفیگ شخصی" if o.get("is_custom_config") else "-")
+    return result
 
 
 @app.get("/api/orders/{order_id}/receipt-base64")
