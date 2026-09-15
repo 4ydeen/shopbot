@@ -87,7 +87,11 @@ async def provision_auto_config(
         # مدل «محصول آماده» (بند ۳.۳ اسپک): مصرف واحدی از reseller_product_credit،
         # نه از reseller_credit_gb. حجم/مدت محصول همچنان برای خودِ ساخت کانفیگ روی
         # پنل لازم است، ولی اعتبارسنجی/کسر بر اساس تعداد است نه گیگابایت.
-        fixed_product_id = supply["product_id"]
+        # در مدل چندمحصولی، محصول انتخاب‌شده از موجودی خودش منبع حقیقت است؛
+        # fixed_product_main_id فقط برای سازگاری با نسخه‌های قدیمی نگه داشته شده.
+        fixed_product_id = int(product.get("id") or 0)
+        if not fixed_product_id:
+            fixed_product_id = supply["product_id"]
         if not fixed_product_id:
             raise ProvisionError("محصول موجودیِ این نمایندگی مشخص نیست؛ با پشتیبانی تماس بگیرید.")
         remaining = main_db.get_reseller_product_credit(owner_id, fixed_product_id)
@@ -100,7 +104,13 @@ async def provision_auto_config(
 
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
-        raise ProvisionError("سرور ساخت کانفیگ نماینده تنظیم نشده یا غیرفعال است؛ ادمین باید یک پنل فعال برای نمایندگی تعیین کند.")
+        product_server_id = product["provision_server_id"] if "provision_server_id" in product.keys() else None
+        if product_server_id:
+            candidate = main_db.get_panel_server(product_server_id)
+            if candidate and candidate["is_active"]:
+                server = candidate
+    if not server or not server["is_active"]:
+        raise ProvisionError("برای این محصول هیچ پنل فعالی برای ساخت کانفیگ نمایندگی پیدا نشد.")
 
     provider = get_provider(server)
     built = []
