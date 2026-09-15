@@ -3388,7 +3388,8 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
         product = db.get_product(body.supply_product_id)
         if not product or not product["is_active"] or not product["is_auto_provision"]:
             raise HTTPException(400, "محصول انتخاب‌شده فعال یا خودکار-ساز نیست.")
-    if body.panel_server_id is not None:
+    panel_was_sent = "panel_server_id" in getattr(body, "model_fields_set", set())
+    if panel_was_sent and body.panel_server_id is not None:
         panel = db.get_panel_server(body.panel_server_id)
         if not panel or not panel["is_active"] or not panel["used_for_reseller"]:
             raise HTTPException(400, "پنل انتخاب‌شده فعال نیست یا برای نمایندگی مجاز نشده است.")
@@ -3398,8 +3399,11 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
         db.set_reseller_status(tg_id, body.enabled)
     if body.supply_model is not None:
         db.set_reseller_supply_model(tg_id, body.supply_model, body.supply_product_id if body.supply_model == "fixed_product" else None)
-    if body.panel_server_id is not None or body.supply_model is not None:
+    if panel_was_sent:
         db.set_reseller_panel(tg_id, body.panel_server_id)
+    elif body.supply_model is not None:
+        # تغییر مدل تامین بدون ارسال پنل، پنل فعلی را دست‌نخورده نگه می‌دارد.
+        pass
     db.log_admin_action(admin["id"], "reseller_level2_edit", f"ویرایش نماینده سطح ۲ {tg_id} (پنل وب - {admin['username']})", "reseller", tg_id)
     return {"ok": True}
 
