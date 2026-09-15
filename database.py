@@ -6419,6 +6419,35 @@ class Database:
                 "SELECT * FROM reseller_product_credit WHERE reseller_id=? ORDER BY id", (reseller_id,)
             ).fetchall()
 
+    def set_reseller_product_credit(self, reseller_id: int, product_id: int, qty: int,
+                                     admin_id: int = None, reason: str = None) -> int:
+        """تنظیم موجودی اولیه/قطعی محصول نماینده. برخلاف grant، مقدار را دقیقاً روی qty می‌گذارد.
+        برای فعال‌سازی اولیه‌ی نمایندگی استفاده می‌شود تا موجودی باقی‌مانده از یک
+        نمایندگی/درخواست قبلی به نمایندگی تازه منتقل نشود."""
+        if not isinstance(qty, int) or qty < 0:
+            raise ValueError("qty باید عدد صحیح بزرگ‌تر یا مساوی صفر باشد")
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT qty_remaining FROM reseller_product_credit WHERE reseller_id=? AND product_id=?",
+                (reseller_id, product_id),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE reseller_product_credit SET qty_remaining=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE reseller_id=? AND product_id=?",
+                    (qty, reseller_id, product_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO reseller_product_credit (reseller_id, product_id, qty_remaining) VALUES (?, ?, ?)",
+                    (reseller_id, product_id, qty),
+                )
+            conn.execute(
+                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                (reseller_id, 0, reason or f"تنظیم موجودی اولیه محصول #{product_id}: {qty}", admin_id),
+            )
+            return qty
+
     def grant_reseller_product_credit(self, reseller_id: int, product_id: int, qty: int,
                                        admin_id: int = None, reason: str = None):
         """افزایش موجودی محصول نماینده (تخصیص اولیه یا شارژ مجدد ادمین)."""

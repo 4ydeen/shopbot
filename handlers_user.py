@@ -26,7 +26,7 @@ from md_utils import escape_md, escape_html
 import keyboards as kb
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
 import ai_support
-from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path, DB_PATH
+from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path, DB_PATH, ADMIN_PANEL_URL
 from database import Database, DuplicateBotTokenError
 from config_delivery import deliver_config_to_user, send_individual_configs, build_qr_bytes
 from renewal_engine import execute_renewal, RenewalError
@@ -4821,7 +4821,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
         if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
             (await asyncio.to_thread(
-                db.grant_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
+                db.set_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
                 admin_id=req["reviewed_by"],
                 reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
             ))
@@ -4836,13 +4836,28 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
             "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ با ری‌استارت سرویس اصلی خودکار روشن می‌شود."
+        web_panel_note = ""
+        if req["wants_web_panel"]:
+            panel_url = (await asyncio.to_thread(db.get_setting, "admin_panel_url", "")) or ADMIN_PANEL_URL or ""
+            panel_url = panel_url.rstrip("/")
+            if panel_url:
+                b_value = reseller_bot_id
+                setup_token = await asyncio.to_thread(db.get_reseller_bot, reseller_bot_id)
+                setup_token = setup_token["web_panel_setup_token"] if setup_token else None
+                if setup_token:
+                    web_panel_note = (
+                        f"\n\n🌐 لینک راه‌اندازی پنل وب نمایندگی:\n"
+                        f"{panel_url}/setup?b={b_value}&t={setup_token}\n\n"
+                        "این لینک یک‌بارمصرف است؛ با باز کردن آن، یوزرنیم و رمز پنل را خودت تعیین می‌کنی."
+                    )
         try:
             await bot.send_message(
                 owner_id,
                 f"{status_text}\n\n"
                 f"🤖 بات: @{username}\n"
                 f"📦 اعتبار حجمی تخصیص‌یافته: {req['volume_gb']:,} گیگ\n\n"
-                f"برای شروع، با /start به بات خودتان (@{username}) وارد شوید.",
+                f"برای شروع، با /start به بات خودتان (@{username}) وارد شوید."
+                f"{web_panel_note}",
                 reply_markup=kb.menu_for_user(db, owner_id, is_main_bot),
             )
         except Exception:

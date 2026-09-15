@@ -100,7 +100,7 @@ async def provision_auto_config(
 
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
-        raise ProvisionError("پنل اعتبار حجمی نماینده تنظیم نشده یا غیرفعال است؛ با پشتیبانی تماس بگیرید.")
+        raise ProvisionError("سرور ساخت کانفیگ نماینده تنظیم نشده یا غیرفعال است؛ ادمین باید یک پنل فعال برای نمایندگی تعیین کند.")
 
     provider = get_provider(server)
     built = []
@@ -248,7 +248,7 @@ async def provision_reseller_fixed_product(main_db: Database, owner_id: int, pro
     duration_days = product["duration_days"] if product["duration_days"] is not None else 30
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
-        raise ProvisionError("پنل نمایندگی تنظیم نشده یا غیرفعال است.")
+        raise ProvisionError("سرور ساخت کانفیگ برای نماینده تنظیم نشده یا غیرفعال است؛ ادمین باید یک پنل فعال برای نمایندگی تعیین کند.")
     provider = get_provider(server)
     built=[]
     try:
