@@ -796,7 +796,6 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
                 CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
-                CREATE INDEX IF NOT EXISTS idx_users_owner_reseller_id ON users(owner_reseller_id);
                 CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
                 CREATE INDEX IF NOT EXISTS idx_configs_product_id ON configs(product_id);
                 CREATE INDEX IF NOT EXISTS idx_configs_product_unused ON configs(product_id, is_used);
@@ -1164,6 +1163,15 @@ class Database:
                 c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
 
             self._migrate_columns(conn)
+
+            # رفع باگ: این ایندکس قبلا داخل executescript بالا بود، اما روی
+            # دیتابیس‌های قدیمی (قبل از اضافه‌شدن ستون owner_reseller_id) جدول
+            # users از قبل وجود داشت، پس CREATE TABLE IF NOT EXISTS کاری نمی‌کرد
+            # و ساخت این ایندکس با OperationalError: no such column می‌شکست -
+            # قبل از این‌که _migrate_columns اصلا فرصت اضافه‌کردن ستون را پیدا کند.
+            # حالا بعد از migrate_columns ساخته می‌شود که ستون تضمینا موجود است.
+            c.execute("CREATE INDEX IF NOT EXISTS idx_users_owner_reseller_id ON users(owner_reseller_id)")
+
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
 
