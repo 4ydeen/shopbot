@@ -602,22 +602,51 @@ async def get_current_admin(request: Request):
     admin = (await asyncio.to_thread(tenant.db.get_web_admin, payload["id"]))
     if not admin or not admin["is_active"]:
         raise HTTPException(401, "حساب کاربری غیرفعال یا حذف شده است.")
+    reseller_profile = None
+    if tenant.slug and tenant.bot_id:
+        rb = await asyncio.to_thread(main_db.get_reseller_bot, tenant.bot_id)
+        if rb:
+            owner_tg_id = int(rb["owner_telegram_id"])
+            supply = await asyncio.to_thread(main_db.get_reseller_supply, owner_tg_id)
+            reseller_profile = {
+                "enabled": True,
+                "level": int(rb["reseller_level"] or 2),
+                "has_live_bot": bool(rb["has_live_bot"]) if "has_live_bot" in rb.keys() else True,
+                "inline_link_enabled": await asyncio.to_thread(main_db.is_inline_reseller, owner_tg_id),
+                "web_panel_enabled": bool(rb["web_panel_enabled"]) if "web_panel_enabled" in rb.keys() else False,
+                "miniapp_enabled": bool(rb["miniapp_enabled"]) if "miniapp_enabled" in rb.keys() else False,
+                "owner_telegram_id": owner_tg_id,
+                "supply_model": supply["model"],
+                "fixed_product_id": supply["product_id"],
+            }
     return {
         "id": admin["id"],
         "username": admin["username"],
         "role": admin["role"],
         "permissions": (await asyncio.to_thread(tenant.db.get_web_admin_permissions, admin)),
         "tenant": tenant.slug,
+        "reseller_profile": reseller_profile,
     }
 
 
 # مجوزهایی که حتی برای owner پنل یک نماینده هم معنی ندارند (مثلاً «نمایندگی‌ها»:
 # پنل وب نماینده‌ی سطح ۱ نباید بتواند نماینده‌های خودش را مدیریت کند).
 MAIN_TENANT_ONLY_PERMISSIONS = {"resellers"}
+# مالک پنل یک نماینده سطح ۲ owner است، اما owner بودن نباید او را به ادمین
+# دیتابیس اصلی تبدیل کند. این مجوزها فقط در tenant اصلی معنی دارند؛ برای
+# نماینده سطح ۲ مسیرهای self-service پایین‌تر استفاده می‌شوند.
+LEVEL2_BLOCKED_PERMISSIONS = {
+    "catalog", "discounts", "panels", "system", "settings", "backup", "resellers",
+}
 
 
 def require_permission(permission: str):
     def _dep(admin=Depends(get_current_admin)):
+        if admin.get("tenant") and permission in LEVEL2_BLOCKED_PERMISSIONS:
+            # سطح ۱ همان پنل کامل نمایندگی را حفظ می‌کند.
+            profile = admin.get("reseller_profile") or {}
+            if int(profile.get("level", 2)) != 1:
+                raise HTTPException(403, "این قابلیت برای نمایندگی سطح ۲ در دسترس نیست.")
         if permission in MAIN_TENANT_ONLY_PERMISSIONS and admin["tenant"]:
             raise HTTPException(403, "این بخش فقط در پنل بات اصلی در دسترس است.")
         if admin["role"] != "owner" and permission not in admin["permissions"]:
@@ -2581,6 +2610,222 @@ async def api_admin_custom_config_delete(custom_config_id: int, admin=Depends(re
     return {"status": "ok"}
 
 
+# ------------------------------------------------------- reseller self-service --
+# پنل وب نماینده سطح ۲ «مدیریت کاتالوگ» نیست؛ یک فضای عملیاتی شخصی است.
+# نماینده فقط موجودی‌ای را که مدیر به او داده مصرف می‌کند و هرگز به محصولات/پنل‌های
+# اصلی برای ویرایش، حذف یا ساخت دسترسی پیدا نمی‌کند.
+
+
+def _require_level2_reseller_admin(admin):
+    if not admin.get("tenant"):
+        raise HTTPException(403, "این بخش فقط از پنل نمایندگی در دسترس است.")
+    profile = admin.get("reseller_profile") or {}
+    if int(profile.get("level", 2)) != 2:
+        raise HTTPException(403, "این بخش برای نمایندگی سطح ۲ است.")
+    return profile
+
+
+def _reseller_owner_id_or_404():
+    tenant = _current_tenant.get()
+    if not tenant.bot_id:
+        raise HTTPException(403, "نمایندگی معتبر نیست.")
+    row = main_db.get_reseller_bot(tenant.bot_id)
+    if not row or not row["is_active"]:
+        raise HTTPException(403, "نمایندگی غیرفعال است.")
+    return int(row["owner_telegram_id"]), row
+
+
+def _reseller_product_view(p, qty=0):
+    return {
+        "id": int(p["id"]), "name": p["name"], "description": p["description"] or "",
+        "price": int(p["price"] or 0), "duration_days": int(p["duration_days"] or 0),
+        "volume_gb": int(p["auto_provision_volume_gb"] or 0),
+        "provision_server_id": p["provision_server_id"], "qty": int(qty or 0),
+        "is_active": bool(p["is_active"]),
+    }
+
+
+@app.get("/api/reseller/self-service")
+async def api_reseller_self_service(admin=Depends(get_current_admin)):
+    profile = _require_level2_reseller_admin(admin)
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    supply = await asyncio.to_thread(main_db.get_reseller_supply, owner_id)
+    credit = await asyncio.to_thread(main_db.get_reseller_credit, owner_id)
+    inventory = await asyncio.to_thread(main_db.get_reseller_product_inventory, owner_id)
+    tenant_db = _current_tenant.get().db
+    services = await asyncio.to_thread(tenant_db_get_custom_configs, tenant_db, owner_id)
+    fixed = []
+    for row in inventory:
+        if int(row["qty_remaining"] or 0) > 0 and row["is_active"] and row["is_auto_provision"]:
+            fixed.append(_reseller_product_view(row, row["qty_remaining"]))
+    settings = await asyncio.to_thread(main_db.get_custom_config_settings)
+    return {
+        "profile": profile,
+        "supply": {"model": supply["model"], "fixed_product_id": supply["product_id"], "credit_gb": int(credit or 0)},
+        "inventory": fixed,
+        "custom_limits": {"min_gb": int(settings["min_gb"]), "max_gb": int(settings["max_gb"])},
+        "services": services,
+    }
+
+
+def tenant_db_get_custom_configs(tenant_db: Database, owner_id: int):
+    # برای نماینده بدون بات، owner دیتابیس محلی همان کاربر اصلی است.
+    rows = tenant_db.get_custom_configs_for_user(owner_id)
+    return [
+        {"id": c["id"], "username": c["username"], "display_name": c["display_name"] or c["username"],
+         "volume_gb": c["volume_gb"], "duration_days": c["duration_days"],
+         "subscription_url": c["subscription_url"], "created_at": c["created_at"], "expires_at": c["expires_at"],
+         "enabled": (c["enabled"] if "enabled" in c.keys() else 1) == 1,
+         "auto_renew": (c["auto_renew"] if "auto_renew" in c.keys() else 0) == 1}
+        for c in rows
+    ]
+
+
+class ResellerSelfBuildBody(BaseModel):
+    volume_gb: int
+    duration_days: int = 30
+    username: Optional[str] = None
+
+
+class ResellerSelfFixedBody(BaseModel):
+    product_id: int
+    quantity: int = 1
+
+
+async def _build_reseller_self_config(owner_id: int, product, volume_gb: int, duration_days: int,
+                                      username: Optional[str], consume_fixed: bool, quantity: int = 1):
+    if volume_gb < 0:
+        raise HTTPException(400, "حجم نامعتبر است.")
+    if duration_days < 0 or duration_days > 3650:
+        raise HTTPException(400, "مدت باید بین ۰ تا ۳۶۵۰ روز باشد؛ ۰ یعنی نامحدود.")
+    if not username:
+        prefix = (await asyncio.to_thread(main_db.get_custom_config_prefix)) or "r"
+        username = f"{prefix}-r{secrets.token_hex(4)}" if prefix else f"r{secrets.token_hex(4)}"
+    username = username.strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", username):
+        raise HTTPException(400, "نام کاربری فقط می‌تواند شامل حروف انگلیسی، عدد، نقطه، خط تیره و زیرخط باشد (۳ تا ۶۴ کاراکتر).")
+
+    server = None
+    if product is not None and product["provision_server_id"]:
+        server = await asyncio.to_thread(main_db.get_panel_server, product["provision_server_id"])
+    if not server or not server["is_active"]:
+        server = await asyncio.to_thread(main_db.get_reseller_panel, owner_id)
+    if not server or not server["is_active"]:
+        raise HTTPException(400, "هیچ پنل فعالی برای ساخت کانفیگ نمایندگی تنظیم نشده است.")
+
+    provider = get_provider(server)
+    try:
+        result = await provider.create_user(username, volume_gb, duration_days)
+    except PanelUsernameTakenError:
+        raise HTTPException(400, "این نام کاربری روی پنل وجود دارد؛ نام دیگری انتخاب کنید.")
+    except PanelError as e:
+        raise HTTPException(400, f"ساخت کانفیگ روی پنل ناموفق بود: {e}")
+
+    # مصرف اعتبار فقط بعد از ساخت موفق؛ اگر مصرف هم‌زمان شکست خورد، اکانت واقعی را rollback کن.
+    if consume_fixed:
+        if not await asyncio.to_thread(main_db.consume_reseller_product_credit, owner_id, int(product["id"]), quantity):
+            try: await provider.delete_user(result.username)
+            except Exception: logger.exception("rollback fixed reseller config failed: %s", result.username)
+            raise HTTPException(409, "موجودی محصول هم‌زمان مصرف شد؛ دوباره تلاش کنید.")
+    else:
+        if not await asyncio.to_thread(main_db.consume_reseller_credit, owner_id, volume_gb * quantity,
+                                       f"ساخت کانفیگ شخصی از پنل وب نماینده"):
+            try: await provider.delete_user(result.username)
+            except Exception: logger.exception("rollback volume reseller config failed: %s", result.username)
+            raise HTTPException(409, "اعتبار حجمی هم‌زمان مصرف شد؛ دوباره تلاش کنید.")
+
+    tenant_db = _current_tenant.get().db
+    try:
+        local_panel_id = await asyncio.to_thread(tenant_db.get_or_create_mirror_panel_server, server)
+        await asyncio.to_thread(tenant_db.add_custom_config, owner_id, local_panel_id, result.username,
+                                volume_gb, duration_days, result.subscription_url,
+                                source="reseller")
+    except Exception:
+        # اگر ثبت محلی شکست خورد، اکانت و اعتبار را rollback می‌کنیم تا نماینده سرویس گمشده نداشته باشد.
+        try: await provider.delete_user(result.username)
+        except Exception: logger.exception("rollback after local reseller record failure: %s", result.username)
+        if consume_fixed:
+            await asyncio.to_thread(main_db.adjust_reseller_product_credit, owner_id, int(product["id"]), quantity,
+                                    reason="rollback ساخت کانفیگ نماینده")
+        else:
+            await asyncio.to_thread(main_db.adjust_reseller_credit, owner_id, volume_gb * quantity,
+                                    reason="rollback ساخت کانفیگ نماینده")
+        raise HTTPException(500, "ثبت سرویس در پنل نماینده ناموفق بود؛ عملیات برگشت داده شد.")
+    return {"username": result.username, "subscription_url": result.subscription_url,
+            "volume_gb": volume_gb, "duration_days": duration_days}
+
+
+@app.post("/api/reseller/self-service/fixed")
+async def api_reseller_self_fixed(body: ResellerSelfFixedBody, admin=Depends(get_current_admin)):
+    _require_level2_reseller_admin(admin)
+    if body.quantity != 1:
+        raise HTTPException(400, "در حال حاضر هر بار فقط یک محصول برای استفاده شخصی دریافت می‌شود.")
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    supply = await asyncio.to_thread(main_db.get_reseller_supply, owner_id)
+    if supply["model"] != "fixed_product" or int(supply["product_id"] or 0) != body.product_id:
+        raise HTTPException(403, "این محصول به موجودی نمایندگی شما اختصاص داده نشده است.")
+    product = await asyncio.to_thread(main_db.get_product, body.product_id)
+    if not product or not product["is_active"] or not product["is_auto_provision"]:
+        raise HTTPException(400, "محصول در دسترس نیست.")
+    qty = await asyncio.to_thread(main_db.get_reseller_product_credit, owner_id, body.product_id)
+    if qty < 1:
+        raise HTTPException(400, "موجودی این محصول تمام شده است.")
+    result = await _build_reseller_self_config(owner_id, product, int(product["auto_provision_volume_gb"] or 0),
+                                               int(product["duration_days"] if product["duration_days"] is not None else 30),
+                                               None, True, 1)
+    await asyncio.to_thread(main_db.log_admin_action, admin["id"], "reseller_self_fixed",
+                            f"نماینده {owner_id} محصول #{body.product_id} را برای خود مصرف کرد (پنل وب)", "reseller", owner_id)
+    return result
+
+
+@app.post("/api/reseller/self-service/custom")
+async def api_reseller_self_custom(body: ResellerSelfBuildBody, admin=Depends(get_current_admin)):
+    profile = _require_level2_reseller_admin(admin)
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    if profile.get("supply_model") != "volume_credit":
+        raise HTTPException(403, "ساخت آزاد کانفیگ فقط برای نمایندگی دارای اعتبار حجمی فعال است.")
+    settings = await asyncio.to_thread(main_db.get_custom_config_settings)
+    if body.volume_gb < int(settings["min_gb"]) or body.volume_gb > int(settings["max_gb"]):
+        raise HTTPException(400, f"حجم باید بین {settings['min_gb']} تا {settings['max_gb']} گیگابایت باشد.")
+    credit = await asyncio.to_thread(main_db.get_reseller_credit, owner_id)
+    if credit < body.volume_gb:
+        raise HTTPException(400, f"اعتبار کافی نیست؛ موجودی فعلی {credit:,} گیگ است.")
+    result = await _build_reseller_self_config(owner_id, None, body.volume_gb, body.duration_days, body.username, False, 1)
+    await asyncio.to_thread(main_db.log_admin_action, admin["id"], "reseller_self_custom",
+                            f"نماینده {owner_id} کانفیگ شخصی {body.volume_gb}GB/{body.duration_days}d ساخت (پنل وب)", "reseller", owner_id)
+    return result
+
+
+@app.get("/api/reseller/self-service/services")
+async def api_reseller_self_services(admin=Depends(get_current_admin)):
+    _require_level2_reseller_admin(admin)
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    return await asyncio.to_thread(tenant_db_get_custom_configs, _current_tenant.get().db, owner_id)
+
+
+@app.post("/api/reseller/self-service/services/{config_id}/toggle")
+async def api_reseller_self_toggle(config_id: int, admin=Depends(get_current_admin)):
+    _require_level2_reseller_admin(admin)
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    cc = db.get_custom_config_owned(config_id, owner_id)
+    if not cc or cc["source"] != "reseller": raise HTTPException(404, "سرویس یافت نشد.")
+    enabled = not ((cc["enabled"] if "enabled" in cc.keys() else 1) == 1)
+    if not db.set_custom_config_enabled(config_id, owner_id, enabled): raise HTTPException(400, "تغییر وضعیت ناموفق بود.")
+    return {"ok": True, "enabled": enabled}
+
+
+@app.post("/api/reseller/self-service/services/{config_id}/rename")
+async def api_reseller_self_rename(config_id: int, body: dict, admin=Depends(get_current_admin)):
+    _require_level2_reseller_admin(admin)
+    owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
+    cc = db.get_custom_config_owned(config_id, owner_id)
+    if not cc or cc["source"] != "reseller": raise HTTPException(404, "سرویس یافت نشد.")
+    name = str(body.get("name") or "").strip()
+    if not name or len(name) > 80: raise HTTPException(400, "نام نامعتبر است.")
+    if not db.rename_custom_config(config_id, owner_id, name): raise HTTPException(400, "تغییر نام ناموفق بود.")
+    return {"ok": True}
+
+
 # ------------------------------------------------------- categories/products --
 
 
@@ -2589,7 +2834,7 @@ class CategoryBody(BaseModel):
 
 
 @app.get("/api/categories")
-def api_categories(admin=Depends(get_current_admin)):
+def api_categories(admin=Depends(require_permission("catalog"))):
     return rows_to_list(db.get_categories(active_only=False))
 
 
@@ -2634,7 +2879,7 @@ class ProductBody(BaseModel):
 
 
 @app.get("/api/products")
-def api_products(admin=Depends(get_current_admin)):
+def api_products(admin=Depends(require_permission("catalog"))):
     products = rows_to_list(db.get_all_products())
     for p in products:
         p["stock"] = db.count_available_configs(p["id"])
