@@ -2291,7 +2291,8 @@ async function showUserDetail(tgId) {
         <span class="mono">ID: ${tgId}</span>
       </div>
       <span class="badge ${u.is_blocked ? 'badge-rejected' : 'badge-approved'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
-      ${(hasPerm('resellers') && !d.is_reseller) ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
+      ${hasPerm('resellers') && !d.is_reseller ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
+      ${hasPerm('resellers') && d.is_reseller ? `<button class="btn btn-sm btn-primary" id="ud-edit-reseller">⚙️ ویرایش نمایندگی</button><button class="btn btn-sm btn-danger" id="ud-delete-reseller">🗑 حذف نمایندگی</button>` : ''}
       ${historyBtn('user', tgId)}
     </div>
 
@@ -2346,6 +2347,18 @@ async function showUserDetail(tgId) {
     if (isSenior) wireUserBankConfigActions(body, tgId, close);
     const makeResellerBtn = $('#ud-make-reseller', body);
     if (makeResellerBtn) makeResellerBtn.addEventListener('click', () => openMakeResellerModal(tgId, close));
+    const editResellerBtn = $('#ud-edit-reseller', body);
+    if (editResellerBtn) editResellerBtn.addEventListener('click', () => openLevel2ResellerManageModal(tgId));
+    const deleteResellerBtn = $('#ud-delete-reseller', body);
+    if (deleteResellerBtn) deleteResellerBtn.addEventListener('click', async () => {
+      if (!confirm('حذف کامل نمایندگی این کاربر و موجودی‌های نمایندگی انجام شود؟')) return;
+      try {
+        await apiDelete(`/resellers/${tgId}`);
+        toast('نمایندگی حذف شد.');
+        close();
+        await showUserDetail(tgId);
+      } catch (e) { handleErr(e); }
+    });
   }, { wide: true });
 }
 
@@ -4335,17 +4348,15 @@ function openResellerBotManageModal(bot) {
       <div><b>سطح نمایندگی</b></div>
       <button class="btn btn-sm" id="rb-level">تغییر به «${isFull ? 'سطح ۲ (محدود)' : 'کامل'}»</button>
       <hr>
-      ${isFull ? `
-        <div><b>پنل وب اختصاصی</b></div>
-        ${bot.web_panel_enabled ? `
-          <button class="btn btn-sm" id="rb-wp-link">🔗 نمایش لینک ورود ثابت</button>
-          <button class="btn btn-sm" id="rb-wp-regen">🔁 ساخت لینک راه‌اندازی جدید (ارسال به نماینده)</button>
-          <button class="btn btn-sm btn-danger" id="rb-wp-off">⛔️ غیرفعال کردن پنل وب</button>
-        ` : `
-          <button class="btn btn-sm btn-primary" id="rb-wp-on">🌐 فعال‌سازی پنل وب (ارسال لینک به نماینده)</button>
-        `}
-        <hr>
-      ` : ''}
+      <div><b>پنل وب اختصاصی</b></div>
+      ${bot.web_panel_enabled ? `
+        <button class="btn btn-sm" id="rb-wp-link">🔗 نمایش لینک ورود ثابت</button>
+        <button class="btn btn-sm" id="rb-wp-regen">🔁 ساخت لینک راه‌اندازی جدید (ارسال به نماینده)</button>
+        <button class="btn btn-sm btn-danger" id="rb-wp-off">⛔️ غیرفعال کردن پنل وب</button>
+      ` : `
+        <button class="btn btn-sm btn-primary" id="rb-wp-on">🌐 فعال‌سازی پنل وب (ارسال لینک به نماینده)</button>
+      `}
+      <hr>
       <button class="btn btn-sm btn-danger" id="rb-delete">🗑 حذف این نماینده</button>
     </div>
   `, (body, close) => {
