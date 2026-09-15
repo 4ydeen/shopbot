@@ -3589,7 +3589,7 @@ async def _finalize_no_bot_reseller_request_web(req, request: Request = None):
     (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
     if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
         (await asyncio.to_thread(
-            db.grant_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
+            db.set_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
             admin_id=req["reviewed_by"],
             reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']} (پنل وب)",
         ))
