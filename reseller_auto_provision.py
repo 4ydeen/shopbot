@@ -254,7 +254,7 @@ async def provision_reseller_fixed_product(main_db: Database, owner_id: int, pro
     # نمایش داده می‌شد، حتی وقتی محصول خودش پنل معتبر داشت.
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
-        product_panel_id = product.get("provision_server_id")
+        product_panel_id = product["provision_server_id"] if "provision_server_id" in product.keys() else None
         if product_panel_id:
             candidate = main_db.get_panel_server(product_panel_id)
             if candidate and candidate["is_active"]:

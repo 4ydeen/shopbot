@@ -2221,7 +2221,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 break
         data = await state.get_data()
         product_id = int(data["fixed_product_id"])
-        server = await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id)
+        # همان پنلی که هنگام انتخاب محصول تعیین شد (ممکن است fallback محصول باشد)
+        server = None
+        panel_server_id = data.get("panel_server_id")
+        if panel_server_id:
+            server = await asyncio.to_thread(reseller_backend.get_panel_server, int(panel_server_id))
+        if not server or not server["is_active"]:
+            server = await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id)
         try:
             result = (await provision_reseller_fixed_product(reseller_backend, call.from_user.id, product_id, 1, username_prefix=prefix or "r", username=candidate))[0]
         except ProvisionError as e:
@@ -2252,7 +2258,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("❌ این نام کاربری قبلاً استفاده شده است."); return
         data=await state.get_data()
         product_id=int(data["fixed_product_id"])
-        server=await asyncio.to_thread(reseller_backend.get_reseller_panel, message.from_user.id)
+        # پنل واقعی انتخاب‌شده در مرحله قبل را نگه می‌داریم؛ اگر پنل نماینده
+        # نداشتیم، این مقدار همان provision_server_id محصول است.
+        server=None
+        panel_server_id=data.get("panel_server_id")
+        if panel_server_id:
+            server=await asyncio.to_thread(reseller_backend.get_panel_server, int(panel_server_id))
+        if not server or not server["is_active"]:
+            server=await asyncio.to_thread(reseller_backend.get_reseller_panel, message.from_user.id)
         try:
             result=(await provision_reseller_fixed_product(reseller_backend, message.from_user.id, product_id, 1, username_prefix=prefix or "r", username=username))[0]
         except ProvisionError as e:
@@ -4852,14 +4865,26 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             panel_url = panel_url.rstrip("/")
             if panel_url:
                 b_value = reseller_bot_id
-                setup_token = await asyncio.to_thread(db.get_reseller_bot, reseller_bot_id)
-                setup_token = setup_token["web_panel_setup_token"] if setup_token else None
+                reseller_bot_row = await asyncio.to_thread(db.get_reseller_bot, reseller_bot_id)
+                setup_token = reseller_bot_row["web_panel_setup_token"] if reseller_bot_row else None
+                # اگر به هر دلیل توکن در زمان فعال‌سازی ذخیره نشده/مصرف شده بود،
+                # همین‌جا یک توکن تازه بساز تا نماینده هیچ‌وقت بدون لینک setup نماند.
+                if not setup_token:
+                    try:
+                        setup_token = await asyncio.to_thread(db.regenerate_reseller_web_panel_token, reseller_bot_id)
+                    except Exception:
+                        setup_token = None
                 if setup_token:
                     web_panel_note = (
                         f"\n\n🌐 لینک راه‌اندازی پنل وب نمایندگی:\n"
                         f"{panel_url}/setup?b={b_value}&t={setup_token}\n\n"
                         "این لینک یک‌بارمصرف است؛ با باز کردن آن، یوزرنیم و رمز پنل را خودت تعیین می‌کنی."
                     )
+            elif req["wants_web_panel"]:
+                web_panel_note = (
+                    "\n\n⚠️ پنل وب فعال شده، اما آدرس پنل وب در تنظیمات بات ثبت نشده است. "
+                    "ابتدا ADMIN_PANEL_URL / آدرس پنل وب را تنظیم کنید تا لینک راه‌اندازی ارسال شود."
+                )
         try:
             await bot.send_message(
                 owner_id,
