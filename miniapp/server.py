@@ -152,6 +152,10 @@ def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لین
         )
         raise HTTPException(status_code=404, detail="این فروشگاه در دسترس نیست.")
 
+    if "miniapp_enabled" in row.keys() and not row["miniapp_enabled"]:
+        _tenant_logger.warning("تننت b=%s: مینی‌اپ برای این نماینده فعال نیست.", b)
+        raise HTTPException(status_code=404, detail="مینی‌اپ برای این نماینده فعال نیست.")
+
     resolved_path = resolve_db_path(row["db_path"])
     if not os.path.exists(resolved_path):
         _tenant_logger.error(
@@ -884,11 +888,60 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
             raise HTTPException(status_code=409, detail="این نام کاربری روی پنل تکراری است.")
         except PanelError as e:
             raise HTTPException(status_code=502, detail=f"خطا در ساخت کانفیگ: {e}")
-        db.adjust_reseller_credit(tg_id, -body.volume_gb, reason=f"ساخت کانفیگ «{result.username}» (مینی‌اپ)")
-        db.add_custom_config(
-            tg_id, server["id"], result.username, body.volume_gb, duration_days,
-            result.subscription_url, source="reseller",
+        # نکته (باگ قبلی): اینجا قبلاً از adjust_reseller_credit با دلتای منفی
+        # استفاده می‌شد که فقط یک UPDATE بدون قید انجام می‌دهد (همیشه "موفق"
+        # است، حتی وقتی اعتبار کافی نباشد). چون بین چک بالا (credit) و همین
+        # لحظه یک تماس شبکه‌ای کند به پنل VPN فاصله افتاده (await
+        # provider.create_user)، دو درخواست هم‌زمان از همین نماینده (مثلاً دو
+        # تب یا دو کلیک سریع) هر دو می‌توانستند از چک بالا رد شوند، هر دو یک
+        # اکانت واقعی روی پنل بسازند و هر دو بدون هیچ قفلی اعتبار را کم کنند -
+        # نتیجه: reseller_credit_gb منفی می‌شد و نماینده ظرفیت واقعی رایگان
+        # بیشتر از اعتبار خریداری‌شده‌اش می‌گرفت. الان درست مثل ResellerFlow در
+        # بات (handlers_user.py) و reseller_auto_provision.py، کسر با
+        # consume_reseller_credit در یک کوئری اتمیک (UPDATE ... WHERE
+        # reseller_credit_gb >= ?) انجام می‌شود؛ اگر هم‌زمان توسط یک ساخت
+        # دیگر مصرف شده باشد، اینجا واقعاً رد می‌شود و اکانت تازه‌ساخته روی
+        # پنل هم پاک می‌شود تا یتیم نماند.
+        credit_ok = db.consume_reseller_credit(
+            tg_id, body.volume_gb, reason=f"ساخت کانفیگ «{result.username}» (مینی‌اپ)"
         )
+        if not credit_ok:
+            try:
+                await provider.delete_user(result.username)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=409,
+                detail="اعتبار شما هم‌زمان توسط یک ساخت دیگر مصرف شد. دوباره امتحان کن.",
+            )
+
+        # نکته (باگ قبلی): قبلاً اینجا try/except نبود؛ اگر add_custom_config
+        # به هر دلیلی (مثلاً قفل موقت دیتابیس) شکست می‌خورد، اعتبار قبلاً کسر
+        # شده بود و اکانت واقعی روی پنل هم ساخته شده بود، ولی هیچ رکوردی در
+        # custom_configs ثبت نمی‌شد - یعنی سرویس یتیم و برای همیشه گم‌شده
+        # (نه در «سرویس‌های من»، نه قابل بازگشت). الان در صورت شکست، هم اعتبار
+        # برگردانده می‌شود هم اکانت پنل پاک می‌شود.
+        try:
+            db.add_custom_config(
+                tg_id, server["id"], result.username, body.volume_gb, duration_days,
+                result.subscription_url, source="reseller",
+            )
+        except Exception:
+            logging.getLogger("miniapp").exception(
+                "ثبت کانفیگ نمایندگی (مینی‌اپ) برای کاربر %s ناموفق بود؛ اعتبار بازگردانده و اکانت پنل پاک شد.",
+                tg_id,
+            )
+            db.adjust_reseller_credit(
+                tg_id, body.volume_gb, reason="بازگشت اعتبار به‌دلیل خطای ثبت کانفیگ (مینی‌اپ)"
+            )
+            try:
+                await provider.delete_user(result.username)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=500,
+                detail="خطایی در ثبت کانفیگ رخ داد؛ اعتبار شما بازگردانده شد. دوباره تلاش کن.",
+            )
         return {
             "status": "approved", "link": result.subscription_url,
             "reseller_credit_left": db.get_reseller_credit(tg_id),
@@ -1050,26 +1103,44 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
         else:
             raise HTTPException(status_code=400, detail="لطفاً یک مدل کانفیگ تست انتخاب کنید.")
 
+        # رفع باگ ریس‌کاندیشن: قبلاً اینجا فقط چک بالای تابع (get_user) کاربر را
+        # از دوباره‌گرفتن تست منع می‌کرد و mark_test_used فقط *بعد* از ساخت
+        # واقعی کانفیگ روی پنل صدا زده می‌شد. چون این یک API عمومی است، یک
+        # کاربر می‌توانست چند ریکوئست POST همزمان به همین endpoint بفرستد (مثلاً
+        # با curl/اسکریپت) و همه از همان چک اولیه رد شوند - هرکدام واقعاً یک
+        # کانفیگ تست می‌ساخت (و در بات‌های نمایندگی، هرکدام از اعتبار حجمی
+        # نماینده کم می‌کرد). سهمیه حالا با یک UPDATE اتمیک *قبل* از تماس با
+        # پنل رزرو می‌شود؛ اگر ساخت کانفیگ شکست بخورد، سهمیه برمی‌گردد.
+        if not db.try_reserve_test_slot(tg_id, MAX_TEST_PER_USER):
+            raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
+
         if is_full_access:
             try:
                 result = await provision_test_plan(db, plan, user_id=tg_id)
             except TestPlanProvisionError as e:
+                db.release_test_slot(tg_id)
                 raise HTTPException(status_code=409, detail=str(e))
         else:
             try:
                 result = await provision_test_config(db, plan, user_id=tg_id)
             except ProvisionError as e:
+                db.release_test_slot(tg_id)
                 raise HTTPException(status_code=409, detail=str(e))
-        db.mark_test_used(tg_id)
         return {"link": result["subscription_url"]}
 
     if not is_full_access:
         raise HTTPException(status_code=400, detail="در حال حاضر هیچ پلن کانفیگ تستی تعریف نشده است.")
 
+    # همین باگ برای مسیر قدیمی «بانک لینک دستی» هم صدق می‌کرد: قبلاً
+    # take_unused_test_config قبل از mark_test_used صدا زده می‌شد، پس چند
+    # ریکوئست همزمان می‌توانستند چند لینک از بانک بردارند. حالا سهمیه اول رزرو
+    # می‌شود؛ اگر لینکی برای برداشتن نبود، سهمیه بلافاصله برمی‌گردد.
+    if not db.try_reserve_test_slot(tg_id, MAX_TEST_PER_USER):
+        raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
     result = db.take_unused_test_config(tg_id)
     if not result:
+        db.release_test_slot(tg_id)
         raise HTTPException(status_code=400, detail="متاسفانه موجودی کانفیگ تست تمام شده است.")
-    db.mark_test_used(tg_id)
     return {"link": result["link"]}
 
 
@@ -4494,7 +4565,11 @@ async def api_admin_approve_reseller_request_payment(request_id: int, auth=Depen
     req = db.get_reseller_request(request_id)
     if not req or req["status"] != "awaiting_payment_review":
         raise HTTPException(status_code=400, detail="این درخواست دیگر معتبر نیست.")
-    db.approve_reseller_request_payment(request_id, admin_id)
+    # رفع باگ ریس‌کاندیشن: approve_reseller_request_payment حالا اتمیک است؛ اگر
+    # هم‌زمان از یک سطح دیگر (بات/پنل وب) همین درخواست تایید شده باشد، False
+    # برمی‌گردد و اینجا متوقف می‌شویم تا اعتبار/بات نماینده دوبار ساخته نشود.
+    if not db.approve_reseller_request_payment(request_id, admin_id):
+        raise HTTPException(status_code=400, detail="این درخواست همین الان از جای دیگری تایید شد.")
     db.log_admin_action(admin_id, "reseller_request_payment_approve", f"درخواست #{request_id} | کاربر {req['user_id']} (مینی‌اپ)")
     _set_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
     await _tg_notify(
@@ -4706,6 +4781,13 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
     if not reseller_bot:
         raise HTTPException(status_code=404, detail="نماینده یافت نشد.")
     db.delete_reseller_bot(reseller_id)
+    # رفع باگ: برخلاف حذف از پنل بات تلگرام و پنل وب (که هر دو بلافاصله
+    # purge_reseller_leftovers را صدا می‌زنند)، این endpoint قبلاً فقط ردیف
+    # reseller_bots را حذف می‌کرد. فلگ is_reseller/اعتبار حجمی/reseller_panel_id/
+    # مدل تامین روی رکورد کاربر در دیتابیس اصلی دست‌نخورده باقی می‌ماند - یعنی
+    # بعد از حذف نماینده از مینی‌اپ، آن کاربر همچنان (بی‌سروصدا و ناسازگار با دو
+    # مسیر حذف دیگر) نماینده و صاحب اعتبار قدیمی‌اش تلقی می‌شد.
+    db.purge_reseller_leftovers(reseller_bot["owner_telegram_id"])
 
     if purge_db:
         resolved_path = resolve_db_path(reseller_bot["db_path"])
@@ -4713,7 +4795,9 @@ def api_admin_delete_reseller(reseller_id: int, purge_db: bool = Query(False), a
 
     return {
         "status": "ok",
-        "db_purged": False,
+        # رفع باگ: این مقدار قبلاً همیشه False هاردکد شده بود، حتی وقتی
+        # purge_db=True بود و پاک‌سازی واقعاً صف شده بود.
+        "db_purged": bool(purge_db),
         "note": "بات نماینده حداکثر تا ۱۰ ثانیه دیگر متوقف می‌شود"
         + (" و بلافاصله بعد از توقف، فایل دیتابیسش پاک خواهد شد." if purge_db else "."),
     }
