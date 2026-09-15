@@ -330,6 +330,7 @@ function openModal(title, bodyHtml, onMount, opts = {}) {
 const NAV = [
   // نمای کلی
   { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any', section: null },
+  { key: 'reseller-self', label: 'نمایندگی من', icon: 'resellers', role: 'reseller-self', section: 'عملیات نمایندگی' },
 
   // عملیات مالی
   { key: 'orders', label: 'سفارش‌ها', icon: 'orders', role: 'any', section: 'عملیات مالی' },
@@ -366,6 +367,19 @@ function hasPerm(perm) {
   return ME.role === 'owner' || (ME.permissions || []).includes(perm);
 }
 function canSee(navRole) {
+  const rp = ME?.reseller_profile;
+  if (navRole === 'reseller-self') return !!(ME?.tenant && rp?.level === 2);
+  if (ME?.tenant && rp?.level === 2) {
+    // سطح ۲ فقط ابزارهای عملیاتی خودش را می‌بیند؛ کاتالوگ/پنل/تنظیمات
+    // مدیریتی عمداً از منو حذف شده‌اند و backend هم همان‌ها را 403 می‌کند.
+    if (navRole === 'any') {
+      if (['dashboard', 'account'].includes(CURRENT_TAB)) return true;
+      if (['orders', 'users', 'tickets', 'support', 'broadcast'].includes(CURRENT_TAB)) return !!(rp.has_live_bot || rp.inline_link_enabled);
+      return true;
+    }
+    if (['orders', 'users', 'tickets', 'support', 'broadcast'].includes(navRole)) return !!(rp.has_live_bot || rp.inline_link_enabled);
+    return false;
+  }
   if (navRole === 'resellers' && ME.tenant) return false;
   if (navRole === 'any') return true;
   if (navRole === 'owner') return ME.role === 'owner';
@@ -786,6 +800,7 @@ async function renderPage(tab) {
   try {
     switch (tab) {
       case 'dashboard': return await renderDashboard();
+      case 'reseller-self': return await renderResellerSelfService();
       case 'orders': return await renderOrders();
       case 'topups': return await renderTopups();
       case 'users': return await renderUsers();
@@ -807,6 +822,77 @@ async function renderPage(tab) {
       case 'account': return await renderAccount();
     }
   } catch (e) { handleErr(e); setContent(`<div class="empty-state">${esc(e.message)}</div>`); }
+}
+
+/* =============================================== reseller self-service === */
+async function renderResellerSelfService() {
+  const d = await apiGet('/reseller/self-service');
+  const rp = d.profile || {};
+  const supply = d.supply || {};
+  const fixed = d.inventory || [];
+  const services = d.services || [];
+  const canCustom = supply.model === 'volume_credit';
+  setContent(`
+    <div class="hero" style="margin-bottom:16px">
+      <div><h2>نمایندگی من</h2><p class="card-sub">این بخش فقط برای مصرف موجودی خودت است؛ هیچ دسترسی مدیریتی به کاتالوگ یا پنل اصلی نداری.</p></div>
+    </div>
+    <div class="stats-grid" style="margin-bottom:16px">
+      <div class="stat-card"><span class="label">مدل تأمین</span><span class="value">${supply.model === 'fixed_product' ? 'محصول آماده' : 'اعتبار حجمی'}</span></div>
+      <div class="stat-card"><span class="label">اعتبار حجمی</span><span class="value mono">${fmt(supply.credit_gb || 0)} GB</span></div>
+      <div class="stat-card"><span class="label">سرویس‌های من</span><span class="value mono">${fmt(services.length)}</span></div>
+    </div>
+    <div class="grid-2" style="gap:16px">
+      <div class="card">
+        <div class="card-head"><h3>📦 محصولات آماده‌ی من</h3><span class="card-sub">فقط محصولاتی که ادمین به موجودی تو داده است.</span></div>
+        <div class="admin-list">
+          ${fixed.length ? fixed.map(p => `<div class="admin-list-row"><div><b>${esc(p.name)}</b><div class="card-sub">${fmt(p.volume_gb)} گیگ · ${p.duration_days ? fmt(p.duration_days)+' روز' : 'نامحدود'} · موجودی ${fmt(p.qty)}</div></div><button class="btn btn-primary btn-sm" data-self-fixed="${p.id}">دریافت برای خودم</button></div>`).join('') : '<div class="empty-state">موجودی محصول آماده‌ای برای تو ثبت نشده است.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>🛠 ساخت کانفیگ دلخواه</h3><span class="card-sub">${canCustom ? `از اعتبار ${fmt(supply.credit_gb || 0)} گیگ مصرف می‌شود.` : 'این قابلیت برای مدل محصول آماده فعال نیست.'}</span></div>
+        ${canCustom ? `<div class="form-grid">
+          <label class="field"><span>حجم (گیگابایت)</span><input class="input" id="rs-volume" type="number" min="${d.custom_limits.min_gb}" max="${d.custom_limits.max_gb}" value="${Math.min(Math.max(d.custom_limits.min_gb, 10), d.custom_limits.max_gb)}"></label>
+          <label class="field"><span>مدت (روز) — ۰ = نامحدود</span><input class="input" id="rs-duration" type="number" min="0" max="3650" value="30"></label>
+          <label class="field"><span>نام کاربری (اختیاری)</span><input class="input" id="rs-username" maxlength="64" placeholder="خالی = خودکار"></label>
+          <button class="btn btn-primary" id="rs-build">ساخت کانفیگ و کسر از اعتبار</button>
+        </div>` : `<div class="empty-state">برای ساخت آزاد، مدل تأمین نمایندگی باید «اعتبار حجمی» باشد.</div>`}
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-head"><h3>🔐 سرویس‌های من</h3></div>
+      <div class="admin-list">
+        ${services.length ? services.map(c => `<div class="admin-list-row"><div><b>${esc(c.display_name || c.username)}</b><div class="card-sub mono">${esc(c.username)} · ${fmt(c.volume_gb)}GB · ${c.duration_days ? fmt(c.duration_days)+' روز' : 'نامحدود'}</div></div><div class="admin-list-row-actions"><button class="btn btn-sm" data-self-toggle="${c.id}">${c.enabled ? 'غیرفعال' : 'فعال'}</button><button class="btn btn-sm" data-self-rename="${c.id}">تغییر نام</button><button class="btn btn-sm" data-self-copy="${c.id}">لینک</button></div></div>`).join('') : '<div class="empty-state">هنوز سرویسی برای خودت ساخته نشده است.</div>'}
+      </div>
+    </div>
+  `);
+  $$('[data-self-fixed]', content()).forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const r = await apiPost('/reseller/self-service/fixed', { product_id: Number(btn.dataset.selfFixed), quantity: 1 });
+      toast('کانفیگ ساخته شد.');
+      showResellerResult(r);
+      await renderResellerSelfService();
+    } catch (e) { handleErr(e); btn.disabled = false; }
+  }));
+  $('#rs-build')?.addEventListener('click', async () => {
+    const volume_gb = Number($('#rs-volume').value), duration_days = Number($('#rs-duration').value), username = $('#rs-username').value.trim() || null;
+    const btn = $('#rs-build'); btn.disabled = true;
+    try { const r = await apiPost('/reseller/self-service/custom', { volume_gb, duration_days, username }); toast('کانفیگ ساخته شد.'); showResellerResult(r); await renderResellerSelfService(); }
+    catch (e) { handleErr(e); btn.disabled = false; }
+  });
+  $$('[data-self-toggle]', content()).forEach(btn => btn.addEventListener('click', async () => { try { await apiPost(`/reseller/self-service/services/${btn.dataset.selfToggle}/toggle`); await renderResellerSelfService(); } catch(e){handleErr(e);} }));
+  $$('[data-self-rename]', content()).forEach(btn => btn.addEventListener('click', async () => {
+    const name = prompt('نام نمایشی جدید را وارد کن:'); if (!name) return;
+    try { await apiPost(`/reseller/self-service/services/${btn.dataset.selfRename}/rename`, { name }); await renderResellerSelfService(); } catch(e){handleErr(e);}
+  }));
+  $$('[data-self-copy]', content()).forEach(btn => btn.addEventListener('click', async () => {
+    const service = services.find(x => String(x.id) === String(btn.dataset.selfCopy)); if (!service) return;
+    try { await navigator.clipboard.writeText(service.subscription_url || ''); toast('لینک کپی شد.'); } catch(e) { openModal('لینک اشتراک', `<div class="form-grid"><textarea class="input" rows="4" readonly>${esc(service.subscription_url || '')}</textarea></div>`); }
+  }));
+}
+
+function showResellerResult(r) {
+  openModal('✅ کانفیگ آماده است', `<div class="form-grid"><div><b>نام کاربری:</b> <span class="mono">${esc(r.username)}</span></div><div><b>حجم:</b> ${fmt(r.volume_gb)} گیگ · <b>مدت:</b> ${r.duration_days ? fmt(r.duration_days)+' روز' : 'نامحدود'}</div><textarea class="input" rows="5" readonly>${esc(r.subscription_url || '')}</textarea></div>`);
 }
 
 /* ========================================================= dashboard === */
