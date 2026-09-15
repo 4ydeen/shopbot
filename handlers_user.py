@@ -2188,9 +2188,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         item = next((dict(x) for x in inventory if int(x["product_id"]) == product_id), None)
         if not item or int(item["qty_remaining"]) < 1:
             await call.answer("موجودی این محصول تمام شده است.", show_alert=True); return
+        # برای محصول آماده، خودِ محصول می‌تواند پنل ساخت کانفیگ داشته باشد؛
+        # بنابراین نبودن reseller_panel_id نباید جلوی ساخت کانفیگ را بگیرد.
+        # انتخاب نهایی پنل داخل provision_reseller_fixed_product انجام می‌شود
+        # تا همان منطق fallback در همه مسیرها یکسان باشد.
         server = await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id)
         if not server or not server["is_active"]:
-            await call.answer("پنل نمایندگی تنظیم نشده یا غیرفعال است.", show_alert=True); return
+            product_server_id = item.get("provision_server_id")
+            if product_server_id:
+                candidate = await asyncio.to_thread(reseller_backend.get_panel_server, product_server_id)
+                if candidate and candidate["is_active"]:
+                    server = candidate
+        if not server or not server["is_active"]:
+            await call.answer("برای این محصول هیچ پنل فعالی برای ساخت کانفیگ پیدا نشد.", show_alert=True); return
         await state.clear(); await state.set_state(ResellerFlow.waiting_fixed_product_username)
         await state.update_data(fixed_product_id=product_id, panel_server_id=server["id"])
         await call.answer()

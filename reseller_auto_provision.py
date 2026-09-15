@@ -246,9 +246,21 @@ async def provision_reseller_fixed_product(main_db: Database, owner_id: int, pro
     if not volume_gb or volume_gb <= 0:
         raise ProvisionError("حجم محصول تنظیم نشده است.")
     duration_days = product["duration_days"] if product["duration_days"] is not None else 30
+    # برای محصولات آماده، اول پنل اختصاصی نماینده را استفاده می‌کنیم؛
+    # اگر ادمین پنل اختصاصی برای نماینده تعیین نکرده باشد، خودِ پنل
+    # تعریف‌شده روی محصول (provision_server_id) باید به‌عنوان fallback
+    # استفاده شود. در غیر این صورت داشتن یک محصول auto-provision عملاً
+    # برای نماینده غیرقابل استفاده می‌شد و پیام «پنل نمایندگی تنظیم نشده»
+    # نمایش داده می‌شد، حتی وقتی محصول خودش پنل معتبر داشت.
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
-        raise ProvisionError("سرور ساخت کانفیگ برای نماینده تنظیم نشده یا غیرفعال است؛ ادمین باید یک پنل فعال برای نمایندگی تعیین کند.")
+        product_panel_id = product.get("provision_server_id")
+        if product_panel_id:
+            candidate = main_db.get_panel_server(product_panel_id)
+            if candidate and candidate["is_active"]:
+                server = candidate
+    if not server or not server["is_active"]:
+        raise ProvisionError("پنل فعال برای ساخت این محصول پیدا نشد؛ پنل نمایندگی یا پنل خود محصول را بررسی کنید.")
     provider = get_provider(server)
     built=[]
     try:
