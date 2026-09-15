@@ -4290,14 +4290,21 @@ def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(re
         if body.auto_provision_volume_gb == 0 and not effective_server_id:
             raise HTTPException(status_code=400, detail="حجم نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
 
+    # نکته: edit_product برای provision_server_id/auto_provision_volume_gb از سنتینل
+    # Ellipsis استفاده می‌کند (یعنی «بدون تغییر»)؛ پس این دو را فقط وقتی صراحتاً
+    # مقداردهی شده‌اند پاس می‌دهیم، وگرنه ممکن است به‌اشتباه NULL شوند.
+    edit_kwargs = {}
+    if provision_server_id is not None:
+        edit_kwargs["provision_server_id"] = provision_server_id
+    if body.auto_provision_volume_gb is not None:
+        edit_kwargs["auto_provision_volume_gb"] = body.auto_provision_volume_gb
     db.edit_product(
         product_id,
         name=body.name.strip() if body.name else None,
         price=body.price,
         description=body.description,
         duration_days=body.duration_days,
-        provision_server_id=provision_server_id,
-        auto_provision_volume_gb=body.auto_provision_volume_gb,
+        **edit_kwargs,
     )
     if body.price is not None and body.price != old_product["price"]:
         db.log_admin_action(
