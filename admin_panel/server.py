@@ -3072,7 +3072,7 @@ def _set_main_bot_fsm_state(chat_id: int, state: Optional[str], data: Optional[d
 @app.get("/api/reseller-panels-lite")
 def api_reseller_panels_lite(admin=Depends(require_permission("resellers"))):
     """لیست سبک پنل‌ها (فقط id/name) برای انتخاب‌گرها؛ بدون نیاز به مجوز «panels»."""
-    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
+    return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True) if s["used_for_reseller"]]
 
 
 # ------------------------------------------------- reseller bots (سطح ۱/کامل) --
@@ -3303,7 +3303,17 @@ class ResellerCreditBody(BaseModel):
 
 @app.post("/api/resellers/{tg_id}/credit")
 async def api_adjust_reseller_credit(tg_id: int, body: ResellerCreditBody, admin=Depends(require_permission("resellers"))):
-    (await asyncio.to_thread(db.adjust_reseller_credit, tg_id, body.delta_gb, admin_id=admin["id"], reason=body.reason or "تنظیم از پنل وب"))
+    if body.delta_gb == 0:
+        raise HTTPException(400, "مقدار اعتبار نمی‌تواند صفر باشد.")
+    if not db.is_reseller(tg_id):
+        raise HTTPException(400, "این کاربر نماینده فعال نیست.")
+    try:
+        await asyncio.to_thread(
+            db.adjust_reseller_credit, tg_id, body.delta_gb,
+            admin_id=admin["id"], reason=body.reason or "تنظیم از پنل وب",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_credit_adjust",
         f"نماینده {tg_id} به میزان {body.delta_gb:,} گیگ (پنل وب - {admin['username']})",
@@ -3378,6 +3388,10 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
         product = db.get_product(body.supply_product_id)
         if not product or not product["is_active"] or not product["is_auto_provision"]:
             raise HTTPException(400, "محصول انتخاب‌شده فعال یا خودکار-ساز نیست.")
+    if body.panel_server_id is not None:
+        panel = db.get_panel_server(body.panel_server_id)
+        if not panel or not panel["is_active"] or not panel["used_for_reseller"]:
+            raise HTTPException(400, "پنل انتخاب‌شده فعال نیست یا برای نمایندگی مجاز نشده است.")
     if body.owner_name is not None:
         db.update_user_profile(tg_id, first_name=body.owner_name)
     if body.enabled is not None:
@@ -3668,6 +3682,11 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         if body.volume_gb <= 0:
             raise HTTPException(400, "حجم اعتبار اولیه باید عددی مثبت باشد.")
         volume_gb = body.volume_gb
+
+    if body.panel_server_id is not None:
+        panel = db.get_panel_server(body.panel_server_id)
+        if not panel or not panel["is_active"] or not panel["used_for_reseller"]:
+            raise HTTPException(400, "پنل انتخاب‌شده فعال نیست یا برای نمایندگی مجاز نشده است.")
 
     request_text = (body.note or "").strip() or "ثبت مستقیم توسط ادمین از پنل وب"
     request_id = (await asyncio.to_thread(
