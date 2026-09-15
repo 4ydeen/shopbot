@@ -25,6 +25,14 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+
+class DuplicateBotTokenError(Exception):
+    """توکن بات قبلاً برای یک بات نمایندگی دیگر ثبت شده (قید UNIQUE ستون bot_token).
+
+    رفع باگ: register_reseller_bot قبلاً این IntegrityError احتمالی (رقابت دو ثبت‌نام
+    هم‌زمان با دقیقاً یک توکن یکسان) را مدیریت نمی‌کرد و به‌صورت خام بالا می‌رفت؛
+    الان به یک خطای مشخص تبدیل می‌شود تا صدازننده پیام قابل‌فهم به کاربر نشان دهد."""
+
 # مجوزهای granular پنل وب مدیریت. هر ادمین (به‌جز owner که همیشه دسترسی کامل
 # دارد) یک زیرمجموعه دلخواه از این کلیدها را می‌تواند داشته باشد.
 WEB_ADMIN_PERMISSIONS = (
@@ -144,6 +152,11 @@ DEFAULT_SETTINGS = {
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
     "referral_commission_max_count": "0",  # حداکثر تعداد نفراتی که پورسانت خریدشان تعلق می‌گیرد (0 = نامحدود)
+    # کارمزد نماینده‌ی «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک): روی هر خرید
+    # (نه فقط اولین خرید) مشتریانی که با لینک این نماینده وارد شده‌اند، این درصد
+    # به کیف پول خودِ نماینده تعلق می‌گیرد.
+    "reseller_inline_commission_enabled": "1",
+    "reseller_inline_commission_percent": "10",
     # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
     "referral_free_config_threshold": "10",  # تعداد دعوت لازم
@@ -248,6 +261,18 @@ DEFAULT_SETTINGS = {
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
     "miniapp_enabled": "1",
     "reseller_request_enabled": "1",
+    # روشن/خاموش سراسری هرکدام از ۵ محور فرم درخواست نمایندگی سطح ۲ (بند ۶ اسپک).
+    # اگر مالک بخواهد یک محور را کلاً از فرم درخواست حذف کند (نه فقط رد کردنش توسط
+    # کاربر)، همین کلیدها را از پنل ادمین (API) به "0" تغییر می‌دهد.
+    "reseller_axis_bot_dedicated_enabled": "1",
+    "reseller_axis_bot_inline_link_enabled": "1",
+    "reseller_axis_bot_none_enabled": "1",
+    "reseller_axis_webpanel_enabled": "1",
+    "reseller_axis_miniapp_enabled": "1",
+    "reseller_axis_supply_volume_enabled": "1",
+    "reseller_axis_supply_fixed_product_enabled": "1",
+    # لیست id محصولات مجاز برای مدل تامین «محصول آماده»، جدا با کاما؛ خالی یعنی همه‌ی محصولات مجازند.
+    "reseller_fixed_product_ids": "",
     # حداقل مبلغ مجاز برای هر روش پرداخت (تومان). 0 یعنی بدون محدودیت.
     "min_amount_wallet_topup": "1000",  # حداقل مبلغ شارژ کیف پول
     "min_amount_card": "0",             # حداقل مبلغ برای پرداخت کارت‌به‌کارت دستی
@@ -556,6 +581,10 @@ class Database:
                     referral_first_purchase_rewarded INTEGER DEFAULT 0,
                     referral_invite_bonus_given INTEGER DEFAULT 0,
                     referral_free_config_given INTEGER DEFAULT 0,
+                    owner_reseller_id INTEGER,
+                    inline_reseller_enabled INTEGER DEFAULT 0,
+                    reseller_supply_model TEXT DEFAULT 'volume_credit',
+                    fixed_product_main_id INTEGER,
                     joined_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -688,6 +717,8 @@ class Database:
                     db_path TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1,
                     link_slug TEXT UNIQUE,
+                    has_live_bot INTEGER DEFAULT 1,
+                    miniapp_enabled INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -765,6 +796,7 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
                 CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
+                CREATE INDEX IF NOT EXISTS idx_users_owner_reseller_id ON users(owner_reseller_id);
                 CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
                 CREATE INDEX IF NOT EXISTS idx_configs_product_id ON configs(product_id);
                 CREATE INDEX IF NOT EXISTS idx_configs_product_unused ON configs(product_id, is_used);
@@ -1021,11 +1053,39 @@ class Database:
                     owner_telegram_id INTEGER,
                     reject_reason TEXT,
                     reviewed_by INTEGER,
+                    wants_custom_config INTEGER DEFAULT 0,
+                    supply_model TEXT DEFAULT 'volume_credit',
+                    supply_product_id INTEGER,
+                    supply_qty INTEGER,
+                    bot_choice TEXT DEFAULT 'dedicated',
+                    wants_web_panel INTEGER DEFAULT 0,
+                    wants_miniapp INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_requests_user ON reseller_requests(user_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_requests_status ON reseller_requests(status);
+
+                CREATE TABLE IF NOT EXISTS reseller_product_credit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reseller_id INTEGER NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    qty_remaining INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(reseller_id, product_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_product_credit_reseller ON reseller_product_credit(reseller_id);
+
+                CREATE TABLE IF NOT EXISTS reseller_inline_commission_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_reseller_id INTEGER NOT NULL,
+                    buyer_id INTEGER NOT NULL,
+                    paid_amount INTEGER NOT NULL,
+                    commission_amount INTEGER NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_inline_commission_owner ON reseller_inline_commission_log(owner_reseller_id);
 
                 -- ===================== پنل مدیریت وب مستقل (خارج از تلگرام) =====================
                 CREATE TABLE IF NOT EXISTS web_admins (
@@ -1106,6 +1166,35 @@ class Database:
             self._migrate_columns(conn)
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
+
+            # رفع باگ: این فایل دیتابیس ممکن است از یک بات نمایندگیِ حذف‌شده‌ی قبلی
+            # باقی مانده باشد (مثلاً ادمین موقع حذف نماینده گزینه‌ی «پاک نشود» را
+            # زده، و یک نماینده‌ی تازه بعداً با همان یوزرنیم بات ثبت‌نام کرده - چون
+            # مسیر فایل فقط از روی یوزرنیم بات ساخته می‌شود). قبلاً چون همه‌جا از
+            # CREATE TABLE IF NOT EXISTS استفاده شده، owner قدیمی در admins دست‌نخورده
+            # می‌ماند و INSERT OR IGNORE بالا owner جدید را فقط *اضافه* می‌کند - نتیجه
+            # دو ردیف با role='owner' بود و get_owner_telegram_id() (که LIMIT 1 می‌زند)
+            # می‌توانست owner قدیمی و غلط را برگرداند، یعنی کل اعتبار حجمی/تشخیص
+            # مالکیت این بات نماینده به فرد اشتباه (نماینده‌ی حذف‌شده‌ی قبلی) می‌رفت.
+            # این چک باید بعد از _migrate_columns باشد چون ستون role در نصب‌های
+            # خیلی قدیمی/دیتابیس تازه‌ساز با ALTER TABLE همان‌جا اضافه می‌شود، نه در
+            # CREATE TABLE بالا. اگر owner ثبت‌شده‌ی فعلی با owner_id تازه فرق دارد،
+            # یعنی این قطعاً داده‌ی یک نصب/مالک دیگر است - جدول admins برای این
+            # instance از صفر ساخته می‌شود تا مالکیت همیشه بدون ابهام مشخص باشد
+            # (نگه‌داشتن کاربران/سفارش‌های قدیمی به‌عنوان «پشتیبان» به‌عهده‌ی خودِ
+            # فایل دیتابیس است، نه این تابع).
+            existing_owner = conn.execute(
+                "SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1"
+            ).fetchone()
+            if existing_owner and existing_owner["telegram_id"] != owner_id:
+                logger.warning(
+                    "init_db: owner قدیمی (%s) این دیتابیس با owner تازه (%s) فرق دارد؛ "
+                    "احتمالاً فایل از یک نماینده‌ی حذف‌شده‌ی قبلی باقی مانده - جدول admins بازسازی می‌شود.",
+                    existing_owner["telegram_id"], owner_id,
+                )
+                conn.execute("DELETE FROM admins")
+                conn.execute("INSERT INTO admins (telegram_id) VALUES (?)", (owner_id,))
+
             # اطمینان از این‌که همیشه مالک اصلی (از env) نقش «owner» را داشته باشد،
             # چه در نصب تازه و چه در ارتقای نصب‌های قدیمی‌تر که این ستون را نداشتند.
             conn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (owner_id,))
@@ -1124,6 +1213,7 @@ class Database:
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
         "custom_config_history", "reseller_credit_log", "reseller_requests",
+        "reseller_product_credit", "reseller_inline_commission_log",
         "payment_webhook_logs", "web_push_subscriptions", "temp_messages",
         "settings",
     )
@@ -1169,6 +1259,10 @@ class Database:
     def _migrate_columns(self, conn):
         migrations = [
             ("users", "referred_by", "INTEGER"),
+            ("users", "owner_reseller_id", "INTEGER"),
+            ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
+            ("users", "reseller_supply_model", "TEXT DEFAULT 'volume_credit'"),
+            ("users", "fixed_product_main_id", "INTEGER"),
             ("users", "referral_credit", "INTEGER DEFAULT 0"),
             ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
             ("users", "referral_invite_bonus_given", "INTEGER DEFAULT 0"),
@@ -1203,6 +1297,8 @@ class Database:
             ("reseller_bots", "web_panel_enabled", "INTEGER DEFAULT 0"),
             ("reseller_bots", "web_panel_setup_token", "TEXT"),
             ("reseller_bots", "web_panel_setup_token_created_at", "TEXT"),
+            ("reseller_bots", "has_live_bot", "INTEGER DEFAULT 1"),
+            ("reseller_bots", "miniapp_enabled", "INTEGER DEFAULT 1"),
             ("crypto_invoices", "expires_at", "TEXT"),
             # ساخت کانفیگ شخصی: سفارش‌های این نوع از همان جدول orders رد می‌شوند
             # (تا کارت‌به‌کارت/کیف‌پول/کریپتو بدون تغییر کار کنند) و product_id
@@ -1258,6 +1354,22 @@ class Database:
             ("reseller_requests", "reviewed_by", "INTEGER"),
             ("reseller_requests", "created_at", "TEXT"),
             ("reseller_requests", "updated_at", "TEXT"),
+            ("reseller_requests", "wants_custom_config", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "supply_model", "TEXT DEFAULT 'volume_credit'"),
+            ("reseller_requests", "supply_product_id", "INTEGER"),
+            ("reseller_requests", "supply_qty", "INTEGER"),
+            ("reseller_requests", "bot_choice", "TEXT DEFAULT 'dedicated'"),
+            ("reseller_requests", "wants_web_panel", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "wants_miniapp", "INTEGER DEFAULT 0"),
+            # رفع باگ: قبلاً وضعیت pending_review در طول کل مراحل «انتخاب پنل» و
+            # «تعیین قیمت» ثابت می‌ماند، پس اگر دو ادمین senior هم‌زمان روی یک
+            # درخواست کار می‌کردند، هر دو می‌توانستند پنل انتخاب کنند و قیمت
+            # بفرستند بدون این‌که از کار همدیگر خبردار شوند (آخری بی‌سروصدا
+            # رونویسی می‌کرد). claimed_by یک قفل خوش‌بینانه‌ی ساده است: اولین
+            # ادمینی که «تایید و تعیین هزینه» را می‌زند این درخواست را claim
+            # می‌کند و تا وقتی قیمت را نهایی نکند یا خودش/ادمین دیگری آن را رد
+            # نکند، ادمین دوم پیام «توسط ادمین دیگری در حال بررسی است» می‌بیند.
+            ("reseller_requests", "claimed_by", "INTEGER"),
             ("web_admins", "permissions", "TEXT"),
             ("admin_logs", "record_type", "TEXT"),
             ("admin_logs", "record_id", "TEXT"),
@@ -1299,6 +1411,22 @@ class Database:
             ("configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "connect_alert_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
+            # آینه‌ی محلیِ پنل اعتبار حجمی نمایندگی (رفع باگ): بات‌های نمایندگی هر
+            # کدام دیتابیس sqlite جدای خودشان را دارند و panel_servers.id بین این
+            # دو دیتابیس هیچ ارتباطی ندارد. reseller_auto_provision.py برای ساخت
+            # کاربر واقعی از پنلِ ثبت‌شده در دیتابیس بات اصلی استفاده می‌کند، ولی
+            # add_custom_config باید رکورد را در دیتابیس همین بات نمایندگی (که
+            # FOREIGN KEY(panel_server_id) به panel_servers خودش دارد) ذخیره کند.
+            # قبلاً همان id عددی بات اصلی مستقیم پاس داده می‌شد که تقریباً همیشه در
+            # جدول panel_servers بات نمایندگی وجود نداشت (این بات‌ها معمولاً هیچ
+            # پنلی از خودشان ندارند) و INSERT با FOREIGN KEY constraint failed شکست
+            # می‌خورد - چون داخل try/except بی‌صدا بود، مشتری اکانتش را واقعاً
+            # می‌گرفت ولی هیچ‌جای بات نمایندگی ثبت نمی‌شد (نه در «سرویس‌های من»، نه
+            # در یادآورهای تمدید/اتمام حجم). get_or_create_mirror_panel_server یک
+            # ردیف محلی معادل همان پنل می‌سازد/به‌روز می‌کند و mirror_source_id
+            # ارتباط پایدار بین دو دیتابیس را نگه می‌دارد.
+            ("panel_servers", "mirror_source_id", "INTEGER"),
+            ("panel_servers", "is_mirror", "INTEGER DEFAULT 0"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1691,6 +1819,42 @@ class Database:
     def mark_test_used(self, tg_id: int):
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET test_used=test_used+1 WHERE telegram_id=?", (tg_id,))
+
+    def try_reserve_test_slot(self, tg_id: int, max_allowed: int) -> bool:
+        """رفع باگ ریس‌کاندیشن: قبلاً همه‌جا (بات، مینی‌اپ) الگو این بود که اول
+        test_used در پایتون با یک SELECT جدا چک شود، بعد کانفیگ تست واقعاً روی
+        پنل ساخته شود (این مرحله می‌تواند طول بکشد - تماس شبکه‌ای با پنل)، و فقط
+        در انتها mark_test_used صدا زده شود. بین «چک» و «mark» هیچ قفلی نبود، پس
+        چند درخواست همزمان از یک کاربر (دبل‌تپ روی دکمه، یا چند ریکوئست موازی به
+        API مینی‌اپ) همگی از همان چک اولیه (test_used هنوز صفر) رد می‌شدند و هر
+        کدام یک کانفیگ تست واقعی می‌ساختند - یعنی هم محدودیت «یک تست در هر
+        کاربر» دور زده می‌شد و هم (در بات‌های نمایندگی) هر تلاش واقعاً از اعتبار
+        حجمی نماینده کم می‌کرد.
+
+        این تابع دقیقاً همان الگوی اتمیک consume_reseller_credit/mark_used_once
+        را برای شمارنده‌ی test_used پیاده می‌کند: با یک UPDATE...WHERE اتمیک،
+        سهمیه را *قبل* از تماس با پنل رزرو می‌کند. True یعنی این فراخوانی واقعاً
+        برنده‌ی رزرو بوده (باید ادامه دهد)؛ False یعنی سهمیه از قبل توسط همین یا
+        یک درخواست هم‌زمان دیگر مصرف شده (باید رد شود). اگر بعد از رزرو موفق،
+        ساخت کانفیگ روی پنل شکست بخورد، صدازننده باید release_test_slot را صدا
+        بزند تا این سهمیه به کاربر برگردد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET test_used=test_used+1 WHERE telegram_id=? AND test_used<?",
+                (tg_id, max_allowed),
+            )
+            return cur.rowcount > 0
+
+    def release_test_slot(self, tg_id: int):
+        """جفتِ try_reserve_test_slot: وقتی رزرو شد ولی ساخت کانفیگ روی پنل بعداً
+        شکست خورد (مثلاً اعتبار هم‌زمان توسط خرید دیگری مصرف شد یا خودِ پنل خطا
+        داد)، سهمیه‌ی رزروشده باید برگردد تا کاربر واقعاً بتواند دوباره تلاش کند.
+        WHERE test_used>0 جلوی منفی‌شدن را در حالت‌های لبه‌ای (مثل ریست دستی
+        همزمانِ ادمین) می‌گیرد."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET test_used=test_used-1 WHERE telegram_id=? AND test_used>0", (tg_id,)
+            )
 
     def reset_all_test_usage(self) -> list:
         """test_used همه‌ی کاربرانی که قبلاً کانفیگ تست گرفته‌اند را صفر می‌کند تا
@@ -2239,6 +2403,16 @@ class Database:
                 "SELECT p.*, c.name as category_name FROM products p "
                 "JOIN categories c ON p.category_id=c.id ORDER BY c.sort_order, p.id"
             ).fetchall()
+
+    def get_reseller_fixed_products(self):
+        """محصولات مجاز برای مدل تامین «محصول آماده» در فرم درخواست نمایندگی سطح ۲
+        (بند ۶ اسپک)؛ اگر ادمین لیستی انتخاب نکرده باشد (تنظیم خالی)، همه‌ی محصولات فعال برگردانده می‌شوند."""
+        raw = (self.get_setting("reseller_fixed_product_ids", "") or "").strip()
+        products = [p for p in self.get_all_products() if p["is_active"]]
+        if not raw:
+            return products
+        allowed_ids = {int(x) for x in raw.split(",") if x.strip().isdigit()}
+        return [p for p in products if p["id"] in allowed_ids]
 
     def get_product(self, product_id: int):
         with self._get_conn() as conn:
@@ -3176,6 +3350,126 @@ class Database:
                         "UPDATE users SET referred_by=? WHERE telegram_id=?", (referrer_tg_id, user_tg_id)
                     )
 
+    # -------------------------------------------------------------------
+    # نمایندگی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
+    # -------------------------------------------------------------------
+
+    def enable_inline_reseller(self, owner_tg_id: int):
+        """این نماینده گزینه‌ی «لینک اختصاصی داخل بات اصلی» را دارد؛ یعنی لینک
+        ref اختصاصی‌اش (resref_<id>) و صفحه‌ی آمار برایش فعال می‌شود."""
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET inline_reseller_enabled=1 WHERE telegram_id=?", (owner_tg_id,))
+
+    def disable_inline_reseller(self, owner_tg_id: int):
+        """رفع باگ: قبلاً هیچ تابع متقابلی برای enable_inline_reseller وجود نداشت -
+        یعنی نماینده‌ی «لینک اختصاصی داخل بات اصلی» بعد از فعال‌شدن، هیچ‌وقت از هیچ
+        مسیر ادمینی (حذف نماینده، پاک‌سازی کاربران یتیم) واقعاً غیرفعال نمی‌شد و
+        لینک/کارمزدش برای همیشه فعال می‌ماند. این فقط لینک را می‌بندد (لینک تازه
+        دیگر owner_reseller_id جدید ثبت نمی‌کند و _apply_inline_reseller_commission
+        دیگر کارمزدی واریز نمی‌کند)؛ عمداً owner_reseller_id مشتریانی که قبلاً به
+        این نماینده وصل شده‌اند را پاک نمی‌کند - چون آن یک برچسب تاریخی/گزارشی
+        است، نه یک اجازه‌ی فعال، و می‌تواند اگر بعداً همین نماینده دوباره فعال شد
+        بدون گم‌شدن سابقه‌ی مشتریانش برگردد."""
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET inline_reseller_enabled=0 WHERE telegram_id=?", (owner_tg_id,))
+
+    def is_inline_reseller(self, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT inline_reseller_enabled FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            return bool(row and row["inline_reseller_enabled"])
+
+    def set_owner_reseller_id(self, user_tg_id: int, owner_tg_id: int):
+        """برچسب دائمی «این مشتری مالِ کدام نماینده‌ی لینک‌محور است» — مثل
+        set_referred_by، فقط بار اول ثبت می‌شود و دیگر تغییر نمی‌کند، و کاملاً
+        مستقل از سیستم referred_by (یک کاربر می‌تواند هم‌زمان توسط یک دوست
+        referred شده باشد و هم مشتریِ یک نماینده‌ی لینک‌محور باشد)."""
+        if user_tg_id == owner_tg_id:
+            return
+        with self._get_conn() as conn:
+            owner_exists = conn.execute(
+                "SELECT 1 FROM users WHERE telegram_id=? AND inline_reseller_enabled=1", (owner_tg_id,)
+            ).fetchone()
+            if owner_exists:
+                # رفع باگ: قبلاً اینجا اول با یک SELECT جدا چک می‌شد که
+                # owner_reseller_id هنوز NULL است و بعد یک UPDATE بدون قید انجام
+                # می‌شد؛ بین این دو مرحله هیچ قفلی نبود، پس دو /start تقریباً
+                # هم‌زمان با دو لینک نماینده‌ی متفاوت (مثلاً باز شدن دوباره‌ی همان
+                # دیپ‌لینک در دو تب/دستگاه) می‌توانستند هر دو از NULL بودن مطمئن
+                # شوند و آخرین UPDATE، نتیجه‌ی اولی را بی‌سروصدا رونویسی کند. حالا
+                # خودِ UPDATE با WHERE owner_reseller_id IS NULL اتمیک است.
+                conn.execute(
+                    "UPDATE users SET owner_reseller_id=? WHERE telegram_id=? AND owner_reseller_id IS NULL",
+                    (owner_tg_id, user_tg_id),
+                )
+
+    def _apply_inline_reseller_commission(self, buyer_tg_id: int, paid_amount: int):
+        """روی هر خرید تسویه‌شده (نه فقط اولین خرید) از مشتریانی که owner_reseller_id
+        دارند، درصدی کارمزد به کیف پول (referral_credit) خودِ نماینده اضافه می‌شود.
+        این تابع را reward_referrer_if_first_purchase صدا می‌زند تا نیازی به تغییر
+        هیچ‌کدام از ~۱۷ نقطه‌ی تکمیل سفارش در کل پروژه (بات، پنل ادمین، مینی‌اپ،
+        وبهوک درگاه‌ها) نباشد."""
+        if not paid_amount or paid_amount <= 0:
+            return
+        if self.get_setting("reseller_inline_commission_enabled", "1") != "1":
+            return
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT owner_reseller_id FROM users WHERE telegram_id=?", (buyer_tg_id,)
+            ).fetchone()
+            owner_id = row["owner_reseller_id"] if row else None
+        if not owner_id:
+            return
+        # رفع باگ: قبلاً اینجا فقط owner_reseller_id مشتری چک می‌شد، نه اینکه خودِ
+        # نماینده هنوز inline_reseller_enabled باشد یا نه. یعنی حتی بعد از اینکه
+        # ادمین با disable_inline_reseller نمایندگی را می‌بست، مشتریانی که قبلاً
+        # به او وصل شده بودند همچنان تا ابد برایش کارمزد تولید می‌کردند - چون این
+        # برچسبِ owner_reseller_id عمداً هنگام غیرفعال‌سازی پاک نمی‌شود (برای حفظ
+        # سابقه/امکان فعال‌سازی مجدد بدون گم‌شدن مشتریان). این چک آن رخنه را می‌بندد.
+        if not self.is_inline_reseller(owner_id):
+            return
+        percent = int(self.get_setting("reseller_inline_commission_percent", "10") or 0)
+        if percent <= 0:
+            return
+        commission = (paid_amount * percent) // 100
+        if commission <= 0:
+            return
+        self.add_wallet_credit(owner_id, commission)
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO reseller_inline_commission_log (owner_reseller_id, buyer_id, paid_amount, commission_amount) "
+                "VALUES (?, ?, ?, ?)",
+                (owner_id, buyer_tg_id, paid_amount, commission),
+            )
+
+    def get_inline_reseller_stats(self, owner_tg_id: int) -> dict:
+        with self._get_conn() as conn:
+            customers = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE owner_reseller_id=?", (owner_tg_id,)
+            ).fetchone()["c"]
+            row = conn.execute(
+                "SELECT COUNT(*) cnt, COALESCE(SUM(commission_amount),0) total "
+                "FROM reseller_inline_commission_log WHERE owner_reseller_id=?",
+                (owner_tg_id,),
+            ).fetchone()
+            return {
+                "customers": customers, "paid_orders": row["cnt"], "total_commission": row["total"],
+            }
+
+    def list_inline_resellers(self):
+        """برای نمایش در پنل ادمین (بند ۴ از موارد باقی‌مانده): لیست همه‌ی
+        نماینده‌های «لینک اختصاصی داخل بات اصلی» به‌همراه آمار مشتری/کارمزدشان."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT u.telegram_id, u.username, u.first_name, u.referral_credit, "
+                "(SELECT COUNT(*) FROM users c WHERE c.owner_reseller_id=u.telegram_id) AS customers, "
+                "(SELECT COUNT(*) FROM reseller_inline_commission_log l WHERE l.owner_reseller_id=u.telegram_id) AS paid_orders, "
+                "(SELECT COALESCE(SUM(commission_amount),0) FROM reseller_inline_commission_log l WHERE l.owner_reseller_id=u.telegram_id) AS total_commission "
+                "FROM users u WHERE u.inline_reseller_enabled=1 ORDER BY total_commission DESC"
+            ).fetchall()
+            return rows
+
     def get_referral_stats(self, user_tg_id: int) -> dict:
         with self._get_conn() as conn:
             count = conn.execute(
@@ -3205,6 +3499,27 @@ class Database:
         """حالت ۱ از سه مدل زیرمجموعه‌گیری: پورسانت درصدی، فقط برای اولین خرید هر
         زیرمجموعه، و در صورت تنظیم بودن سقف (referral_commission_max_count)، فقط برای
         همان تعداد اول از زیرمجموعه‌هایی که خرید کرده‌اند."""
+        # کارمزد نماینده‌ی لینک‌محور (بند ۳.۱ اسپک) کاملاً مستقل از سیستم referred_by
+        # است و روی هر خرید (نه فقط اولین) اعمال می‌شود؛ همین‌جا صدا زده می‌شود چون
+        # این تابع از قبل در تمام نقاط تکمیل سفارش پروژه صدا زده می‌شود.
+        self._apply_inline_reseller_commission(referred_user_tg_id, paid_amount)
+
+        # رفع باگ: بات اصلی (main.py)، بک‌اند مینی‌اپ/وب‌هوک‌ها (miniapp/server.py) و
+        # پنل ادمین (admin_panel/server.py) سه پروسه‌ی کاملاً جدا هستند که هرکدام
+        # instance و قفل پایتونیِ self._lock مستقل خودشان را روی همین یک فایل
+        # SQLite دارند - آن قفل فقط داخل همان یک پروسه اثر دارد. قبلاً اینجا ابتدا
+        # با یک SELECT جدا خوانده می‌شد که آیا referral_first_purchase_rewarded
+        # هنوز صفر است، و بعد یک UPDATE بدون قید روی مقدار قبلی آن را ۱ می‌کرد -
+        # دقیقاً همان الگوی دومرحله‌ای بدون قفل که در consume_reseller_credit و
+        # approve_topup و claim_order از قبل با UPDATE...WHERE اتمیک بسته شده بود،
+        # فقط اینجا جا افتاده بود. اگر دو «اولین خرید» تقریباً هم‌زمان برای یک
+        # زیرمجموعه در دو پروسه‌ی مختلف تکمیل می‌شد (مثلاً یکی با وب‌هوک درگاه در
+        # مینی‌اپ و دیگری با تایید دستی رسید در پنل ادمین)، هر دو می‌توانستند فلگ
+        # را هنوز صفر ببینند و هر دو UPDATE را بزنند - یعنی کارمزد ارجاع دوبار به
+        # کیف‌پول معرف واریز می‌شد. الان مثل بقیه‌ی جاهای پروژه، خودِ UPDATE با
+        # WHERE referral_first_purchase_rewarded=0 اتمیک است و ادامه‌ی کار
+        # (بررسی سقف/واریز کارمزد) فقط وقتی انجام می‌شود که همین فراخوانی واقعاً
+        # برنده‌ی این انتقال بوده - یعنی cur.rowcount>0.
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT referred_by, referral_first_purchase_rewarded FROM users WHERE telegram_id=?",
@@ -3226,17 +3541,28 @@ class Database:
                     (referrer_id,),
                 ).fetchone()["c"]
                 if already >= max_count:
-                    # سقف پر شده؛ همچنان به‌عنوان «رویدادِ اولین خرید» علامت می‌زنیم تا دوباره بررسی نشود
-                    conn.execute(
-                        "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
+                    # سقف پر شده؛ همچنان به‌عنوان «رویدادِ اولین خرید» علامت می‌زنیم تا دوباره
+                    # بررسی نشود - ولی چون این هم یک نوشتنِ یک‌باره روی همین فلگ است، همان
+                    # قید اتمیک لازم است تا اگر هم‌زمان یک فراخوانی دیگر (پیش از رسیدن به این
+                    # شرط) همین ردیف را رد کرده، این یکی رکورد رویداد را دوباره پردازش نکند.
+                    cur = conn.execute(
+                        "UPDATE users SET referral_first_purchase_rewarded=1 "
+                        "WHERE telegram_id=? AND referral_first_purchase_rewarded=0",
                         (referred_user_tg_id,),
                     )
+                    if cur.rowcount == 0:
+                        return None
                     return None
 
-            conn.execute(
-                "UPDATE users SET referral_first_purchase_rewarded=1 WHERE telegram_id=?",
+            cur = conn.execute(
+                "UPDATE users SET referral_first_purchase_rewarded=1 "
+                "WHERE telegram_id=? AND referral_first_purchase_rewarded=0",
                 (referred_user_tg_id,),
             )
+            if cur.rowcount == 0:
+                # فراخوانیِ هم‌زمانِ دیگری (در همین پروسه یا پروسه‌ی دیگر) همین لحظه برنده شد؛
+                # برای جلوگیری از واریز دوبرابرِ کارمزد، اینجا صرف‌نظر می‌کنیم.
+                return None
 
         percent = int(self.get_setting("referral_percent", "10") or 0)
         reward = (paid_amount * percent) // 100
@@ -3512,14 +3838,42 @@ class Database:
     # ثبت‌نام بات‌های نمایندگی (فقط در دیتابیس بات اصلی معنا دارد)
     # -----------------------------------------------------------------------
 
-    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
-                               db_path: str, reseller_level: int = 2) -> int:
+    def get_reseller_owner_display_name(self, tg_id: int) -> str:
+        """نام نمایشی یک نماینده برای ستون reseller_bots.owner_name، وقتی خودِ کاربر
+        (نه ادمین با تایپ دستی) درخواست نمایندگی داده و اسم جداگانه‌ای از او پرسیده
+        نشده است. قبلاً این‌جا به‌اشتباه متن آزادِ توضیحِ درخواست (request_text)
+        گذاشته می‌شد که اسم واقعی کسی نیست و در لیست ادمین گیج‌کننده بود.
+        اولویت: نام‌ونام‌خانوادگی/یوزرنیمِ ثبت‌شده در users، وگرنه خودِ آیدی عددی."""
         with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level),
-            )
+            row = conn.execute(
+                "SELECT first_name, username FROM users WHERE telegram_id=?", (tg_id,)
+            ).fetchone()
+        name = (row["first_name"] or "").strip() if row else ""
+        username = (row["username"] or "").strip() if row else ""
+        if name and username:
+            return f"{name} (@{username})"
+        if name:
+            return name
+        if username:
+            return f"@{username}"
+        return f"کاربر {tg_id}"
+
+    def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
+                               db_path: str, reseller_level: int = 2, has_live_bot: int = 1) -> int:
+        with self._get_conn() as conn:
+            try:
+                cur = conn.execute(
+                    "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level, has_live_bot) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level, 1 if has_live_bot else 0),
+                )
+            except sqlite3.IntegrityError:
+                # رفع باگ: قبلاً این استثنا کنترل‌نشده تا هندلر بالا می‌رفت. چون چکِ
+                # get_reseller_bot_by_token در لحظه‌ی ورود توکن (چند مرحله قبل‌تر از
+                # اینجا) و این INSERT دو عملیات جدا هستند، اگر دقیقاً همان توکن در این
+                # فاصله توسط یک ثبت‌نام دیگر مصرف شود، فقط قید UNIQUE ستون bot_token
+                # جلوی دوباره‌ثبت‌شدن را می‌گیرد؛ اینجا آن را به خطای قابل‌فهم تبدیل می‌کنیم.
+                raise DuplicateBotTokenError(bot_token)
             return cur.lastrowid
 
     def get_reseller_bot_by_token(self, bot_token: str):
@@ -3598,6 +3952,71 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM reseller_bots WHERE id=?", (bot_id,))
 
+    def transfer_reseller_ownership(self, bot_id: int, new_owner_telegram_id: int, new_owner_name: str = None) -> bool:
+        """رفع باگ: edit_reseller_bot فقط owner_telegram_id/owner_name را روی خودِ
+        ردیف reseller_bots عوض می‌کرد - یعنی صرفاً یک برچسب نمایشی در پنل ادمین.
+        سه جای دیگر که «مالک واقعی» این نماینده از آن‌ها خوانده می‌شود دست‌نخورده
+        می‌ماندند: فلگ‌های is_reseller/reseller_credit_gb/reseller_supply_model/
+        fixed_product_main_id/reseller_panel_id روی رکورد کاربر *قدیمی* در همین
+        دیتابیس اصلی، و مهم‌تر از همه role='owner' در جدول admins دیتابیسِ محلیِ
+        خودِ بات نماینده - که reseller_auto_provision.get_owner_telegram_id() از
+        همان‌جا می‌خواند. نتیجه این بود که بعد از «تغییر مالک» در پنل وب، اسم مالک
+        جدید فقط در لیست دیده می‌شد ولی عملاً بات همچنان مالک قبلی را می‌شناخت و
+        اعتبار حجمی هم هنوز از حساب او کسر می‌شد. این تابع هر سه‌جا را با هم عوض
+        می‌کند تا مالکیت واقعاً و به‌طور کامل منتقل شود."""
+        bot_row = self.get_reseller_bot(bot_id)
+        if not bot_row:
+            return False
+        old_owner = bot_row["owner_telegram_id"]
+        if old_owner == new_owner_telegram_id:
+            self.edit_reseller_bot(bot_id, owner_name=new_owner_name)
+            return True
+
+        with self._get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO users (telegram_id) VALUES (?)", (new_owner_telegram_id,))
+            old_row = conn.execute(
+                "SELECT is_reseller, reseller_credit_gb, reseller_supply_model, fixed_product_main_id, "
+                "reseller_panel_id FROM users WHERE telegram_id=?", (old_owner,),
+            ).fetchone()
+            if old_row:
+                conn.execute(
+                    "UPDATE users SET is_reseller=?, reseller_credit_gb=?, reseller_supply_model=?, "
+                    "fixed_product_main_id=?, reseller_panel_id=? WHERE telegram_id=?",
+                    (old_row["is_reseller"], old_row["reseller_credit_gb"], old_row["reseller_supply_model"],
+                     old_row["fixed_product_main_id"], old_row["reseller_panel_id"], new_owner_telegram_id),
+                )
+                conn.execute(
+                    "UPDATE users SET is_reseller=0, reseller_credit_gb=0, reseller_supply_model='volume_credit', "
+                    "fixed_product_main_id=NULL, reseller_panel_id=NULL WHERE telegram_id=?",
+                    (old_owner,),
+                )
+            conn.execute(
+                "UPDATE reseller_bots SET owner_telegram_id=?, owner_name=COALESCE(?, owner_name) WHERE id=?",
+                (new_owner_telegram_id, new_owner_name, bot_id),
+            )
+
+        # هم‌گام‌سازی role='owner' در دیتابیس محلی خودِ بات نماینده (اگر بات زنده/
+        # دیتابیس مجزا دارد؛ برای resellerهای has_live_bot=0 هم همین db_path معتبر
+        # و init_db شده است، پس بدون شرط اضافه امتحان می‌شود).
+        try:
+            from config import resolve_db_path
+            local_path = resolve_db_path(bot_row["db_path"])
+            if os.path.exists(local_path):
+                local_db = type(self)(local_path)
+                with local_db._get_conn() as lconn:
+                    lconn.execute("INSERT OR IGNORE INTO admins (telegram_id) VALUES (?)", (new_owner_telegram_id,))
+                    lconn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (new_owner_telegram_id,))
+                    lconn.execute(
+                        "UPDATE admins SET role='admin' WHERE telegram_id=? AND role='owner'", (old_owner,)
+                    )
+        except Exception:
+            logger.exception(
+                "هم‌گام‌سازی مالک جدید (%s) روی دیتابیس محلی نماینده #%s ناموفق بود؛ "
+                "reseller_bots.owner_telegram_id عوض شد ولی ممکن است بات هنوز مالک قبلی را بشناسد.",
+                new_owner_telegram_id, bot_id,
+            )
+        return True
+
     # ---------------------------------------------------- web panel (reseller) --
 
     def enable_reseller_web_panel(self, bot_id: int) -> str:
@@ -3618,6 +4037,12 @@ class Database:
             conn.execute(
                 "UPDATE reseller_bots SET web_panel_enabled=0, web_panel_setup_token=NULL, "
                 "web_panel_setup_token_created_at=NULL WHERE id=?", (bot_id,)
+            )
+
+    def set_reseller_miniapp_enabled(self, bot_id: int, enabled: bool):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_bots SET miniapp_enabled=? WHERE id=?", (1 if enabled else 0, bot_id)
             )
 
     def regenerate_reseller_web_panel_token(self, bot_id: int) -> str:
@@ -3663,10 +4088,28 @@ class Database:
 
     def purge_reseller_leftovers(self, user_tg_id: int):
         """پرچم نماینده‌بودن، اعتبار حجمی و پنل اختصاصی کاربر را در دیتابیس
-        اصلی صفر/خالی می‌کند؛ برای پاکسازی کامل رد پای یک نمایندگی حذف‌شده."""
+        اصلی صفر/خالی می‌کند؛ برای پاکسازی کامل رد پای یک نمایندگی حذف‌شده.
+
+        رفع باگ: قبلاً reseller_supply_model/fixed_product_main_id اینجا دست‌نخورده
+        می‌ماندند. اگر همین کاربر بعداً دوباره نماینده شود (مثلاً این‌بار با مدل
+        اعتبار حجمی)، get_reseller_supply همچنان مدل/محصولِ نمایندگیِ *قبلی* (که
+        دیگر برایش reseller_product_credit ای وجود ندارد) را برمی‌گرداند و
+        provision_auto_config او را اشتباهاً «مدل محصول آماده با موجودی صفر»
+        می‌دید - یعنی هر خریدی با «موجودی محصول کافی نیست» شکست می‌خورد، درحالی‌که
+        عملاً اعتبار حجمی جدیدش دست‌نخورده و بلااستفاده می‌ماند. حالا این دو فیلد
+        هم به مقدار پیش‌فرض (اعتبار حجمی، بدون محصول ثابت) برمی‌گردند.
+
+        رفع باگ: این تابع inline_reseller_enabled را دست‌نخورده می‌گذاشت، پس یک
+        نماینده‌ی «لینک اختصاصی داخل بات اصلی» (که اصلاً ممکن است هیچ ردیفی در
+        reseller_bots هم نداشته باشد - وقتی نه پنل وب نه مینی‌اپ خواسته) حتی بعد
+        از پاک‌سازی کامل از صفحه‌ی «کاربران یتیم» همچنان لینک/کارمزدش برای همیشه
+        فعال می‌ماند و هیچ راهی برای بستن آن وجود نداشت. الان این‌جا هم
+        inline_reseller_enabled=0 می‌شود."""
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE users SET is_reseller=0, reseller_credit_gb=0, reseller_panel_id=NULL "
+                "UPDATE users SET is_reseller=0, reseller_credit_gb=0, reseller_panel_id=NULL, "
+                "reseller_supply_model='volume_credit', fixed_product_main_id=NULL, "
+                "inline_reseller_enabled=0 "
                 "WHERE telegram_id=?",
                 (user_tg_id,),
             )
@@ -5293,13 +5736,73 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM panel_servers WHERE id=?", (server_id,)).fetchone()
 
-    def get_panel_servers(self, active_only: bool = False):
+    def get_panel_servers(self, active_only: bool = False, include_mirrors: bool = False):
+        """include_mirrors=False (پیش‌فرض) ردیف‌های آینه‌ای که
+        get_or_create_mirror_panel_server برای بات‌های نمایندگی می‌سازد را از
+        لیست «مدیریت پنل‌ها»ی ادمین کنار می‌گذارد - آن‌ها فقط یک کپی داخلی برای
+        رعایت FOREIGN KEY جدول custom_configs هستند و نباید در فرم‌های
+        ادمین/انتخاب پنل به چشم بیایند یا قابل ویرایش/حذف دستی باشند."""
         with self._get_conn() as conn:
-            q = "SELECT * FROM panel_servers"
+            conds = []
             if active_only:
-                q += " WHERE is_active=1"
+                conds.append("is_active=1")
+            if not include_mirrors:
+                conds.append("(is_mirror IS NULL OR is_mirror=0)")
+            q = "SELECT * FROM panel_servers"
+            if conds:
+                q += " WHERE " + " AND ".join(conds)
             q += " ORDER BY id"
             return conn.execute(q).fetchall()
+
+    def get_or_create_mirror_panel_server(self, source_server) -> int:
+        """برای reseller_auto_provision.py: از روی یک ردیف panel_servers که در
+        دیتابیس *دیگری* (بات اصلی) خوانده شده، یک ردیف معادل در دیتابیس همین
+        instance (بات نمایندگی) پیدا یا می‌سازد و id محلی را برمی‌گرداند - چون
+        custom_configs.panel_server_id با FOREIGN KEY فقط به panel_servers
+        *همین* دیتابیس اشاره می‌کند، نه دیتابیسی که source_server از آن آمده.
+        اگر قبلاً برای همین پنل (بر اساس mirror_source_id) یک آینه ساخته شده،
+        همان به‌روزرسانی می‌شود (مثلاً اگر ادمین بعداً آدرس/کلید پنل را عوض
+        کرده) و id قبلی‌اش برمی‌گردد؛ در غیر این صورت یک ردیف تازه ساخته
+        می‌شود. is_mirror=1 باعث می‌شود این ردیف در get_panel_servers()
+        (لیست مدیریت پنل‌های ادمین) دیده نشود، ولی get_panel_server(id) برای
+        عملیات واقعی (تمدید/مصرف/حذف سرویس) کاملاً عادی کار می‌کند."""
+        fields = (
+            "name", "panel_type", "api_url", "api_username", "api_password",
+            "api_key", "template_username", "group_ids", "proxy_settings",
+            "default_group", "xui_inbound_id", "xui_inbound_ids", "xui_sub_base_url",
+        )
+        keys = source_server.keys()
+        values = {f: (source_server[f] if f in keys else None) for f in fields}
+        with self._get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM panel_servers WHERE mirror_source_id=?", (source_server["id"],)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE panel_servers SET name=?, panel_type=?, api_url=?, api_username=?, "
+                    "api_password=?, api_key=?, template_username=?, group_ids=?, proxy_settings=?, "
+                    "default_group=?, xui_inbound_id=?, xui_inbound_ids=?, xui_sub_base_url=?, "
+                    "is_active=1 WHERE id=?",
+                    (values["name"], values["panel_type"], values["api_url"], values["api_username"],
+                     values["api_password"], values["api_key"], values["template_username"],
+                     values["group_ids"], values["proxy_settings"], values["default_group"],
+                     values["xui_inbound_id"], values["xui_inbound_ids"], values["xui_sub_base_url"],
+                     existing["id"]),
+                )
+                return existing["id"]
+            cur = conn.execute(
+                "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, "
+                "api_key, template_username, group_ids, proxy_settings, default_group, xui_inbound_id, "
+                "xui_inbound_ids, xui_sub_base_url, is_active, used_for_custom_config, used_for_test_config, "
+                "used_for_reseller, mirror_source_id, is_mirror) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?, 1)",
+                (values["name"], values["panel_type"], values["api_url"], values["api_username"],
+                 values["api_password"], values["api_key"], values["template_username"],
+                 values["group_ids"], values["proxy_settings"], values["default_group"],
+                 values["xui_inbound_id"], values["xui_inbound_ids"], values["xui_sub_base_url"],
+                 source_server["id"]),
+            )
+            return cur.lastrowid
 
     def get_panel_server_for_usage(self, usage: str):
         """usage: 'custom_config' یا 'test_config' یا 'reseller'. اولین سرور فعالی
@@ -5740,6 +6243,27 @@ class Database:
             ).fetchone()
             return row["reseller_credit_gb"] if row else 0
 
+    def set_reseller_supply_model(self, user_tg_id: int, model: str, product_id: int = None):
+        """مدل تامین نمایندگی (بند ۳.۳ اسپک) روی ردیف کاربر در دیتابیس اصلی ذخیره
+        می‌شود، تا reseller_auto_provision.py که از داخل بات نمایندگی (دیتابیس جدا)
+        به این دیتابیس وصل می‌شود، بدون نیاز به هیچ جدول/تنظیم دیگری بفهمد این
+        نماینده باید از reseller_credit_gb مصرف کند یا از reseller_product_credit."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET reseller_supply_model=?, fixed_product_main_id=? WHERE telegram_id=?",
+                (model, product_id, user_tg_id),
+            )
+
+    def get_reseller_supply(self, user_tg_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT reseller_supply_model, fixed_product_main_id FROM users WHERE telegram_id=?",
+                (user_tg_id,),
+            ).fetchone()
+            if not row:
+                return {"model": "volume_credit", "product_id": None}
+            return {"model": row["reseller_supply_model"] or "volume_credit", "product_id": row["fixed_product_main_id"]}
+
     def set_reseller_status(self, user_tg_id: int, enabled: bool):
         with self._get_conn() as conn:
             conn.execute(
@@ -5758,12 +6282,79 @@ class Database:
                 (user_tg_id, delta_gb, reason, admin_id),
             )
 
+    def consume_reseller_credit(self, user_tg_id: int, amount_gb, reason: str = None, admin_id: int = None) -> bool:
+        """کسر اتمیک اعتبار حجمی نماینده (مدل volume_credit)؛ درست مثل
+        consume_reseller_product_credit برای مدل fixed_product. برخلاف
+        adjust_reseller_credit با دلتای منفی (که فقط یک UPDATE بدون قید بود)، اینجا
+        کسر فقط وقتی واقعاً انجام می‌شود که باقیمانده کافی باشد - همه در یک کوئری
+        اتمیک (UPDATE ... WHERE reseller_credit_gb >= ?). این جلوی رفتن اعتبار به
+        منفی زیر بار هم‌زمان (مثلاً دو خرید مشتریِ یک نماینده در یک لحظه) را می‌گیرد؛
+        قبلاً چک «کافی بودن اعتبار» در پایتون و خودِ کسر دو مرحله‌ی جدا بودند و هیچ
+        قفلی بین‌شان نبود. اگر باقیمانده کافی نباشد، هیچ تغییری اعمال نمی‌شود و
+        False برمی‌گردد تا صدازننده rollback (پاک‌کردن اکانت واقعی روی پنل) را انجام دهد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET reseller_credit_gb = reseller_credit_gb - ? "
+                "WHERE telegram_id=? AND reseller_credit_gb >= ?",
+                (amount_gb, user_tg_id, amount_gb),
+            )
+            if cur.rowcount > 0:
+                conn.execute(
+                    "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                    (user_tg_id, -amount_gb, reason, admin_id),
+                )
+            return cur.rowcount > 0
+
     def get_reseller_credit_log(self, user_tg_id: int, limit: int = 20):
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT * FROM reseller_credit_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
                 (user_tg_id, limit),
             ).fetchall()
+
+    # ------------------------------------------------------------------
+    # موجودی محصول نمایندگی (مدل تامین «محصول آماده»)
+    # ------------------------------------------------------------------
+
+    def get_reseller_product_credit(self, reseller_id: int, product_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT qty_remaining FROM reseller_product_credit WHERE reseller_id=? AND product_id=?",
+                (reseller_id, product_id),
+            ).fetchone()
+            return row["qty_remaining"] if row else 0
+
+    def list_reseller_product_credits(self, reseller_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_product_credit WHERE reseller_id=? ORDER BY id", (reseller_id,)
+            ).fetchall()
+
+    def grant_reseller_product_credit(self, reseller_id: int, product_id: int, qty: int,
+                                       admin_id: int = None, reason: str = None):
+        """افزایش موجودی محصول نماینده (تخصیص اولیه یا شارژ مجدد ادمین)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO reseller_product_credit (reseller_id, product_id, qty_remaining) "
+                "VALUES (?, ?, ?) ON CONFLICT(reseller_id, product_id) "
+                "DO UPDATE SET qty_remaining = qty_remaining + excluded.qty_remaining, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (reseller_id, product_id, qty),
+            )
+            conn.execute(
+                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                (reseller_id, 0, reason or f"تخصیص {qty} عدد از محصول #{product_id}", admin_id),
+            )
+
+    def consume_reseller_product_credit(self, reseller_id: int, product_id: int, qty: int = 1) -> bool:
+        """کسر اتمیک از موجودی محصول نماینده؛ اگر موجودی کافی نبود False برمی‌گرداند."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE reseller_product_credit SET qty_remaining = qty_remaining - ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE reseller_id=? AND product_id=? AND qty_remaining >= ?",
+                (qty, reseller_id, product_id, qty),
+            )
+            return cur.rowcount > 0
 
     def get_resellers(self):
         with self._get_conn() as conn:
@@ -5929,7 +6520,10 @@ class Database:
         "pending_review", "awaiting_payment", "awaiting_payment_review", "awaiting_bot_info",
     )
 
-    def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str) -> int:
+    def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str, wants_custom_config: int = 0,
+                                 supply_model: str = "volume_credit", supply_product_id: int = None,
+                                 supply_qty: int = None, bot_choice: str = "dedicated",
+                                 wants_web_panel: int = 0, wants_miniapp: int = 0) -> int:
         with self._get_conn() as conn:
             # status را صراحتاً اینجا ست می‌کنیم و به مقدار پیش‌فرض ستون در schema
             # تکیه نمی‌کنیم. روی دیتابیس‌های قدیمی‌تر که ستون status از قبل (قبل از
@@ -5940,7 +6534,10 @@ class Database:
             # مستقل از تاریخچه‌ی دیتابیس برای همیشه حل می‌کند.
             known = {
                 "user_id": user_id, "volume_gb": volume_gb, "request_text": request_text,
-                "status": "pending_review",
+                "status": "pending_review", "wants_custom_config": 1 if wants_custom_config else 0,
+                "supply_model": supply_model, "supply_product_id": supply_product_id, "supply_qty": supply_qty,
+                "bot_choice": bot_choice, "wants_web_panel": 1 if wants_web_panel else 0,
+                "wants_miniapp": 1 if wants_miniapp else 0,
             }
             fields = list(known.keys())
             values = list(known.values())
@@ -6005,8 +6602,33 @@ class Database:
         return status in self._RESELLER_REQUEST_OPEN_STATUSES
 
     def admin_cancel_reseller_request(self, request_id: int, admin_id: int):
-        """کنسل دستی یک درخواست نمایندگی توسط ادمین، در هر مرحله‌ای که باشد."""
+        """کنسل دستی یک درخواست نمایندگی توسط ادمین، در هر مرحله‌ای که باشد (حتی اگر
+        claim شده باشد - این عمداً چک claimed_by ندارد تا یک درخواستِ claim-شده‌ی
+        رهاشده هم قابل بستن باشد)."""
         self.set_reseller_request_status(request_id, "cancelled", reviewed_by=admin_id)
+
+    def claim_reseller_request(self, request_id: int, admin_id: int) -> bool:
+        """قفل خوش‌بینانه‌ی اتمیک: فقط وقتی True برمی‌گرداند که درخواست هنوز
+        pending_review و claim‌نشده باشد (یا قبلاً توسط همین ادمین claim شده باشد -
+        مثلاً اگر همان ادمین دوباره روی همان پیام کلیک کند). اگر ادمین دیگری قبلاً
+        claim کرده باشد، False برمی‌گرداند تا صدازننده پیام «توسط ادمین دیگری در حال
+        بررسی است» نشان دهد."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE reseller_requests SET claimed_by=? "
+                "WHERE id=? AND status='pending_review' AND (claimed_by IS NULL OR claimed_by=?)",
+                (admin_id, request_id, admin_id),
+            )
+            return cur.rowcount > 0
+
+    def release_reseller_request_claim(self, request_id: int, admin_id: int):
+        """آزادکردن claim (مثلاً وقتی ادمین با /cancel یا نرفتن به مرحله‌ی بعد منصرف
+        می‌شود) تا ادمین دیگری بتواند این درخواست را بررسی کند."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE reseller_requests SET claimed_by=NULL WHERE id=? AND claimed_by=?",
+                (request_id, admin_id),
+            )
 
     def set_reseller_request_status(self, request_id: int, status: str, **fields):
         cols, values = ["status=?", "updated_at=CURRENT_TIMESTAMP"], [status]
@@ -6031,8 +6653,26 @@ class Database:
             request_id, "awaiting_payment_review", receipt_file_id=file_id, receipt_type=receipt_type
         )
 
-    def approve_reseller_request_payment(self, request_id: int, admin_id: int):
-        self.set_reseller_request_status(request_id, "awaiting_bot_info", reviewed_by=admin_id)
+    def approve_reseller_request_payment(self, request_id: int, admin_id: int) -> bool:
+        """قفل خوش‌بینانه‌ی اتمیک، درست مثل claim_reseller_request برای مرحله‌ی اول.
+
+        رفع باگ: قبلاً این تابع بدون قید status یک UPDATE ساده انجام می‌داد و همه‌ی
+        صدازننده‌ها (بات اصلی، پنل وب، مینی‌اپ) قبل از آن فقط در پایتون
+        req["status"] != "awaiting_payment_review" را چک می‌کردند - یک چک-و-عمل
+        دومرحله‌ای بدون قفل. اگر دو ادمین (یا یک ادمین با دبل‌تپ روی موبایل قبل از
+        ادیت‌شدن پیام) هم‌زمان روی همین درخواست «تایید پرداخت» می‌زدند، هر دو از
+        همان چک پایتونی رد می‌شدند و مراحل بعدی (تخصیص اعتبار/موجودی، ساخت بات
+        نماینده) دوبار اجرا می‌شد - مثلاً اعتبار حجمی نماینده دوبرابر شارژ می‌شد.
+        حالا خودِ UPDATE با WHERE status='awaiting_payment_review' اتمیک است و
+        True فقط وقتی برمی‌گردد که همین فراخوانی واقعاً برنده‌ی این انتقال بوده؛
+        صدازننده باید با False از ادامه‌ی پردازش (اعطای اعتبار/ساخت بات) صرف‌نظر کند."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE reseller_requests SET status='awaiting_bot_info', reviewed_by=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_payment_review'",
+                (admin_id, request_id),
+            )
+            return cur.rowcount > 0
 
     def set_reseller_request_bot(self, request_id: int, token: str, username: str):
         self.set_reseller_request_status(

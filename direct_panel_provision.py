@@ -9,10 +9,13 @@
 روی همان پنل ساخته می‌شود - از دید خریدار دقیقاً مثل خرید از بانک کانفیگ.
 """
 
+import logging
 import random
 import string
 
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+
+logger = logging.getLogger(__name__)
 
 
 class ProvisionError(Exception):
@@ -28,11 +31,15 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
     """محصول باید provision_server_id معتبر داشته باشد. برای هر واحد یک کاربر واقعی
     روی همان پنل ساخته می‌شود. برمی‌گرداند: لیستی از
     {"username": ..., "subscription_url": ..., "volume_gb": ..., "duration_days": ...}
-    در صورت بروز خطا ProvisionError پرتاب می‌شود؛ واحدهایی که تا آن لحظه با موفقیت
-    روی پنل ساخته شده‌اند، در همان لیست خطا هم اشاره می‌شوند تا چیزی گم نشود.
+    در صورت هر نوع خطا (حتی بعد از ساخت موفق چند واحد) ProvisionError پرتاب می‌شود
+    و این تابع همه‌یا-هیچ است: واحدهایی که تا آن لحظه واقعاً روی پنل ساخته شده‌اند
+    قبل از پرتاب خطا تلاش می‌شود پاک شوند تا اکانت یتیم روی پنل باقی نماند.
 
     اگر user_id داده شود، هر واحد ساخته‌شده در custom_configs (source='direct_product')
     هم ثبت می‌شود تا هشدار اتمام حجم/زمان و «سرویس‌های من» آن را ببینند."""
+    if not isinstance(quantity, int) or quantity < 1:
+        raise ProvisionError("تعداد درخواستی نامعتبر است.")
+
     server_id = product["provision_server_id"]
     if not server_id:
         raise ProvisionError("این محصول به هیچ پنلی وصل نشده است.")
@@ -50,6 +57,21 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
     provider = get_provider(server)
     prefix = db.get_custom_config_prefix()
     built = []
+
+    async def _rollback_built():
+        # رفع باگ: برخلاف ادعای docstring («واحدهای ساخته‌شده گم نمی‌شوند»)، قبلاً
+        # اگر واحد Nام از چند واحدِ یک خرید با خطا مواجه می‌شد، واحدهای ۱..N-۱ که
+        # واقعاً روی پنل ساخته شده بودند نه پاک می‌شدند و نه در ProvisionError پرتاب‌شده
+        # به‌جایی اشاره می‌شدند - یعنی اکانت‌های واقعی روی پنل مشتری برای همیشه یتیم
+        # می‌ماندند (نه در custom_configs ثبت می‌شدند، نه قابل پیگیری بودند) درحالی‌که
+        # خودِ خرید با خطا مواجه شده بود. دقیقاً مثل reseller_auto_provision._rollback_built،
+        # الان قبل از پرتاب ProvisionError هر واحدِ تا این لحظه ساخته‌شده حذف می‌شود.
+        for item in built:
+            try:
+                await provider.delete_user(item["username"])
+            except Exception:
+                pass
+
     try:
         for _ in range(quantity):
             username = None
@@ -63,6 +85,7 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
                 except PanelUsernameTakenError:
                     continue
             if username is None:
+                await _rollback_built()
                 raise ProvisionError("ساخت نام کاربری یکتا روی پنل ناموفق بود؛ دوباره تلاش کنید.")
             built.append({
                 "username": result.username,
@@ -73,6 +96,7 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
     except ProvisionError:
         raise
     except PanelError as e:
+        await _rollback_built()
         raise ProvisionError(f"خطا در ساخت کانفیگ روی پنل: {e}")
 
     if user_id is not None:
@@ -83,6 +107,14 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
                     item["subscription_url"], order_id=order_id, source="direct_product",
                 )
             except Exception:
-                pass
+                # مسیر خودِ ساخت روی پنل قبلاً موفق شده (والا اصلاً به این بلوک
+                # نمی‌رسیدیم)؛ اینجا فقط ثبت محلی سرویس است، پس raise نمی‌کنیم
+                # تا مشتری از خریدی که واقعاً تحویل گرفته محروم نشود - ولی لاگ
+                # می‌کنیم تا این‌جور شکست‌ها دیگر بی‌صدا گم نشوند.
+                logger.exception(
+                    "add_custom_config برای واحد direct-provision ناموفق بود "
+                    "(user_id=%s, username=%s, order_id=%s) - این سرویس در «سرویس‌های من» دیده نخواهد شد.",
+                    user_id, item.get("username"), order_id,
+                )
 
     return built

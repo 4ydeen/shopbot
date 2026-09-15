@@ -13,12 +13,15 @@
 می‌شوند پس این کار فقط یک اتصال SQLite دوم است، نه فراخوانی شبکه‌ای.
 """
 
+import logging
 import random
 import string
 
 from config import DB_PATH as MAIN_DB_PATH
 from database import Database
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+
+logger = logging.getLogger(__name__)
 
 
 class ProvisionError(Exception):
@@ -44,6 +47,17 @@ async def provision_auto_config(
     اگر user_id داده شود، هر واحد در custom_configs بات نمایندگی (local_db) هم
     ثبت می‌شود (source پیش‌فرض 'direct_product'، برای کانفیگ تست 'test') تا هشدار
     اتمام حجم/زمان و «سرویس‌های من» آن را ببینند."""
+    # اعتبارسنجی تعداد: بدون این چک، quantity<=0 باعث می‌شد range(quantity) هیچ
+    # کانفیگی نسازد ولی total_volume_gb منفی/صفر پایین‌تر به consume_reseller_credit
+    # یا consume_reseller_product_credit پاس داده شود؛ چک اتمیک آن‌ها فقط
+    # "باقیمانده >= مقدار درخواستی" را رد می‌کند و با یک مقدار منفی این شرط
+    # همیشه true است - یعنی به‌جای کسر، عملاً به اعتبار نماینده رایگان اضافه
+    # می‌شد. همه‌ی نقاط فراخوانی فعلی خودشان quantity را به حداقل ۱ محدود
+    # می‌کنند، ولی خودِ این تابع (به‌عنوان تنها نقطه‌ی مرکزی کسر اعتبار) نباید
+    # به رعایت این قانون توسط هر فراخوانی فعلی/آینده متکی باشد.
+    if not isinstance(quantity, int) or quantity < 1:
+        raise ProvisionError("تعداد درخواستی نامعتبر است.")
+
     owner_id = local_db.get_owner_telegram_id()
     if not owner_id:
         raise ProvisionError("مالک این بات مشخص نیست؛ با پشتیبانی تماس بگیرید.")
@@ -51,7 +65,15 @@ async def provision_auto_config(
     volume_gb = product["auto_provision_volume_gb"]
     if not volume_gb or volume_gb <= 0:
         raise ProvisionError("حجم این محصول تنظیم نشده است.")
-    duration_days = product["duration_days"] or 30
+    # نکته (باگ قبلی): `product["duration_days"] or 30` عدد ۰ را هم falsy
+    # می‌دید، درحالی‌که duration_days=0 در کل پروژه یعنی «نامحدود/بدون انقضا»
+    # (رجوع کنید به add_custom_config و گزینه‌ی «نامحدود» در ساخت محصول) - نه
+    # «تنظیم نشده». نتیجه این بود که محصولات auto-provision با مدت «نامحدود»
+    # وقتی از بات نمایندگی خریداری می‌شدند، هم روی پنل واقعی با انقضای ۳۰ روزه
+    # ساخته می‌شدند و هم در «سرویس‌های من» به‌اشتباه ۳۰ روزه نشان داده می‌شدند.
+    # فقط None (یعنی واقعاً تنظیم نشده) باید به ۳۰ پیش‌فرض بیفتد - دقیقاً مثل
+    # direct_panel_provision.py که همین فیلد را درست مدیریت می‌کند.
+    duration_days = product["duration_days"] if product["duration_days"] is not None else 30
     total_volume_gb = volume_gb * quantity
 
     main_db = Database(MAIN_DB_PATH)
@@ -59,9 +81,22 @@ async def provision_auto_config(
     if not main_db.is_reseller(owner_id):
         raise ProvisionError("دسترسی اعتبار حجمی برای مالک این بات فعال نیست؛ با پشتیبانی تماس بگیرید.")
 
-    credit = main_db.get_reseller_credit(owner_id)
-    if credit < total_volume_gb:
-        raise ProvisionError(f"اعتبار حجمی نماینده کافی نیست (نیاز: {total_volume_gb:,} گیگ، باقیمانده: {credit:,} گیگ).")
+    supply = main_db.get_reseller_supply(owner_id)
+    is_fixed_product = supply["model"] == "fixed_product"
+    if is_fixed_product:
+        # مدل «محصول آماده» (بند ۳.۳ اسپک): مصرف واحدی از reseller_product_credit،
+        # نه از reseller_credit_gb. حجم/مدت محصول همچنان برای خودِ ساخت کانفیگ روی
+        # پنل لازم است، ولی اعتبارسنجی/کسر بر اساس تعداد است نه گیگابایت.
+        fixed_product_id = supply["product_id"]
+        if not fixed_product_id:
+            raise ProvisionError("محصول موجودیِ این نمایندگی مشخص نیست؛ با پشتیبانی تماس بگیرید.")
+        remaining = main_db.get_reseller_product_credit(owner_id, fixed_product_id)
+        if remaining < quantity:
+            raise ProvisionError(f"موجودی محصول نماینده کافی نیست (نیاز: {quantity:,}، باقیمانده: {remaining:,}).")
+    else:
+        credit = main_db.get_reseller_credit(owner_id)
+        if credit < total_volume_gb:
+            raise ProvisionError(f"اعتبار حجمی نماینده کافی نیست (نیاز: {total_volume_gb:,} گیگ، باقیمانده: {credit:,} گیگ).")
 
     server = main_db.get_reseller_panel(owner_id)
     if not server or not server["is_active"]:
@@ -69,6 +104,21 @@ async def provision_auto_config(
 
     provider = get_provider(server)
     built = []
+
+    async def _rollback_built():
+        # این تابع یتیم‌ماندن اکانت‌های واقعیِ روی پنل را حل می‌کند: قبلاً اگر
+        # واحد N ام (از چند واحدِ یک خرید) با خطا مواجه می‌شد، واحدهای ۱..N-۱ که
+        # قبلاً واقعاً روی پنل ساخته شده بودند هرگز پاک نمی‌شدند - چون کل خرید
+        # لغو می‌شد نه از اعتبار نماینده کم می‌شد و نه رکوردی از آن‌ها ثبت
+        # می‌شد، درحالی‌که خودِ اکانت روی پنل باقی می‌ماند و ظرفیت واقعی
+        # نماینده را بی‌حساب مصرف می‌کرد. الان قبل از پرتاب ProvisionError، هر
+        # واحدِ تا این لحظه ساخته‌شده تلاش می‌شود از روی پنل هم حذف شود.
+        for item in built:
+            try:
+                await provider.delete_user(item["username"])
+            except Exception:
+                pass
+
     try:
         for _ in range(quantity):
             username = None
@@ -82,6 +132,7 @@ async def provision_auto_config(
                 except PanelUsernameTakenError:
                     continue
             if username is None:
+                await _rollback_built()
                 raise ProvisionError("ساخت نام کاربری یکتا روی پنل ناموفق بود؛ دوباره تلاش کنید.")
             built.append({
                 "username": result.username,
@@ -92,23 +143,72 @@ async def provision_auto_config(
     except ProvisionError:
         raise
     except PanelError as e:
+        await _rollback_built()
         raise ProvisionError(f"خطا در ساخت کانفیگ روی پنل: {e}")
 
     # فقط بعد از موفقیت واقعیِ ساخت همه‌ی واحدها روی پنل، از اعتبار کم می‌شود
-    main_db.adjust_reseller_credit(
-        owner_id, -total_volume_gb, reason=f"خرید خودکار مشتری - محصول «{product['name']}» × {quantity}"
-    )
+    if is_fixed_product:
+        if not main_db.consume_reseller_product_credit(owner_id, fixed_product_id, quantity):
+            # این حالت خیلی نادر است (رقابت هم‌زمان دو خرید)؛ چون بالا اتمیک چک نشده
+            # بود، اینجا با UPDATE...WHERE qty_remaining>=? واقعاً اتمیک تضمین می‌شود.
+            # واحدها قبلاً واقعاً روی پنل ساخته شده‌اند، پس باید پاک شوند وگرنه یتیم
+            # می‌مانند (قبلاً همین‌جا rollback فراموش شده بود).
+            await _rollback_built()
+            raise ProvisionError("موجودی محصول هم‌زمان توسط یک خرید دیگر مصرف شد؛ دوباره تلاش کنید.")
+    else:
+        # قبلاً اینجا adjust_reseller_credit با دلتای منفی صدا زده می‌شد که فقط یک
+        # UPDATE بدون قید بود؛ چون چکِ «اعتبار کافی است؟» بالاتر (چند خط قبل) در
+        # پایتون انجام شده بود و هیچ قفلی بین آن چک و این کسر نبود، دو خرید هم‌زمانِ
+        # مشتریِ همین نماینده می‌توانستند هر دو از یک اعتبار مشترک رد شوند و اعتبار
+        # نماینده منفی شود. consume_reseller_credit کسر را در همان یک کوئری اتمیک
+        # (UPDATE ... WHERE reseller_credit_gb >= ?) انجام می‌دهد.
+        if not main_db.consume_reseller_credit(
+            owner_id, total_volume_gb,
+            reason=f"خرید خودکار مشتری - محصول «{product['name']}» × {quantity}",
+        ):
+            await _rollback_built()
+            raise ProvisionError("اعتبار حجمی هم‌زمان توسط یک خرید دیگر مصرف شد؛ دوباره تلاش کنید.")
 
     if user_id is not None:
-        for item in built:
-            try:
-                local_db.add_custom_config(
-                    user_id, server["id"], item["username"], item["volume_gb"], item["duration_days"],
-                    item["subscription_url"], order_id=order_id, source=source,
-                    product_id=product_id_for_config,
-                )
-            except Exception:
-                pass
+        # مهم: server["id"] شناسه‌ی ردیف در دیتابیس بات *اصلی* است، درحالی‌که
+        # add_custom_config روی local_db (دیتابیس همین بات نمایندگی) نوشته
+        # می‌شود و custom_configs.panel_server_id یک FOREIGN KEY به
+        # panel_servers *همان* دیتابیس محلی دارد - نه به بات اصلی. قبلاً همین
+        # id خام بات اصلی مستقیم پاس داده می‌شد که تقریباً همیشه (بات‌های
+        # نمایندگی معمولاً هیچ پنلی از خودشان ندارند) با FOREIGN KEY constraint
+        # failed شکست می‌خورد و چون در try/except بی‌صدا بود، خرید ظاهراً موفق
+        # می‌شد (اعتبار کم شده، اکانت واقعی روی پنل ساخته شده) ولی هیچ رکوردی
+        # در دیتابیس بات نمایندگی ثبت نمی‌شد - یعنی نه در «سرویس‌های من»، نه در
+        # یادآور تمدید/اتمام حجم قابل پیگیری بود. get_or_create_mirror_panel_server
+        # یک ردیف محلی معادل می‌سازد/به‌روز می‌کند تا FK رعایت شود.
+        try:
+            local_panel_id = local_db.get_or_create_mirror_panel_server(server)
+        except Exception:
+            logger.exception(
+                "ساخت/به‌روزرسانی آینه‌ی محلی پنل نمایندگی ناموفق بود (owner_id=%s, panel_id=%s)؛ "
+                "ثبت سرویس در دیتابیس بات نمایندگی رد می‌شود.", owner_id, server["id"],
+            )
+            local_panel_id = None
+
+        if local_panel_id is not None:
+            for item in built:
+                try:
+                    local_db.add_custom_config(
+                        user_id, local_panel_id, item["username"], item["volume_gb"], item["duration_days"],
+                        item["subscription_url"], order_id=order_id, source=source,
+                        product_id=product_id_for_config,
+                    )
+                except Exception:
+                    # این دیگر یک شکست ساختاری قابل‌پیش‌بینی (مثل FK قبلی) نیست -
+                    # اگر همچنان رخ دهد (مثلاً دیتابیس قفل/خراب) حداقل لاگ می‌شود
+                    # تا قابل پیگیری باشد؛ عمداً raise نمی‌شود چون این فقط ثبت
+                    # محلی سرویس است، نه خودِ خرید که قبلاً واقعاً و با موفقیت
+                    # از اعتبار نماینده کسر و روی پنل ساخته شده.
+                    logger.exception(
+                        "add_custom_config برای واحد auto-provision ناموفق بود "
+                        "(user_id=%s, username=%s, order_id=%s) - این سرویس در «سرویس‌های من» دیده نخواهد شد.",
+                        user_id, item.get("username"), order_id,
+                    )
 
     return built
 

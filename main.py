@@ -45,6 +45,11 @@ async def main():
     # ۲. تمام بات‌های نمایندگیِ فعال (ثبت‌شده از پنل مدیریت بات اصلی)
     main_db = Database(DB_PATH)
     reseller_bots = main_db.list_reseller_bots(active_only=True)
+    # نماینده‌های «بدون بات واقعی» (has_live_bot=0 - فقط اعتبار/موجودی، بدون توکن
+    # واقعی) نباید اینجا امتحان شوند؛ توکن‌شان قلابی است (مثل "no-bot:123:456") و
+    # start_bot روی آن حتماً شکست می‌خورد. قبلاً این فیلتر نبود و فقط به‌خاطر
+    # try/except دور هر آیتم (پایین‌تر) کرش نمی‌کرد، ولی بی‌فایده تلاش می‌شد.
+    reseller_bots = [rb for rb in reseller_bots if (rb["has_live_bot"] if "has_live_bot" in rb.keys() else 1)]
     for rb in reseller_bots:
         resolved_path = resolve_db_path(rb["db_path"])
         # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ - باید قبل از start_bot باشد تا

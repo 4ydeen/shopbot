@@ -413,9 +413,16 @@ class ResellerFlow(StatesGroup):
 class ResellerRequestFlow(StatesGroup):
     waiting_volume = State()
     waiting_text = State()
+    waiting_bot_choice = State()
+    waiting_web_panel = State()
+    waiting_miniapp = State()
+    waiting_supply_model = State()
+    waiting_supply_product = State()
+    waiting_supply_qty = State()
     waiting_receipt = State()
     waiting_bot_token = State()
     waiting_owner_id = State()
+    waiting_owner_id_confirm = State()
 
 
 class AdminResellerRequestFlow(StatesGroup):

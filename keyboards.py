@@ -2613,6 +2613,46 @@ def topup_review_kb(topup_id) -> InlineKeyboardMarkup:
 # درخواست خودکار نمایندگی سطح ۲
 # ---------------------------------------------------------------------------
 
+def reseller_request_bot_choice_kb(options=None) -> InlineKeyboardMarkup:
+    all_buttons = {
+        "dedicated": InlineKeyboardButton(text="🤖 بات مستقل با توکن خودم", callback_data="resreq_bot:dedicated"),
+        "inline_link": InlineKeyboardButton(text="🔗 لینک اختصاصی داخل بات اصلی", callback_data="resreq_bot:inline_link"),
+        "none": InlineKeyboardButton(text="🚫 ندارم", callback_data="resreq_bot:none"),
+    }
+    options = options or list(all_buttons.keys())
+    return InlineKeyboardMarkup(inline_keyboard=[[all_buttons[o]] for o in options if o in all_buttons])
+
+
+def reseller_request_web_panel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ بله، پنل وب می‌خواهم", callback_data="resreq_webpanel:1")],
+        [InlineKeyboardButton(text="❌ نه", callback_data="resreq_webpanel:0")],
+    ])
+
+
+def reseller_request_miniapp_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ بله، مینی‌اپ می‌خواهم", callback_data="resreq_miniapp:1")],
+        [InlineKeyboardButton(text="❌ نه", callback_data="resreq_miniapp:0")],
+    ])
+
+
+def reseller_request_supply_model_kb(options=None) -> InlineKeyboardMarkup:
+    all_buttons = {
+        "volume_credit": InlineKeyboardButton(text="📦 اعتبار حجمی (گیگابایت) برای ساخت آزاد", callback_data="resreq_supply:volume_credit"),
+        "fixed_product": InlineKeyboardButton(text="🛒 محصول آماده با تعداد مشخص", callback_data="resreq_supply:fixed_product"),
+    }
+    options = options or list(all_buttons.keys())
+    return InlineKeyboardMarkup(inline_keyboard=[[all_buttons[o]] for o in options if o in all_buttons])
+
+
+def reseller_request_supply_product_kb(products) -> InlineKeyboardMarkup:
+    rows = []
+    for p in products:
+        rows.append([InlineKeyboardButton(text=f"🛒 {p['name']}", callback_data=f"resreq_supplyprod:{p['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def reseller_request_review_kb(request_id) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ تایید و تعیین هزینه", callback_data=f"resreq_approve:{request_id}")],
@@ -2626,6 +2666,32 @@ def reseller_request_panel_pick_kb(request_id, panels) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=f"🖥 {p['name']}", callback_data=f"resreq_panel:{request_id}:{p['id']}")])
     rows.append([InlineKeyboardButton(text="↩️ خودکار (اولین پنل فعالِ نمایندگی)", callback_data=f"resreq_panel:{request_id}:0")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reseller_owner_id_confirm_kb() -> InlineKeyboardMarkup:
+    """تایید آیدی عددی مالک قبل از ثبت نهایی بات نمایندگی (رفع باگ: قبلاً هر
+    عددی که کاربر تایپ می‌کرد بدون هیچ تاییدی به‌عنوان مالک/گیرنده‌ی اعتبار
+    نمایندگی ثبت می‌شد و یک اشتباه تایپی قابل جبران نبود)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ بله، همین آیدی درست است", callback_data="resreq_ownerok")],
+        [InlineKeyboardButton(text="✏️ نه، دوباره وارد می‌کنم", callback_data="resreq_ownerretry")],
+    ])
+
+
+def reseller_owner_external_confirm_kb(request_id) -> InlineKeyboardMarkup:
+    """رفع باگ امنیتی: تاییدِ نهاییِ مالکیتِ نمایندگی وقتی آیدیِ وارد‌شده با
+    درخواست‌دهنده فرق دارد، دیگر با کلیکِ خودِ درخواست‌دهنده انجام نمی‌شود؛ این دکمه
+    مستقیماً در چتِ خودِ آیدیِ نامزدشده فرستاده می‌شود و فقط خودش می‌تواند بزندش."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ تایید می‌کنم، مالک این نمایندگی باشم", callback_data=f"resreq_ownerx_ok:{request_id}")],
+        [InlineKeyboardButton(text="❌ نه، قبول نمی‌کنم", callback_data=f"resreq_ownerx_no:{request_id}")],
+    ])
+
+
+def reseller_request_owner_wait_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ انصراف از درخواست", callback_data=f"resreq_cancel:{request_id}")],
+    ])
 
 
 def reseller_request_pay_kb(request_id) -> InlineKeyboardMarkup:

@@ -15,10 +15,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from aiogram import Router, F, Bot
-from aiogram.filters import CommandStart
+from aiogram import Router, F, Bot, Dispatcher
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramNetworkError
 
 from md_utils import escape_md, escape_html
@@ -26,7 +27,7 @@ import keyboards as kb
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
 import ai_support
 from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path
-from database import Database
+from database import Database, DuplicateBotTokenError
 from config_delivery import deliver_config_to_user, send_individual_configs, build_qr_bytes
 from renewal_engine import execute_renewal, RenewalError
 from temp_messages import schedule_message_autodelete
@@ -356,6 +357,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # پردازش پارامتر دیپ‌لینک: /start <param>
         # چند بخش با "-" قابل ترکیب هستند، مثلاً: nofj-disc_SUMMER10
         #   ref<id>     زیرمجموعه‌گیری (منطق قبلی، بدون تغییر)
+        #   resref_<id> مشتریِ نماینده‌ی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
         #   disc_CODE   اعمال خودکار کد تخفیف در اولین خرید
         #   test        باز کردن مستقیم فلوی کانفیگ تست
         #   wheel       باز کردن مستقیم گردونه شانس
@@ -373,7 +375,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             (await asyncio.to_thread(db.set_force_join_exempt, message.from_user.id))
 
         for token in filter(None, start_param.split("-")):
-            if token.startswith("ref"):
+            if token.startswith("resref_"):
+                # نماینده‌ی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک) —
+                # کاملاً مستقل از سیستم زیرمجموعه‌گیری ref<id> زیر.
+                owner_part = token[len("resref_"):]
+                if owner_part.isdigit() and int(owner_part) != message.from_user.id:
+                    (await asyncio.to_thread(db.set_owner_reseller_id, message.from_user.id, int(owner_part)))
+            elif token.startswith("ref"):
                 ref_part = token[3:]
                 if ref_part.isdigit() and int(ref_part) != message.from_user.id:
                     referrer_id = int(ref_part)
@@ -2067,17 +2075,36 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         # هیچ پلنی تعریف نشده: سازگاری با نصب‌های خیلی قدیمی که هنوز فقط بانک لینک دستی دارند
+        # رفع باگ ریس‌کاندیشن: قبلاً اینجا اول take_unused_test_config صدا زده می‌شد
+        # و بعد mark_test_used - بین این دو هیچ قفلی نبود، پس چند کلیک/ریکوئست
+        # همزمان از یک کاربر می‌توانستند همگی از چک بالای تابع (test_used هنوز
+        # صفر) رد شوند و هرکدام یک کانفیگ از بانک لینک بگیرند. حالا سهمیه *قبل*
+        # از برداشتن کانفیگ با یک UPDATE اتمیک رزرو می‌شود.
+        if not (await asyncio.to_thread(db.try_reserve_test_slot, message.from_user.id, MAX_TEST_PER_USER)):
+            await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
+            return
+
         result = (await asyncio.to_thread(db.take_unused_test_config, message.from_user.id))
         if not result:
+            # موجودی بانک لینک تمام شده - سهمیه‌ی رزروشده باید برگردد چون کانفیگی
+            # تحویل داده نشد، وگرنه کاربر بدون گرفتن هیچ کانفیگی «مصرف‌شده» می‌ماند.
+            (await asyncio.to_thread(db.release_test_slot, message.from_user.id))
             await message.answer("متاسفانه موجودی کانفیگ تست تمام شده است. لطفاً بعداً مراجعه کنید.")
             return
 
-        (await asyncio.to_thread(db.mark_test_used, message.from_user.id))
         await _send_test_config_link(message, result['link'], "🧪 کانفیگ تست شما:")
 
     async def _deliver_test_plan(message: Message, plan) -> None:
-        user = (await asyncio.to_thread(db.get_user, message.from_user.id))
-        if user and user["test_used"] >= MAX_TEST_PER_USER:
+        # رفع باگ ریس‌کاندیشن: قبلاً اینجا فقط یک SELECT ساده (get_user) چک
+        # می‌شد و mark_test_used فقط *بعد* از ساخت واقعی کانفیگ روی پنل صدا زده
+        # می‌شد - یعنی بین چک و مصرف، کل زمانِ تماس با پنل (که می‌تواند طول
+        # بکشد) بدون قفل بود. چند درخواست همزمان از همین دکمه (دبل‌تپ، یا چند
+        # ریکوئست موازی از مینی‌اپ) همه از همان چک اولیه رد می‌شدند و هرکدام
+        # واقعاً یک کانفیگ تست می‌ساختند (و در بات‌های نمایندگی، هرکدام واقعاً
+        # از اعتبار حجمی نماینده کم می‌کردند). حالا سهمیه با یک UPDATE اتمیک
+        # *قبل* از تماس با پنل رزرو می‌شود؛ اگر ساخت کانفیگ شکست بخورد، سهمیه
+        # با release_test_slot برمی‌گردد تا کاربر واقعاً بتواند دوباره تلاش کند.
+        if not (await asyncio.to_thread(db.try_reserve_test_slot, message.from_user.id, MAX_TEST_PER_USER)):
             await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
             return
 
@@ -2086,16 +2113,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             try:
                 result = await provision_test_config(db, plan, user_id=message.from_user.id)
             except ProvisionError as e:
+                (await asyncio.to_thread(db.release_test_slot, message.from_user.id))
                 await message.answer(f"⛔️ {e}")
                 return
         else:
             try:
                 result = await provision_test_plan(db, plan, user_id=message.from_user.id)
             except TestPlanProvisionError as e:
+                (await asyncio.to_thread(db.release_test_slot, message.from_user.id))
                 await message.answer(f"⛔️ {e}")
                 return
 
-        (await asyncio.to_thread(db.mark_test_used, message.from_user.id))
         await _send_test_config_link(
             message, result['subscription_url'],
             f"🧪 کانفیگ تست شما ({plan['name']} - {format_plan_amount(plan)}):",
@@ -2219,8 +2247,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         duration_days = (await asyncio.to_thread(db.get_custom_config_settings))["duration_days"]
+        provider = get_provider(server)
         try:
-            provider = get_provider(server)
             result = await provider.create_user(data["reseller_username"], volume_gb, duration_days)
         except PanelUsernameTakenError:
             await message.answer("❌ این نام کاربری روی پنل تکراری است. دوباره از ابتدا با نام دیگری امتحان کن.")
@@ -2229,11 +2257,45 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(f"⛔️ خطا در ساخت کانفیگ: {e}")
             return
 
-        (await asyncio.to_thread(db.adjust_reseller_credit, message.from_user.id, -volume_gb, reason=f"ساخت کانفیگ «{result.username}»"))
-        (await asyncio.to_thread(db.add_custom_config, 
-            message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
-            source="reseller",
+        # کسر اتمیک، نه فقط یک UPDATE بدون قید: اگر بین چک بالا و همین لحظه یک
+        # مصرف هم‌زمان دیگر (مثلاً یک خرید اتوماتیک از همین نماینده) دقیقاً همین
+        # اعتبار را برده باشد، اینجا واقعاً رد می‌شود و اکانت تازه‌ساخته روی پنل هم
+        # پاک می‌شود تا یتیم نماند.
+        credit_ok = (await asyncio.to_thread(
+            db.consume_reseller_credit, message.from_user.id, volume_gb,
+            reason=f"ساخت کانفیگ «{result.username}»",
         ))
+        if not credit_ok:
+            try:
+                await provider.delete_user(result.username)
+            except Exception:
+                pass
+            await message.answer("❌ اعتبار شما هم‌زمان توسط یک ساخت دیگر مصرف شد. دوباره از ابتدا امتحان کن.")
+            return
+
+        try:
+            (await asyncio.to_thread(db.add_custom_config,
+                message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
+                source="reseller",
+            ))
+        except Exception:
+            # اگر ثبت رکورد محلی شکست بخورد، هم اعتبار برگردانده می‌شود هم اکانتِ
+            # روی پنل پاک می‌شود؛ وگرنه اعتبار نماینده بی‌دلیل کم شده بود بدون این‌که
+            # خودش هیچ رکورد/کانفیگی از آن داشته باشد (اکانت یتیم روی پنل).
+            logging.getLogger("handlers_user").exception(
+                "ثبت کانفیگ دستی نماینده %s ناموفق بود", message.from_user.id
+            )
+            (await asyncio.to_thread(
+                db.adjust_reseller_credit, message.from_user.id, volume_gb,
+                reason="بازگشت اعتبار به‌دلیل خطای ثبت کانفیگ",
+            ))
+            try:
+                await provider.delete_user(result.username)
+            except Exception:
+                pass
+            await message.answer("⛔️ خطایی در ثبت کانفیگ رخ داد؛ اعتبار شما بازگردانده شد. دوباره تلاش کن.")
+            return
+
         new_credit = (await asyncio.to_thread(db.get_reseller_credit, message.from_user.id))
         await state.clear()
         await message.answer(
@@ -3647,6 +3709,27 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await message.answer("\n".join(lines))
 
     # -----------------------------------------------------------------------
+    # لینک نمایندگی سطح ۲ - «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
+    # -----------------------------------------------------------------------
+
+    @router.message(Command("reseller_link"))
+    async def inline_reseller_link(message: Message, bot: Bot):
+        if not (await asyncio.to_thread(db.is_inline_reseller, message.from_user.id)):
+            return
+        me = await bot.get_me()
+        link = f"https://t.me/{me.username}?start=resref_{message.from_user.id}"
+        percent = (await asyncio.to_thread(db.get_setting, "reseller_inline_commission_percent", "10"))
+        stats = (await asyncio.to_thread(db.get_inline_reseller_stats, message.from_user.id))
+        await message.answer(
+            "🔗 نمایندگی شما (لینک اختصاصی داخل بات)\n\n"
+            f"لینک فروش شما:\n{link}\n\n"
+            f"روی هر خرید مشتریانی که با این لینک وارد شده‌اند، {percent}٪ کارمزد به کیف پول شما اضافه می‌شود.\n\n"
+            f"👥 تعداد مشتریان شما: {stats['customers']}\n"
+            f"🧾 تعداد خریدهای تسویه‌شده: {stats['paid_orders']}\n"
+            f"👛 مجموع کارمزد دریافتی: {stats['total_commission']:,} تومان"
+        )
+
+    # -----------------------------------------------------------------------
     # کیف پول (جدا از زیرمجموعه‌گیری)
     # -----------------------------------------------------------------------
 
@@ -4032,6 +4115,155 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=kb.cancel_kb(),
         )
 
+    _RESREQ_AXIS_KEYS = (
+        "reseller_axis_bot_dedicated_enabled", "reseller_axis_bot_inline_link_enabled",
+        "reseller_axis_bot_none_enabled", "reseller_axis_webpanel_enabled", "reseller_axis_miniapp_enabled",
+        "reseller_axis_supply_volume_enabled", "reseller_axis_supply_fixed_product_enabled",
+    )
+
+    async def _resreq_axes(state: FSMContext) -> dict:
+        """کش وضعیت روشن/خاموش ۴ محور فرم (بند ۶ اسپک) داخل state، تا هر مرحله
+        دوباره از دیتابیس نخواند."""
+        data = await state.get_data()
+        axes = data.get("resreq_axes")
+        if axes is None:
+            axes = {k: (await asyncio.to_thread(db.get_setting, k, "1")) == "1" for k in _RESREQ_AXIS_KEYS}
+            await state.update_data(resreq_axes=axes)
+        return axes
+
+    async def _resreq_notify(event, text: str, reply_markup=None):
+        """ارسال/ادیت پیام صرف‌نظر از اینکه event پیام است یا کال‌بک."""
+        if isinstance(event, CallbackQuery):
+            await event.answer()
+            await _safe_edit(event.message, text, reply_markup=reply_markup)
+        else:
+            await event.answer(text, reply_markup=reply_markup)
+
+    async def _resreq_step_bot_choice(event, state: FSMContext):
+        axes = await _resreq_axes(state)
+        options = [o for o, key in (
+            ("dedicated", "reseller_axis_bot_dedicated_enabled"),
+            ("inline_link", "reseller_axis_bot_inline_link_enabled"),
+            ("none", "reseller_axis_bot_none_enabled"),
+        ) if axes.get(key, True)] or ["dedicated"]
+        if len(options) == 1:
+            await state.update_data(resreq_bot_choice=options[0])
+            await _resreq_step_web_panel(event, state)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_bot_choice)
+        await _resreq_notify(event, "بات این نمایندگی چطور باشد؟", kb.reseller_request_bot_choice_kb(options))
+
+    async def _resreq_step_web_panel(event, state: FSMContext):
+        axes = await _resreq_axes(state)
+        if not axes.get("reseller_axis_webpanel_enabled", True):
+            await state.update_data(resreq_wants_web_panel=0)
+            await _resreq_step_miniapp(event, state)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_web_panel)
+        await _resreq_notify(event, "آیا پنل وب اختصاصی (فقط دسترسی به داده‌های خودش) می‌خواهد؟", kb.reseller_request_web_panel_kb())
+
+    async def _resreq_step_miniapp(event, state: FSMContext):
+        axes = await _resreq_axes(state)
+        if not axes.get("reseller_axis_miniapp_enabled", True):
+            await state.update_data(resreq_wants_miniapp=0)
+            await _resreq_step_supply_model(event, state)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_miniapp)
+        await _resreq_notify(event, "آیا مینی‌اپ فروشگاه می‌خواهد؟", kb.reseller_request_miniapp_kb())
+
+    async def _resreq_step_supply_model(event, state: FSMContext):
+        axes = await _resreq_axes(state)
+        options = [o for o, key in (
+            ("volume_credit", "reseller_axis_supply_volume_enabled"),
+            ("fixed_product", "reseller_axis_supply_fixed_product_enabled"),
+        ) if axes.get(key, True)] or ["volume_credit"]
+        if len(options) == 1:
+            await state.update_data(resreq_supply_model=options[0])
+            if options[0] == "fixed_product":
+                await _resreq_ask_supply_product(event, state)
+            else:
+                await _resreq_finalize(event, state)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_supply_model)
+        await _resreq_notify(event, "مدل تامین این نمایندگی چه باشد؟", kb.reseller_request_supply_model_kb(options))
+
+    async def _resreq_ask_supply_product(event, state: FSMContext):
+        products = (await asyncio.to_thread(db.get_reseller_fixed_products))
+        if not products:
+            await state.update_data(resreq_supply_model="volume_credit")
+            await _resreq_notify(event, "⚠️ فعلاً محصولی برای این مدل مجاز نشده؛ به «اعتبار حجمی» تغییر یافت.")
+            await _resreq_finalize(event, state)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_supply_product)
+        await _resreq_notify(event, "کدام محصول؟", kb.reseller_request_supply_product_kb(products))
+
+    # توجه: سوال «کاستوم‌سازی کانفیگ» عمداً از فرم حذف شد. این قابلیت (ساخت کانفیگ شخصی
+    # مشتری) روی طرف بات فقط از یک پنل VPN «شخصیِ» خودِ همان بات تامین می‌شود
+    # (panel_servers محلی با used_for_custom_config=1) و is_full_access_bot هم آن را
+    # قفل می‌کند؛ نمایندگی سطح ۲ نه پنل شخصی دارد و نه اجازه‌ی ساختش را (طبق ممیزی
+    # امنیتی بند ۳.۲). یعنی حتی با روشن‌کردن این تاگل، فیچر عملاً کار نمی‌کرد. برای
+    # اینکه یک گزینه‌ی ظاهراً فعال ولی درعمل بی‌اثر به نماینده نشان داده نشود، این مرحله
+    # حذف و wants_custom_config همیشه ۰ ثبت می‌شود.
+
+    async def _resreq_finalize(event, state: FSMContext):
+        data = await state.get_data()
+        volume_gb = data.get("resreq_volume")
+        request_text = data.get("resreq_text")
+        bot_choice = data.get("resreq_bot_choice", "dedicated")
+        wants_web_panel = data.get("resreq_wants_web_panel", 0)
+        wants_miniapp = data.get("resreq_wants_miniapp", 0)
+        supply_model = data.get("resreq_supply_model", "volume_credit")
+        supply_product_id = data.get("resreq_supply_product_id")
+        supply_product_name = data.get("resreq_supply_product_name")
+        supply_qty = data.get("resreq_supply_qty")
+        wants_custom_config = 0  # همیشه غیرفعال؛ دلیل را در کامنت بالای این تابع ببینید.
+        await state.clear()
+        user_id = event.from_user.id
+        bot_obj = event.bot
+
+        if not volume_gb or request_text is None:
+            await _resreq_notify(event, "⚠️ این درخواست منقضی شده. لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.")
+            return
+
+        try:
+            request_id = (await asyncio.to_thread(
+                db.create_reseller_request, user_id, volume_gb, request_text, wants_custom_config,
+                supply_model, supply_product_id, supply_qty, bot_choice, wants_web_panel, wants_miniapp,
+            ))
+            user_row = (await asyncio.to_thread(db.get_user, user_id))
+            first_name = (user_row["first_name"] if user_row else "") or ""
+            username = (user_row["username"] if user_row else "") or "---"
+            if supply_model == "fixed_product":
+                supply_label = f"محصول آماده — {supply_product_name} × {supply_qty:,}"
+            else:
+                supply_label = "اعتبار حجمی"
+            bot_choice_label = {
+                "dedicated": "بات مستقل با توکن", "inline_link": "لینک اختصاصی داخل بات اصلی", "none": "ندارد",
+            }.get(bot_choice, bot_choice)
+            caption = (
+                f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"
+                f"👤 کاربر: {first_name} (@{username})\n"
+                f"🆔 آیدی عددی: {user_id}\n"
+                f"📦 حجم درخواستی: {volume_gb:,} گیگ\n"
+                f"🤖 بات: {bot_choice_label}\n"
+                f"🌐 پنل وب: {'بله' if wants_web_panel else 'خیر'}\n"
+                f"📱 مینی‌اپ: {'بله' if wants_miniapp else 'خیر'}\n"
+                f"🧩 مدل تامین: {supply_label}\n\n"
+                f"📝 متن درخواست:\n{request_text}"
+            )
+            for admin_id in _senior_admin_ids():
+                try:
+                    await bot_obj.send_message(admin_id, caption, reply_markup=kb.reseller_request_review_kb(request_id))
+                except Exception:
+                    pass
+
+            await _resreq_notify(event, "✅ درخواست نمایندگی شما ثبت شد. بعد از بررسی ادمین، هزینه‌ی نمایندگی برایتان اعلام می‌شود.")
+            target_msg = event.message if isinstance(event, CallbackQuery) else event
+            await _send_inline_main_menu(target_msg, user_id)
+        except Exception:
+            logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی سطح ۲ کاربر %s", user_id)
+            await _resreq_notify(event, "⚠️ در ثبت درخواست خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.")
+
     @router.message(ResellerRequestFlow.waiting_text)
     async def reseller_request_text(message: Message, state: FSMContext, bot: Bot):
         request_text = (message.text or "").strip()
@@ -4042,12 +4274,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             request_text = "توضیحی ارائه نشده."
         data = await state.get_data()
         volume_gb = data.get("resreq_volume")
-        await state.clear()
 
         if not volume_gb:
             # اگر به هر دلیلی (مثلاً ری‌استارت بات بین دو مرحله) داده‌ی حجم گم شده باشد،
             # به‌جای کرش‌کردن روی فرمت عدد، از کاربر می‌خواهیم دوباره از ابتدا شروع کند
             # تا هرگز بدون پاسخ نماند.
+            await state.clear()
             await message.answer(
                 "⚠️ مشکلی در ثبت درخواست پیش آمد (احتمالاً به‌دلیل گذشت زمان زیاد). "
                 "لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.",
@@ -4056,36 +4288,57 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await _send_inline_main_menu(message, message.from_user.id)
             return
 
-        try:
-            request_id = (await asyncio.to_thread(db.create_reseller_request, message.from_user.id, volume_gb, request_text))
-            user_row = (await asyncio.to_thread(db.get_user, message.from_user.id))
-            first_name = (user_row["first_name"] if user_row else "") or ""
-            username = (user_row["username"] if user_row else "") or "---"
-            caption = (
-                f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"
-                f"👤 کاربر: {first_name} (@{username})\n"
-                f"🆔 آیدی عددی: {message.from_user.id}\n"
-                f"📦 حجم درخواستی: {volume_gb:,} گیگ\n\n"
-                f"📝 متن درخواست:\n{request_text}"
-            )
-            for admin_id in _senior_admin_ids():
-                try:
-                    await bot.send_message(admin_id, caption, reply_markup=kb.reseller_request_review_kb(request_id))
-                except Exception:
-                    pass
+        await state.update_data(resreq_text=request_text)
+        await _resreq_step_bot_choice(message, state)
 
-            await message.answer(
-                "✅ درخواست نمایندگی شما ثبت شد. بعد از بررسی ادمین، هزینه‌ی نمایندگی برایتان اعلام می‌شود.",
-                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
-            )
-            await _send_inline_main_menu(message, message.from_user.id)
-        except Exception:
-            logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی سطح ۲ کاربر %s", message.from_user.id)
-            await message.answer(
-                "⚠️ در ثبت درخواست خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.",
-                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
-            )
-            await _send_inline_main_menu(message, message.from_user.id)
+    @router.callback_query(ResellerRequestFlow.waiting_bot_choice, F.data.startswith("resreq_bot:"))
+    async def reseller_request_bot_choice(call: CallbackQuery, state: FSMContext):
+        bot_choice = call.data.split(":")[1]
+        await state.update_data(resreq_bot_choice=bot_choice)
+        await _resreq_step_web_panel(call, state)
+
+    @router.callback_query(ResellerRequestFlow.waiting_web_panel, F.data.startswith("resreq_webpanel:"))
+    async def reseller_request_web_panel(call: CallbackQuery, state: FSMContext):
+        wants_web_panel = int(call.data.split(":")[1])
+        await state.update_data(resreq_wants_web_panel=wants_web_panel)
+        await _resreq_step_miniapp(call, state)
+
+    @router.callback_query(ResellerRequestFlow.waiting_miniapp, F.data.startswith("resreq_miniapp:"))
+    async def reseller_request_miniapp(call: CallbackQuery, state: FSMContext):
+        wants_miniapp = int(call.data.split(":")[1])
+        await state.update_data(resreq_wants_miniapp=wants_miniapp)
+        await _resreq_step_supply_model(call, state)
+
+    @router.callback_query(ResellerRequestFlow.waiting_supply_model, F.data.startswith("resreq_supply:"))
+    async def reseller_request_supply_model(call: CallbackQuery, state: FSMContext):
+        supply_model = call.data.split(":")[1]
+        await state.update_data(resreq_supply_model=supply_model)
+        if supply_model == "fixed_product":
+            await _resreq_ask_supply_product(call, state)
+        else:
+            await _resreq_finalize(call, state)
+
+    @router.callback_query(ResellerRequestFlow.waiting_supply_product, F.data.startswith("resreq_supplyprod:"))
+    async def reseller_request_supply_product(call: CallbackQuery, state: FSMContext):
+        product_id = int(call.data.split(":")[1])
+        product = (await asyncio.to_thread(db.get_product, product_id))
+        if not product:
+            await call.answer("این محصول دیگر در دسترس نیست.", show_alert=True)
+            return
+        await state.update_data(resreq_supply_product_id=product_id, resreq_supply_product_name=product["name"])
+        await state.set_state(ResellerRequestFlow.waiting_supply_qty)
+        await call.answer()
+        await _safe_edit(call.message, f"چند عدد «{product['name']}» نیاز دارید؟ فقط عدد ارسال کنید:")
+
+    @router.message(ResellerRequestFlow.waiting_supply_qty)
+    async def reseller_request_supply_qty(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("لطفاً یک عدد صحیح و مثبت ارسال کنید.")
+            return
+        await state.update_data(resreq_supply_qty=int(text))
+        await _resreq_finalize(message, state)
+
 
     @router.callback_query(F.data.startswith("resreq_pay:"))
     async def reseller_request_pay(call: CallbackQuery):
@@ -4112,7 +4365,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not req or req["user_id"] != call.from_user.id:
             await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
             return
-        if req["status"] not in ("awaiting_payment",):
+        # رفع باگ: قبلاً فقط مرحله‌ی «در انتظار پرداخت» قابل انصراف بود. مرحله‌ی
+        # «awaiting_bot_info» (ارسال توکن / منتظرِ تاییدِ مالک) می‌تواند به‌خاطر آیدی
+        # مالکی که هیچ‌وقت تایید نمی‌کند برای همیشه باز بماند و قبلاً هیچ راهی برای
+        # خودِ درخواست‌دهنده برای بستنش نبود (فقط ادمین می‌توانست دستی کنسل کند).
+        if req["status"] not in ("awaiting_payment", "awaiting_bot_info"):
             await call.answer("این درخواست دیگر قابل انصراف نیست.", show_alert=True)
             return
         (await asyncio.to_thread(db.set_reseller_request_status, request_id, "cancelled"))
@@ -4270,6 +4527,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if (await asyncio.to_thread(db.get_reseller_bot_by_token, token)):
             await message.answer("⛔️ این توکن قبلاً برای یک بات نمایندگی دیگر ثبت شده است.")
             return
+        data = await state.get_data()
+        request_id = data.get("resreq_request_id")
+        # رفع باگ: توکن/یوزرنیم قبلاً فقط داخل FSM state خودِ درخواست‌دهنده نگه
+        # داشته می‌شد. مسیر تایید مالکیت «بیرونی» (وقتی آیدی مالک با آیدی
+        # درخواست‌دهنده فرق دارد - ر.ک. reseller_request_owner_id) باید بتواند
+        # همین مقادیر را از خودِ ردیف درخواست بخواند، چون آن تایید در چتِ شخص
+        # دیگری اتفاق می‌افتد که به state این چت اصلاً دسترسی ندارد.
+        if request_id:
+            (await asyncio.to_thread(db.set_reseller_request_bot, request_id, token, me.username))
         await state.update_data(resreq_bot_token=token, resreq_bot_username=me.username)
         await state.set_state(ResellerRequestFlow.waiting_owner_id)
         await message.answer(
@@ -4278,7 +4544,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
 
     @router.message(ResellerRequestFlow.waiting_owner_id)
-    async def reseller_request_owner_id(message: Message, state: FSMContext, bot: Bot):
+    async def reseller_request_owner_id(message: Message, state: FSMContext):
         raw = (message.text or "").strip()
         if not raw.isdigit():
             await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
@@ -4286,17 +4552,146 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         owner_id = int(raw)
         data = await state.get_data()
         request_id = data.get("resreq_request_id")
-        token = data.get("resreq_bot_token")
-        username = data.get("resreq_bot_username")
         req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
         if not req or req["status"] != "awaiting_bot_info":
             await state.clear()
             await message.answer("این درخواست دیگر معتبر نیست.")
             return
 
+        (await asyncio.to_thread(
+            db.set_reseller_request_status, request_id, "awaiting_bot_info", owner_telegram_id=owner_id
+        ))
+
+        if owner_id == message.from_user.id:
+            await state.update_data(resreq_owner_id=owner_id)
+            await state.set_state(ResellerRequestFlow.waiting_owner_id_confirm)
+            await message.answer(
+                f"آیدی عددی وارد‌شده: `{owner_id}`\n\n"
+                "این عدد از این به بعد مالکِ بات نمایندگی و صاحبِ اعتبار/موجودی آن خواهد بود. "
+                "آیا تایید می‌کنید؟",
+                parse_mode="Markdown",
+                reply_markup=kb.reseller_owner_id_confirm_kb(),
+            )
+            return
+
+        # رفع باگ امنیتی: قبلاً هر آیدی دلخواهی که درخواست‌دهنده تایپ می‌کرد، فقط
+        # با تاییدِ خودِ درخواست‌دهنده (نه صاحبِ واقعیِ آن آیدی) به‌عنوان مالکِ
+        # نمایندگی و صاحبِ اعتبار/موجودی ثبت می‌شد - یعنی می‌شد بدون اطلاع یا
+        # رضایتِ کسی، نمایندگی و مسئولیتِ آن را به آیدی یک شخص ثالث چسباند. حالا
+        # وقتی آیدیِ واردشده با درخواست‌دهنده فرق دارد، تاییدِ نهایی فقط با کلیکِ
+        # خودِ آن آیدی (در چتِ خودش با همین بات) ممکن است.
+        await state.clear()
+        sent_ok = False
+        try:
+            await message.bot.send_message(
+                owner_id,
+                f"🏪 کاربری با آیدی عددی {message.from_user.id} درخواست کرده که شما مالکِ یک بات "
+                f"نمایندگی (@{req['bot_username']}) با {req['volume_gb']:,} گیگ اعتبار حجمی اولیه باشید.\n\n"
+                "با تایید، این بات و کلِ اعتبار/موجودیِ آن از این پس متعلق به آیدی شما (همین چت) "
+                "خواهد بود. آیا تایید می‌کنید؟",
+                reply_markup=kb.reseller_owner_external_confirm_kb(request_id),
+            )
+            sent_ok = True
+        except Exception:
+            sent_ok = False
+
+        if sent_ok:
+            await message.answer(
+                f"✅ درخواست تاییدِ مالکیت برای آیدی {owner_id} ارسال شد. تا وقتی خودشان تایید نکنند، "
+                "نمایندگی نهایی نمی‌شود.",
+                reply_markup=kb.reseller_request_owner_wait_kb(request_id),
+            )
+        else:
+            (await asyncio.to_thread(
+                db.set_reseller_request_status, request_id, "awaiting_bot_info", owner_telegram_id=None
+            ))
+            await state.set_state(ResellerRequestFlow.waiting_owner_id)
+            await message.answer(
+                "⚠️ نتوانستم به این آیدی پیام بدهم (احتمالاً هنوز با این بات شروع نکرده‌اند).\n\n"
+                "یا از خودشان بخواهید ابتدا با /start وارد بات شوند و دوباره همین آیدی را بفرستید، "
+                "یا آیدی عددی خودتان را به‌عنوان مالک ارسال کنید:"
+            )
+
+    @router.callback_query(ResellerRequestFlow.waiting_owner_id_confirm, F.data == "resreq_ownerretry")
+    async def reseller_request_owner_id_retry(call: CallbackQuery, state: FSMContext):
+        await state.set_state(ResellerRequestFlow.waiting_owner_id)
+        await call.answer()
+        await _safe_edit(call.message, "باشه، دوباره آیدی عددی مالک بات را ارسال کنید:")
+
+    async def _finalize_dedicated_bot_reseller(req, bot: Bot, dispatcher: Dispatcher):
+        """ثبت نهایی بات نمایندگیِ «مستقل با توکن» - نقطه‌ی مرکزیِ مشترک بین مسیر
+        خودتاییدی (مالک = درخواست‌دهنده) و تاییدِ بیرونی (مالک شخص دیگری است که خودش
+        دکمه‌ی تایید را زده). عمداً همه‌چیز (توکن/یوزرنیم/آیدی مالک) را از خودِ ردیف
+        دیتابیسِ درخواست می‌خواند، نه از FSM state، چون در مسیر بیرونی این تابع از
+        چتِ مالک صدا زده می‌شود که اصلاً به state چتِ درخواست‌دهنده دسترسی ندارد."""
+        owner_id = req["owner_telegram_id"]
+        token = req["bot_token"]
+        username = req["bot_username"]
+        requester_id = req["user_id"]
+
         os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
         db_path = os.path.join(RESELLER_DBS_DIR, f"{username}.db")
-        reseller_bot_id = (await asyncio.to_thread(db.register_reseller_bot, token, username, owner_id, req["request_text"] or "", db_path, reseller_level=2))
+        # رفع باگ: مسیر فایل دیتابیس فقط از روی یوزرنیم بات ساخته می‌شود. اگر یک
+        # نماینده‌ی قبلی با همین یوزرنیم بات قبلاً حذف شده باشد ولی ادمین موقع حذف
+        # گزینه‌ی «پاک نشود» را زده باشد، این فایل قدیمی همچنان روی دیسک هست و چون
+        # init_db همه‌جا از CREATE TABLE IF NOT EXISTS استفاده می‌کند، بدون این پاکسازی
+        # کل کاربران/کیف‌پول/سفارش‌های نماینده‌ی قبلی عیناً به این نماینده‌ی *تازه* هم
+        # دیده می‌شد (و طبق باگ init_db، حتی مالکیت ممکن بود به‌اشتباه به نماینده‌ی
+        # قبلی برگردد). چون این یک ثبت‌نام کاملاً تازه است، هر فایل قدیمی روی این
+        # مسیر باید قبل از init_db حذف شود تا نماینده‌ی جدید همیشه از صفر شروع کند.
+        if os.path.exists(db_path):
+            logging.getLogger("handlers_user").warning(
+                "فایل دیتابیس قدیمی روی مسیر نماینده‌ی تازه پیدا شد و قبل از ثبت‌نام پاک می‌شود: %s", db_path,
+            )
+            try:
+                os.remove(db_path)
+            except OSError:
+                logging.getLogger("handlers_user").exception("پاک‌کردن فایل دیتابیس قدیمی نماینده ناموفق بود: %s", db_path)
+            for suffix in (".fsm.sqlite3", ".fsm.sqlite3-wal", ".fsm.sqlite3-shm"):
+                stale_fsm = db_path + suffix
+                if os.path.exists(stale_fsm):
+                    try:
+                        os.remove(stale_fsm)
+                    except OSError:
+                        pass
+        # قبلاً اینجا req["request_text"] (متن آزادِ توضیحِ درخواست) به‌جای اسم
+        # صاحب بات ذخیره می‌شد که باعث می‌شد لیست ادمین به‌جای اسم، توضیحات درخواست
+        # را نشان دهد. get_reseller_owner_display_name اسم/یوزرنیم واقعی را برمی‌گرداند.
+        owner_name = (await asyncio.to_thread(db.get_reseller_owner_display_name, owner_id))
+        try:
+            reseller_bot_id = (await asyncio.to_thread(
+                db.register_reseller_bot, token, username, owner_id, owner_name, db_path, reseller_level=2
+            ))
+        except DuplicateBotTokenError:
+            # رفع باگ: قبلاً این استثنا کنترل‌نشده تا بیرونِ هندلر بالا می‌رفت. این
+            # فقط در یک شرایط بسیار نادر (دقیقاً همان توکن هم‌زمان توسط یک ثبت‌نام
+            # دیگر مصرف شود) رخ می‌دهد؛ درخواست به مرحله‌ی «ارسال توکن» برمی‌گردد تا
+            # درخواست‌دهنده بتواند توکن تازه‌ای بگیرد و دوباره تلاش کند.
+            (await asyncio.to_thread(
+                db.set_reseller_request_status, req["id"], "awaiting_bot_info",
+                owner_telegram_id=None, bot_token=None, bot_username=None,
+            ))
+            try:
+                requester_state = FSMContext(
+                    storage=dispatcher.storage,
+                    key=StorageKey(bot_id=bot.id, chat_id=requester_id, user_id=requester_id),
+                )
+                await requester_state.set_state(ResellerRequestFlow.waiting_bot_token)
+            except Exception:
+                pass
+            try:
+                await bot.send_message(
+                    requester_id,
+                    "⛔️ این توکن همین الان توسط یک ثبت‌نام دیگر مصرف شد؛ لطفاً یک توکن جدید از @BotFather "
+                    "بگیرید و دوباره ارسال کنید.",
+                )
+            except Exception:
+                pass
+            return
+
+        (await asyncio.to_thread(db.set_reseller_miniapp_enabled, reseller_bot_id, bool(req["wants_miniapp"])))
+        if req["wants_web_panel"]:
+            (await asyncio.to_thread(db.enable_reseller_web_panel, reseller_bot_id))
 
         started = False
         if bot_manager:
@@ -4304,36 +4699,121 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         reseller_db = Database(db_path)
         (await asyncio.to_thread(reseller_db.init_db, owner_id=owner_id))
-        (await asyncio.to_thread(reseller_db.set_setting, "miniapp_tenant_id", str(reseller_bot_id)))
+        if req["wants_miniapp"]:
+            (await asyncio.to_thread(reseller_db.set_setting, "miniapp_tenant_id", str(reseller_bot_id)))
         (await asyncio.to_thread(reseller_db.set_setting, "reseller_level", "2"))
-        (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", "0"))
+        wants_custom_config = "1" if req["wants_custom_config"] else "0"
+        (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", wants_custom_config))
 
         (await asyncio.to_thread(db.set_reseller_status, owner_id, True))
-        (await asyncio.to_thread(db.adjust_reseller_credit, 
-            owner_id, req["volume_gb"], admin_id=req["reviewed_by"],
-            reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
-        ))
+        (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
+        if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
+            (await asyncio.to_thread(
+                db.grant_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
+                admin_id=req["reviewed_by"],
+                reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
+            ))
+        else:
+            (await asyncio.to_thread(db.adjust_reseller_credit,
+                owner_id, req["volume_gb"], admin_id=req["reviewed_by"],
+                reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
+            ))
         if req["panel_server_id"]:
             (await asyncio.to_thread(db.set_reseller_panel, owner_id, req["panel_server_id"]))
         (await asyncio.to_thread(db.complete_reseller_request, req["id"], owner_id))
 
-        await state.clear()
         status_text = "✅ بات نمایندگی راه‌اندازی و همین الان روشن شد." if started else \
             "⚠️ بات ثبت شد ولی راه‌اندازی زنده انجام نشد؛ با ری‌استارت سرویس اصلی خودکار روشن می‌شود."
-        await message.answer(
-            f"{status_text}\n\n"
-            f"🤖 بات: @{username}\n"
-            f"📦 اعتبار حجمی تخصیص‌یافته: {req['volume_gb']:,} گیگ\n\n"
-            f"برای شروع، با /start به بات خودتان (@{username}) وارد شوید.",
-            reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
-        )
-        await _send_inline_main_menu(message, message.from_user.id)
+        try:
+            await bot.send_message(
+                owner_id,
+                f"{status_text}\n\n"
+                f"🤖 بات: @{username}\n"
+                f"📦 اعتبار حجمی تخصیص‌یافته: {req['volume_gb']:,} گیگ\n\n"
+                f"برای شروع، با /start به بات خودتان (@{username}) وارد شوید.",
+                reply_markup=kb.menu_for_user(db, owner_id, is_main_bot),
+            )
+        except Exception:
+            pass
+        if requester_id != owner_id:
+            try:
+                await bot.send_message(
+                    requester_id,
+                    f"✅ آیدی {owner_id} مالکیت نمایندگی سطح ۲ #{req['id']} شما را تایید کرد و راه‌اندازی تکمیل شد.\n"
+                    f"🤖 بات: @{username}",
+                )
+            except Exception:
+                pass
         try:
             for admin_id in _senior_admin_ids():
                 await bot.send_message(
                     admin_id,
                     f"✅ نمایندگی سطح ۲ #{req['id']} تکمیل شد.\n🤖 بات: @{username}\n👤 مالک: {owner_id}",
                 )
+        except Exception:
+            pass
+
+    @router.callback_query(ResellerRequestFlow.waiting_owner_id_confirm, F.data == "resreq_ownerok")
+    async def reseller_request_owner_id_confirmed(call: CallbackQuery, state: FSMContext, bot: Bot, dispatcher: Dispatcher):
+        data = await state.get_data()
+        request_id = data.get("resreq_request_id")
+        req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
+        if not req or req["status"] != "awaiting_bot_info" or not req["owner_telegram_id"] or not req["bot_token"]:
+            await state.clear()
+            await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+            return
+        await call.answer()
+        await state.clear()
+        await _finalize_dedicated_bot_reseller(req, bot, dispatcher)
+
+    @router.callback_query(F.data.startswith("resreq_ownerx_ok:"))
+    async def reseller_request_owner_confirm_external(call: CallbackQuery, bot: Bot, dispatcher: Dispatcher):
+        """تاییدِ مالکیت توسط خودِ آیدیِ نامزدشده (نه درخواست‌دهنده) - رفع باگ امنیتیِ
+        امکان ثبتِ نمایندگی روی آیدیِ شخص ثالث بدون رضایت او."""
+        request_id = int(call.data.split(":")[1])
+        req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+        if not req or req["status"] != "awaiting_bot_info" or not req["owner_telegram_id"] or not req["bot_token"]:
+            await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+            return
+        if req["owner_telegram_id"] != call.from_user.id:
+            # فقط خودِ همان آیدیِ نامزدشده اجازه‌ی تایید دارد، نه هرکسی که این پیام را
+            # (مثلاً با فوروارد) دیده باشد.
+            await call.answer("این تاییدیه برای شما نیست.", show_alert=True)
+            return
+        await call.answer()
+        try:
+            await call.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await _finalize_dedicated_bot_reseller(req, bot, dispatcher)
+
+    @router.callback_query(F.data.startswith("resreq_ownerx_no:"))
+    async def reseller_request_owner_reject_external(call: CallbackQuery, bot: Bot, dispatcher: Dispatcher):
+        request_id = int(call.data.split(":")[1])
+        req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+        if not req or req["status"] != "awaiting_bot_info" or not req["owner_telegram_id"]:
+            await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+            return
+        if req["owner_telegram_id"] != call.from_user.id:
+            await call.answer("این تاییدیه برای شما نیست.", show_alert=True)
+            return
+        await call.answer()
+        rejected_owner_id = req["owner_telegram_id"]
+        (await asyncio.to_thread(
+            db.set_reseller_request_status, request_id, "awaiting_bot_info", owner_telegram_id=None
+        ))
+        await _safe_edit(call.message, "❌ درخواست مالکیت این نمایندگی را رد کردید.")
+        try:
+            user_state = FSMContext(
+                storage=dispatcher.storage,
+                key=StorageKey(bot_id=bot.id, chat_id=req["user_id"], user_id=req["user_id"]),
+            )
+            await user_state.set_state(ResellerRequestFlow.waiting_owner_id)
+            await bot.send_message(
+                req["user_id"],
+                f"❌ آیدی {rejected_owner_id} مالکیت نمایندگی #{request_id} شما را نپذیرفت.\n\n"
+                "لطفاً یک آیدی عددی دیگر (یا آیدی عددی خودتان) را ارسال کنید:",
+            )
         except Exception:
             pass
 

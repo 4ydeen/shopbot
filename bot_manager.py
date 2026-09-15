@@ -390,7 +390,17 @@ class BotManager:
             await asyncio.sleep(interval)
             try:
                 rows = main_db.list_reseller_bots()
-                active_tokens = {r["bot_token"]: r for r in rows if r["is_active"]}
+                # نکته (باگ قبلی): نماینده‌های «بدون بات واقعی» (بات_choice=none/inline_link)
+                # با has_live_bot=0 و یک توکن قلابی (مثل "no-bot:123:456") ثبت می‌شوند تا
+                # فقط اعتبار/موجودی داشته باشند. این حلقه قبلاً این فلگ را چک نمی‌کرد و
+                # سعی می‌کرد با همان توکن قلابی یک Bot() واقعی بسازد که بلافاصله با خطای
+                # اعتبارسنجی فرمت توکن می‌ترکید؛ چون آن خطا داخل خودِ for گرفته نمی‌شد،
+                # کل بقیه‌ی نماینده‌های همان دور (حتی نماینده‌های واقعی با بات زنده) اصلاً
+                # پردازش نمی‌شدند. الان چنین ردیف‌هایی از همان ابتدا کنار گذاشته می‌شوند.
+                active_tokens = {
+                    r["bot_token"]: r for r in rows
+                    if r["is_active"] and (r["has_live_bot"] if "has_live_bot" in r.keys() else 1)
+                }
                 all_tokens = {r["bot_token"] for r in rows}
 
                 for token, row in active_tokens.items():
@@ -415,11 +425,22 @@ class BotManager:
                                 "همگام‌سازی miniapp_tenant_id برای @%s (reconcile) ناموفق بود.",
                                 row["bot_username"],
                             )
-                        started = await self.start_bot(
-                            token, resolved_path, row["owner_telegram_id"], is_main_bot=False
-                        )
-                        if started:
-                            logger.info("بات نمایندگی @%s توسط reconcile راه‌اندازی شد.", row["bot_username"])
+                        # این فراخوانی هم عمداً try/except جدا و مستقل از خودش دارد (نه فقط
+                        # try/except دور کل تابع در انتهای فایل): اگر یک نماینده (به هر
+                        # دلیلی، مثلاً توکن باطل‌شده توسط خودِ صاحبش در BotFather) در ساخت
+                        # Bot()/start_bot خطا بدهد، نباید مانع پردازش بقیه‌ی نماینده‌های
+                        # همان دور از حلقه بشود.
+                        try:
+                            started = await self.start_bot(
+                                token, resolved_path, row["owner_telegram_id"], is_main_bot=False
+                            )
+                            if started:
+                                logger.info("بات نمایندگی @%s توسط reconcile راه‌اندازی شد.", row["bot_username"])
+                        except Exception:
+                            logger.exception(
+                                "راه‌اندازی بات نمایندگی @%s توسط reconcile ناموفق بود؛ رد شد.",
+                                row["bot_username"],
+                            )
 
                 # ترمیم مداوم Menu Button بات‌های نمایندگی که از قبل در حال اجرا
                 # بودند: هر چرخه (هر ۱۰ ثانیه) بررسی می‌شود که آیا
