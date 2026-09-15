@@ -4429,6 +4429,17 @@ async function renderResellersCreditTab() {
     apiGet('/resellers/orphans').catch(() => []),
   ]);
 
+  for (const r of resellers) {
+    r.reseller_supply_model = r.reseller_supply_model || 'volume_credit';
+    if (r.reseller_supply_model === 'fixed_product') {
+      try {
+        const m = await apiGet(`/resellers/${r.telegram_id}/manage`);
+        const primary = (m.inventory || []).find(x => Number(x.product_id) === Number(m.supply.product_id));
+        r.fixed_product_qty = primary ? primary.qty_remaining : 0;
+        r.fixed_product_name = primary ? primary.name : 'محصول مشخص نشده';
+      } catch (_) {}
+    }
+  }
   const hasResellers = resellers.length > 0;
   const totalSoldGb = resellers.reduce((a, r) => a + (r.sold_volume_gb || 0), 0);
   const totalSoldConfigs = resellers.reduce((a, r) => a + (r.sold_configs || 0), 0);
@@ -4482,25 +4493,21 @@ async function renderResellersCreditTab() {
         <span class="card-sub">برای تغییر اعتبار، پنل اختصاصی یا وضعیت هرکدام، از دکمه‌های همان ردیف استفاده کن.</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>کاربر</th><th>اعتبار باقی‌مانده</th><th>فروش</th><th>پنل اختصاصی</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>کاربر</th><th>مدل تامین</th><th>موجودی</th><th>فروش</th><th>پنل</th><th>وضعیت</th><th>عملیات</th></tr></thead>
         <tbody>${resellers.map(r => `<tr>
-          <td>
-            ${r.username ? `<div>@${esc(r.username)}</div>` : ''}
-            <div class="mono" style="${r.username ? 'opacity:.6;font-size:12px' : ''}">${r.telegram_id}</div>
-          </td>
-          <td><span class="badge ${r.reseller_credit_gb > 0 ? 'badge-approved' : 'badge-rejected'}">${fmt(r.reseller_credit_gb)} گیگ</span></td>
+          <td>${r.username ? `<div>@${esc(r.username)}</div>` : ''}<div class="mono" style="${r.username ? 'opacity:.6;font-size:12px' : ''}">${r.telegram_id}</div></td>
+          <td>${r.reseller_supply_model === 'fixed_product' ? '<span class="badge badge-pending">محصول آماده</span>' : '<span class="badge">اعتبار حجمی</span>'}</td>
+          <td>${r.reseller_supply_model === 'fixed_product' ? `<span class="mono">${fmt(r.fixed_product_qty || 0)} عدد</span><div style="opacity:.6;font-size:11px">${esc(r.fixed_product_name || 'محصول مشخص نشده')}</div>` : `<span class="mono">${fmt(r.reseller_credit_gb)} گیگ</span>`}</td>
           <td class="mono">${fmt(r.sold_volume_gb)} گیگ<div style="opacity:.6;font-size:11.5px">${fmt(r.sold_configs)} کانفیگ</div></td>
-          <td>${r.reseller_panel_id ? `<span class="mono">#${r.reseller_panel_id}</span>` : '<span style="opacity:.5">پیش‌فرض خودکار</span>'}</td>
+          <td>${r.reseller_panel_id ? `<span class="mono">#${r.reseller_panel_id}</span>` : '<span style="opacity:.5">پیش‌فرض</span>'}</td>
           <td>${r.is_reseller ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-          <td>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button class="btn btn-sm" data-credit="${r.telegram_id}">💳 اعتبار</button>
-              <button class="btn btn-sm" data-panel="${r.telegram_id}" data-panel-cur="${r.reseller_panel_id || ''}">🌐 پنل</button>
-              <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? '⛔️ غیرفعال' : '✅ فعال'}</button>
-              <button class="btn btn-sm" data-log="${r.telegram_id}">📜 تاریخچه</button>
-            </div>
-          </td>
-        </tr>`).join('') || `<tr><td colspan="6" class="empty-state">${svg('empty')}<div>نماینده‌ی اعتباری ثبت نشده</div></td></tr>`}</tbody>
+          <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" data-manage-l2="${r.telegram_id}">⚙️ مدیریت</button>
+            <button class="btn btn-sm" data-credit="${r.telegram_id}">💳 اعتبار</button>
+            <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? '⛔️ غیرفعال' : '✅ فعال'}</button>
+            <button class="btn btn-sm" data-log="${r.telegram_id}">📜 تاریخچه</button>
+          </div></td>
+        </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>نماینده‌ی سطح ۲ ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
   `;
@@ -4515,6 +4522,8 @@ async function renderResellersCreditTab() {
   bindResellersSubtabs(content());
 
   $('#cres-add', content()).addEventListener('click', openResellerFindModal);
+
+  $$('[data-manage-l2]', content()).forEach(b => b.addEventListener('click', () => openLevel2ResellerManageModal(Number(b.dataset.manageL2))));
 
   $$('[data-credit]', content()).forEach(b =>
     b.addEventListener('click', () => openResellerCreditModal(b.dataset.credit)));
@@ -4578,6 +4587,38 @@ async function renderResellersCreditTab() {
       box.style.display = box.style.display === 'none' ? '' : 'none';
     }));
   }
+}
+
+async function openLevel2ResellerManageModal(tgId) {
+  try {
+    const m = await apiGet(`/resellers/${tgId}/manage`);
+    const u=m.user, supply=m.supply, inventory=m.inventory||[];
+    const products=await apiGet('/reseller-fixed-products');
+    openModal(`مدیریت کامل نماینده سطح ۲ #${tgId}`, `
+      <div class="form-grid">
+        <div><b>کاربر:</b> ${esc(u.username ? '@'+u.username : (u.first_name || '—'))} <span class="mono">${tgId}</span></div>
+        <input class="input" id="l2-owner-name" value="${esc(u.first_name || '')}" placeholder="نام نماینده">
+        <label>مدل تامین</label>
+        <select class="input" id="l2-model"><option value="volume_credit" ${supply.model==='volume_credit'?'selected':''}>اعتبار حجمی</option><option value="fixed_product" ${supply.model==='fixed_product'?'selected':''}>محصول آماده</option></select>
+        <div id="l2-fixed-wrap"><label>محصول اصلی</label><select class="input" id="l2-product">${products.map(p=>`<option value="${p.id}" ${Number(p.id)===Number(supply.product_id)?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>
+        <div><label>پنل نمایندگی</label><select class="input" id="l2-panel"><option value="">پیش‌فرض خودکار</option></select></div>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="l2-enabled" ${u.is_reseller?'checked':''}> نمایندگی فعال باشد</label>
+        <button class="btn btn-primary" id="l2-save">💾 ذخیره تغییرات</button>
+        <hr>
+        <div><b>موجودی محصولات</b></div>
+        <div id="l2-inventory">${inventory.length ? inventory.map(x=>`<div class="admin-list-row"><div><b>${esc(x.name)}</b><div style="opacity:.65;font-size:12px">${x.qty_remaining} عدد</div></div><div class="admin-list-row-actions"><button class="btn btn-sm" data-l2-inv="${x.product_id}" data-delta="1">+1</button><button class="btn btn-sm" data-l2-inv="${x.product_id}" data-delta="-1">−1</button></div></div>`).join('') : '<div class="hint-text">موجودی محصولی ثبت نشده است.</div>'}</div>
+        <div style="display:flex;gap:6px;align-items:center"><select class="input" id="l2-add-product">${products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><input class="input" id="l2-add-qty" type="number" value="1" min="1" placeholder="تعداد"><button class="btn" id="l2-add">➕ شارژ</button></div>
+        <hr><button class="btn btn-danger" id="l2-delete">🗑 حذف کامل نمایندگی</button>
+      </div>`, async (body, close) => {
+      const panels=await apiGet('/reseller-panels-lite').catch(()=>[]);
+      $('#l2-panel',body).insertAdjacentHTML('beforeend',panels.map(x=>`<option value="${x.id}" ${Number(x.id)===Number(u.reseller_panel_id)?'selected':''}>${esc(x.name)}</option>`).join(''));
+      const sync=()=>$('#l2-fixed-wrap',body).style.display=$('#l2-model',body).value==='fixed_product'?'':'none'; sync(); $('#l2-model',body).onchange=sync;
+      $('#l2-save',body).onclick=async()=>{ try { await api(`/resellers/${tgId}`,{method:"PATCH",body:JSON.stringify({owner_name:$('#l2-owner-name',body).value.trim()||null,enabled:$('#l2-enabled',body).checked,supply_model:$('#l2-model',body).value,supply_product_id:$('#l2-model',body).value==='fixed_product'?Number($('#l2-product',body).value):null,panel_server_id:$('#l2-panel',body).value?Number($('#l2-panel',body).value):null})}); toast('ذخیره شد.'); close(); renderResellers(); } catch(e){handleErr(e);} };
+      $$('[data-l2-inv]',body).forEach(btn=>btn.onclick=async()=>{try{await apiPost(`/resellers/${tgId}/products/${btn.dataset.l2Inv}/inventory`,{delta:Number(btn.dataset.delta),reason:'تنظیم از پنل مدیریت'}); toast('موجودی به‌روزرسانی شد.'); close(); openLevel2ResellerManageModal(tgId);}catch(e){handleErr(e);}});
+      $('#l2-add',body).onclick=async()=>{try{const q=Number($('#l2-add-qty',body).value); if(!q||q<1)throw Error('تعداد نامعتبر است.'); await apiPost(`/resellers/${tgId}/products/${$('#l2-add-product',body).value}/inventory`,{delta:q,reason:'شارژ محصول از پنل مدیریت'}); toast('موجودی شارژ شد.'); close(); openLevel2ResellerManageModal(tgId);}catch(e){handleErr(e);}};
+      $('#l2-delete',body).onclick=async()=>{if(!confirm('حذف کامل این نماینده و موجودی‌هایش انجام شود؟'))return; try{await apiDelete(`/resellers/${tgId}`);toast('نمایندگی حذف شد.');close();renderResellers();}catch(e){handleErr(e);}};
+    }, {wide:true});
+  } catch(e){handleErr(e);}
 }
 
 function openResellerCreditModal(tgId, parentClose) {
