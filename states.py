@@ -408,6 +408,7 @@ class AdminRenewalPricing(StatesGroup):
 class ResellerFlow(StatesGroup):
     waiting_username = State()
     waiting_volume = State()
+    waiting_fixed_product_username = State()
 
 
 class ResellerRequestFlow(StatesGroup):

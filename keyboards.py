@@ -563,10 +563,12 @@ def my_orders_back_kb() -> InlineKeyboardMarkup:
     )
 
 
-def reseller_panel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ ساخت کانفیگ جدید", callback_data="reseller_new_config")],
-    ])
+def reseller_panel_kb(fixed_products=None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="➕ ساخت کانفیگ جدید", callback_data="reseller_new_config")]]
+    for p in (fixed_products or []):
+        qty = int(p.get("qty_remaining", 0))
+        rows.append([InlineKeyboardButton(text=f"📦 {p.get('name','محصول')} | موجودی: {qty}", callback_data=f"reseller_fixed:{int(p['product_id'])}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,

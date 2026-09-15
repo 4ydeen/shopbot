@@ -227,3 +227,54 @@ async def provision_test_config(local_db: Database, plan, user_id: int = None) -
         username_prefix=plan["name_prefix"], product_id_for_config=plan["id"],
     )
     return built[0]
+
+
+async def provision_reseller_fixed_product(main_db: Database, owner_id: int, product_id: int,
+                                           quantity: int = 1, username_prefix: str = "r", username: str = None) -> list:
+    """ساخت مستقیم یک محصول آماده برای نماینده سطح ۲ از بات اصلی.
+    موجودی بر اساس تعداد محصول، نه گیگ، مصرف می‌شود."""
+    if not isinstance(quantity, int) or quantity < 1:
+        raise ProvisionError("تعداد درخواستی نامعتبر است.")
+    if not main_db.is_reseller(owner_id):
+        raise ProvisionError("این کاربر نماینده فعال نیست.")
+    product = main_db.get_product(product_id)
+    if not product or not product["is_active"] or not product["is_auto_provision"]:
+        raise ProvisionError("محصول انتخاب‌شده برای ساخت خودکار آماده نیست.")
+    if main_db.get_reseller_product_credit(owner_id, product_id) < quantity:
+        raise ProvisionError("موجودی این محصول کافی نیست.")
+    volume_gb = product["auto_provision_volume_gb"]
+    if not volume_gb or volume_gb <= 0:
+        raise ProvisionError("حجم محصول تنظیم نشده است.")
+    duration_days = product["duration_days"] if product["duration_days"] is not None else 30
+    server = main_db.get_reseller_panel(owner_id)
+    if not server or not server["is_active"]:
+        raise ProvisionError("پنل نمایندگی تنظیم نشده یا غیرفعال است.")
+    provider = get_provider(server)
+    built=[]
+    try:
+        for _ in range(quantity):
+            result=None
+            for _try in range(8):
+                candidate=username if username and _try == 0 else _random_username(username_prefix)
+                try:
+                    result=await provider.create_user(candidate, volume_gb, duration_days)
+                    break
+                except PanelUsernameTakenError:
+                    continue
+            if result is None:
+                raise ProvisionError("ساخت نام کاربری یکتا ناموفق بود؛ دوباره تلاش کنید.")
+            built.append({"username": result.username, "subscription_url": result.subscription_url,
+                          "volume_gb": volume_gb, "duration_days": duration_days, "product_id": product_id,
+                          "product_name": product["name"]})
+    except Exception as e:
+        for item in built:
+            try: await provider.delete_user(item["username"])
+            except Exception: pass
+        if isinstance(e, ProvisionError): raise
+        raise ProvisionError(f"خطا در ساخت کانفیگ: {e}")
+    if not main_db.consume_reseller_product_credit(owner_id, product_id, quantity):
+        for item in built:
+            try: await provider.delete_user(item["username"])
+            except Exception: pass
+        raise ProvisionError("موجودی محصول هم‌زمان توسط خرید دیگری مصرف شد؛ دوباره تلاش کنید.")
+    return built

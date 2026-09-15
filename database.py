@@ -1923,6 +1923,17 @@ class Database:
         self._maybe_reload_admin_cache()
         return tg_id in self._admin_cache
 
+    def update_user_profile(self, user_tg_id: int, first_name: str = None, username: str = None):
+        fields=[]; values=[]
+        if first_name is not None:
+            fields.append("first_name=?"); values.append(first_name)
+        if username is not None:
+            fields.append("username=?"); values.append(username)
+        if not fields: return
+        values.append(user_tg_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE telegram_id=?", values)
+
     def get_owner_telegram_id(self):
         """آیدی تلگرام مالک این بات (نقش owner در جدول admins). برای بات نمایندگی
         همان کسی است که این بات را می‌گرداند - جهت اتصال به اعتبار حجمی‌اش در بات اصلی."""
@@ -2416,11 +2427,25 @@ class Database:
         """محصولات مجاز برای مدل تامین «محصول آماده» در فرم درخواست نمایندگی سطح ۲
         (بند ۶ اسپک)؛ اگر ادمین لیستی انتخاب نکرده باشد (تنظیم خالی)، همه‌ی محصولات فعال برگردانده می‌شوند."""
         raw = (self.get_setting("reseller_fixed_product_ids", "") or "").strip()
-        products = [p for p in self.get_all_products() if p["is_active"]]
+        products = [p for p in self.get_all_products() if p["is_active"] and p["is_auto_provision"]]
         if not raw:
             return products
         allowed_ids = {int(x) for x in raw.split(",") if x.strip().isdigit()}
         return [p for p in products if p["id"] in allowed_ids]
+
+    def get_reseller_product_inventory(self, reseller_id: int):
+        """موجودی محصولات نماینده همراه با مشخصات محصول."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                """SELECT rpc.*, p.name, p.price, p.duration_days, p.description, p.is_active,
+                          p.is_auto_provision, p.auto_provision_volume_gb, p.provision_server_id,
+                          c.name AS category_name
+                   FROM reseller_product_credit rpc
+                   JOIN products p ON p.id=rpc.product_id
+                   LEFT JOIN categories c ON c.id=p.category_id
+                   WHERE rpc.reseller_id=? ORDER BY rpc.qty_remaining DESC, rpc.id""",
+                (reseller_id,),
+            ).fetchall()
 
     def get_product(self, product_id: int):
         with self._get_conn() as conn:
@@ -6323,6 +6348,36 @@ class Database:
     # ------------------------------------------------------------------
     # موجودی محصول نمایندگی (مدل تامین «محصول آماده»)
     # ------------------------------------------------------------------
+
+    def adjust_reseller_product_credit(self, reseller_id: int, product_id: int, delta: int,
+                                        admin_id: int = None, reason: str = None) -> int:
+        """تنظیم اتمیک موجودی یک محصول نماینده. delta مثبت=شارژ، منفی=کسر."""
+        if not isinstance(delta, int) or delta == 0:
+            raise ValueError("delta باید عدد صحیح غیرصفر باشد")
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT qty_remaining FROM reseller_product_credit WHERE reseller_id=? AND product_id=?",
+                (reseller_id, product_id),
+            ).fetchone()
+            current = int(row["qty_remaining"]) if row else 0
+            new_qty = current + delta
+            if new_qty < 0:
+                raise ValueError("موجودی محصول نمی‌تواند منفی شود")
+            if row:
+                conn.execute(
+                    "UPDATE reseller_product_credit SET qty_remaining=?, updated_at=CURRENT_TIMESTAMP WHERE reseller_id=? AND product_id=?",
+                    (new_qty, reseller_id, product_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO reseller_product_credit (reseller_id, product_id, qty_remaining) VALUES (?, ?, ?)",
+                    (reseller_id, product_id, new_qty),
+                )
+            conn.execute(
+                "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
+                (reseller_id, 0, reason or f"تنظیم موجودی محصول #{product_id}: {delta:+d}", admin_id),
+            )
+            return new_qty
 
     def get_reseller_product_credit(self, reseller_id: int, product_id: int) -> int:
         with self._get_conn() as conn:

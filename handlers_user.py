@@ -42,7 +42,7 @@ import noapay_payment
 import custom_gateway_payment
 import card_to_card_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
-from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
+from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
 
@@ -2153,12 +2153,111 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         await state.clear()
         credit = (await asyncio.to_thread(db.get_reseller_credit, message.from_user.id))
+        supply = await asyncio.to_thread(db.get_reseller_supply, message.from_user.id)
+        inventory = await asyncio.to_thread(db.get_reseller_product_inventory, message.from_user.id)
+        fixed = [dict(x) for x in inventory if int(x["qty_remaining"]) > 0]
+        if supply["model"] == "fixed_product" or fixed:
+            lines = ["🧑‍💼 پنل نمایندگی", "", "📦 موجودی محصولات شما:"]
+            if fixed:
+                lines += [f"• {x['name']} — {x['qty_remaining']:,} عدد" for x in fixed]
+            else:
+                lines.append("• موجودی محصولی ندارید.")
+            lines += ["", "برای ساخت کانفیگ، روی محصول موردنظر بزن."]
+            await message.answer("\n".join(lines), reply_markup=kb.reseller_panel_kb(fixed))
+        else:
+            await message.answer(
+                f"🧑‍💼 پنل نمایندگی\n\n📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n\n"
+                f"می‌تونی از این اعتبار مستقیم کانفیگ بسازی.",
+                reply_markup=kb.reseller_panel_kb(),
+            )
+
+    @router.callback_query(F.data.startswith("reseller_fixed:"))
+    async def cb_reseller_fixed_product(call: CallbackQuery, state: FSMContext):
+        if not (await asyncio.to_thread(db.is_reseller, call.from_user.id)):
+            await call.answer("دسترسی نداری.", show_alert=True); return
+        try:
+            product_id = int(call.data.split(":", 1)[1])
+        except Exception:
+            await call.answer("محصول نامعتبر است.", show_alert=True); return
+        inventory = await asyncio.to_thread(db.get_reseller_product_inventory, call.from_user.id)
+        item = next((dict(x) for x in inventory if int(x["product_id"]) == product_id), None)
+        if not item or int(item["qty_remaining"]) < 1:
+            await call.answer("موجودی این محصول تمام شده است.", show_alert=True); return
+        server = await asyncio.to_thread(db.get_reseller_panel, call.from_user.id)
+        if not server or not server["is_active"]:
+            await call.answer("پنل نمایندگی تنظیم نشده یا غیرفعال است.", show_alert=True); return
+        await state.clear(); await state.set_state(ResellerFlow.waiting_fixed_product_username)
+        await state.update_data(fixed_product_id=product_id, panel_server_id=server["id"])
+        await call.answer()
+        await call.message.answer(
+            f"📦 محصول: {item['name']}\n"
+            f"موجودی: {item['qty_remaining']:,} عدد\n\n"
+            "یک نام کاربری برای کانفیگ وارد کن یا از دکمه نام تصادفی استفاده کن.",
+            reply_markup=kb.custom_config_username_kb(),
+        )
+
+    @router.callback_query(F.data == "custom_config_random_username", ResellerFlow.waiting_fixed_product_username)
+    async def cb_reseller_fixed_random_username(call: CallbackQuery, state: FSMContext):
+        prefix = await asyncio.to_thread(db.get_custom_config_prefix)
+        for _ in range(10):
+            suffix = "r" + "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
+            candidate = f"{prefix}-{suffix}" if prefix else suffix
+            if not (await asyncio.to_thread(db.is_custom_username_taken, candidate)):
+                break
+        data = await state.get_data()
+        product_id = int(data["fixed_product_id"])
+        try:
+            result = (await provision_reseller_fixed_product(db, call.from_user.id, product_id, 1, username_prefix=prefix or "r", username=candidate))[0]
+        except ProvisionError as e:
+            await state.clear(); await call.answer(str(e), show_alert=True); return
+        try:
+            await asyncio.to_thread(db.add_custom_config, call.from_user.id, data["panel_server_id"], result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
+        except Exception:
+            try:
+                server=await asyncio.to_thread(db.get_panel_server, data["panel_server_id"])
+                if server:
+                    provider=get_provider(server); await provider.delete_user(result["username"])
+            except Exception: pass
+            await asyncio.to_thread(db.grant_reseller_product_credit, call.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
+            await state.clear(); await call.answer("ثبت کانفیگ ناموفق بود.", show_alert=True); return
+        remaining=await asyncio.to_thread(db.get_reseller_product_credit, call.from_user.id, product_id)
+        await state.clear(); await call.answer("کانفیگ ساخته شد.")
+        await call.message.answer(f"✅ کانفیگ ساخته شد!\n\n🛠 نام کاربری: {escape_md(result['username'])}\n📦 محصول: {escape_md(result['product_name'])}\n📶 حجم: {result['volume_gb']} گیگ | ⏳ مدت: {result['duration_days']} روز\n\n`{result['subscription_url']}`\n\n📦 موجودی باقی‌مانده: {remaining:,} عدد", parse_mode="Markdown", reply_markup=kb.menu_for_user(db, call.from_user.id, is_main_bot))
+
+    @router.message(ResellerFlow.waiting_fixed_product_username)
+    async def reseller_fixed_product_username(message: Message, state: FSMContext):
+        suffix=(message.text or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", suffix):
+            await message.answer("❌ نام کاربری نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا ۲۰ کاراکتر."); return
+        prefix=await asyncio.to_thread(db.get_custom_config_prefix)
+        username=f"{prefix}-{suffix}" if prefix else suffix
+        if await asyncio.to_thread(db.is_custom_username_taken, username):
+            await message.answer("❌ این نام کاربری قبلاً استفاده شده است."); return
+        data=await state.get_data()
+        product_id=int(data["fixed_product_id"])
+        try:
+            result=(await provision_reseller_fixed_product(db, message.from_user.id, product_id, 1, username_prefix=prefix or "r", username=username))[0]
+        except ProvisionError as e:
+            await state.clear(); await message.answer(f"⛔️ {e}"); return
+        try:
+            await asyncio.to_thread(db.add_custom_config, message.from_user.id, data["panel_server_id"], result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
+        except Exception:
+            # در صورت شکست ثبت رکورد، موجودی برگردانده و اکانت پنل حذف می‌شود.
+            try:
+                server=await asyncio.to_thread(db.get_panel_server, data["panel_server_id"])
+                if server:
+                    provider=get_provider(server); await provider.delete_user(result["username"])
+            except Exception: pass
+            await asyncio.to_thread(db.grant_reseller_product_credit, message.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
+            await state.clear(); await message.answer("⛔️ ثبت کانفیگ ناموفق بود؛ موجودی شما برگشت داده شد."); return
+        remaining=await asyncio.to_thread(db.get_reseller_product_credit, message.from_user.id, product_id)
+        await state.clear()
         await message.answer(
-            f"🧑‍💼 پنل نمایندگی\n\n"
-            f"📦 اعتبار باقی‌مانده: {credit:,} گیگابایت\n\n"
-            f"می‌تونی از این اعتبار مستقیم کانفیگ بسازی، بدون پرداخت جداگانه. "
-            f"با هر قیمتی که خودت بخوای می‌تونی به مشتری‌هات بفروشیش.",
-            reply_markup=kb.reseller_panel_kb(),
+            f"✅ کانفیگ محصول آماده ساخته شد!\n\n🛠 نام کاربری: {escape_md(result['username'])}\n"
+            f"📦 محصول: {escape_md(result['product_name'])}\n"
+            f"📶 حجم: {result['volume_gb']} گیگ | ⏳ مدت: {result['duration_days']} روز\n\n`{result['subscription_url']}`\n\n"
+            f"📦 موجودی باقی‌مانده: {remaining:,} عدد", parse_mode="Markdown",
+            reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
 
     @router.callback_query(F.data == "reseller_new_config")
