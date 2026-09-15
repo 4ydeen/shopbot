@@ -3921,6 +3921,35 @@ def api_reseller_fixed_products(admin=Depends(require_permission("resellers"))):
     return [{"id": p["id"], "name": p["name"]} for p in db.get_reseller_fixed_products()]
 
 
+def _decode_reseller_supply_items(request_text):
+    """Read optional multi-product allocation metadata embedded by the admin make-reseller flow.
+    Older requests have no marker and continue using supply_product_id/supply_qty.
+    """
+    import json as _json
+    text = request_text or ""
+    marker = "[[RESSELLER_SUPPLY_ITEMS:"
+    if marker not in text:
+        return []
+    try:
+        start = text.index(marker) + len(marker)
+        end = text.index("]]", start)
+        raw = text[start:end]
+        items = _json.loads(raw)
+        if not isinstance(items, list):
+            return []
+        out = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            pid = int(item.get("product_id") or 0)
+            qty = int(item.get("quantity") or 0)
+            if pid > 0 and qty > 0:
+                out.append({"product_id": pid, "quantity": qty})
+        return out
+    except Exception:
+        return []
+
+
 class MakeResellerBody(BaseModel):
     volume_gb: int = 0
     bot_choice: str = "none"
@@ -3929,6 +3958,7 @@ class MakeResellerBody(BaseModel):
     supply_model: str = "volume_credit"
     supply_product_id: Optional[int] = None
     supply_qty: Optional[int] = None
+    supply_items: Optional[list[dict]] = None
     panel_server_id: Optional[int] = None
     note: Optional[str] = None
 
@@ -3954,9 +3984,35 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
     if (await asyncio.to_thread(db.get_open_reseller_request, tg_id)):
         raise HTTPException(400, "این کاربر یک درخواست نمایندگی باز دارد؛ ابتدا از تب «درخواست‌های نمایندگی» آن را ببندید.")
 
+    fixed_items = []
     if body.supply_model == "fixed_product":
-        if not body.supply_product_id or not body.supply_qty or body.supply_qty <= 0:
-            raise HTTPException(400, "برای مدل «محصول آماده» انتخاب محصول و تعداد الزامی است.")
+        # چند محصول مجاز است؛ برای سازگاری با درخواست‌های قدیمی، فیلد تکی هم پذیرفته می‌شود.
+        if body.supply_items:
+            for raw in body.supply_items:
+                try:
+                    pid = int(raw.get("product_id") or 0)
+                    qty = int(raw.get("quantity") or 0)
+                except Exception:
+                    continue
+                if pid > 0 and qty > 0:
+                    fixed_items.append({"product_id": pid, "quantity": qty})
+            # یک محصول تکراری را تجمیع کن.
+            merged = {}
+            for item in fixed_items:
+                merged[item["product_id"]] = merged.get(item["product_id"], 0) + item["quantity"]
+            fixed_items = [{"product_id": pid, "quantity": qty} for pid, qty in merged.items()]
+        elif body.supply_product_id and body.supply_qty and body.supply_qty > 0:
+            fixed_items = [{"product_id": int(body.supply_product_id), "quantity": int(body.supply_qty)}]
+        if not fixed_items:
+            raise HTTPException(400, "حداقل یک محصول و تعداد آن را انتخاب کنید.")
+        for item in fixed_items:
+            product = db.get_product(item["product_id"])
+            if not product or not product["is_active"] or not product["is_auto_provision"]:
+                raise HTTPException(400, f"محصول #{item['product_id']} فعال یا خودکار-ساز نیست.")
+        # ستون‌های فعلی درخواست فقط یک محصول را نگه می‌دارند؛ اولین محصول primary است
+        # و لیست کامل در marker متنی برای ادامه‌ی flow ذخیره می‌شود.
+        body.supply_product_id = fixed_items[0]["product_id"]
+        body.supply_qty = fixed_items[0]["quantity"]
         volume_gb = 0
     else:
         if body.volume_gb <= 0:
@@ -3969,6 +4025,10 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
             raise HTTPException(400, "پنل انتخاب‌شده فعال نیست یا برای نمایندگی مجاز نشده است.")
 
     request_text = (body.note or "").strip() or "ثبت مستقیم توسط ادمین از پنل وب"
+    if fixed_items:
+        # متادیتای داخلی برای اینکه اگر بات مستقل بعداً توکن را فرستاد، تمام اقلام هم تخصیص یابند.
+        import json as _json
+        request_text = f"{request_text} [[RESSELLER_SUPPLY_ITEMS:{_json.dumps(fixed_items, separators=(',', ':'))}]]"
     request_id = (await asyncio.to_thread(
         db.create_reseller_request, tg_id, volume_gb, request_text, 0,
         body.supply_model, body.supply_product_id, body.supply_qty, body.bot_choice,
