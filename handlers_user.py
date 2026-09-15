@@ -26,7 +26,7 @@ from md_utils import escape_md, escape_html
 import keyboards as kb
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
 import ai_support
-from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path
+from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path, DB_PATH
 from database import Database, DuplicateBotTokenError
 from config_delivery import deliver_config_to_user, send_individual_configs, build_qr_bytes
 from renewal_engine import execute_renewal, RenewalError
@@ -95,6 +95,11 @@ async def _send_admin_notification(bot, admin_id, send_coro_factory, context_lab
 
 
 def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
+    # نمایندگی سطح ۲ در بات‌های مستقل، دیتابیس محلی جدا دارد؛ اعتبار، مدل تامین و
+    # پنل واقعی اما در دیتابیس اصلی نگهداری می‌شوند. این backend مشترک جلوی اختلاف
+    # رفتار «بات اصلی» و «بات نماینده» را می‌گیرد.
+    reseller_backend = db if is_main_bot else Database(DB_PATH)
+
     # امنیت/هزینه: جلوگیری از اسپم پیام به دستیار هوش مصنوعی. هر بات (اصلی یا
     # نمایندگی) نمونه‌ی مستقل خودش از این دیکشنری را دارد (بسته به closure)،
     # پس رفتار بین بات‌های مختلف قاطی نمی‌شود. فقط حافظه‌ی درون‌پروسه‌ای است -
@@ -2152,9 +2157,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not (await asyncio.to_thread(db.is_reseller, message.from_user.id)):
             return
         await state.clear()
-        credit = (await asyncio.to_thread(db.get_reseller_credit, message.from_user.id))
-        supply = await asyncio.to_thread(db.get_reseller_supply, message.from_user.id)
-        inventory = await asyncio.to_thread(db.get_reseller_product_inventory, message.from_user.id)
+        credit = (await asyncio.to_thread(reseller_backend.get_reseller_credit, message.from_user.id))
+        supply = await asyncio.to_thread(reseller_backend.get_reseller_supply, message.from_user.id)
+        inventory = await asyncio.to_thread(reseller_backend.get_reseller_product_inventory, message.from_user.id)
         fixed = [dict(x) for x in inventory if int(x["qty_remaining"]) > 0]
         if supply["model"] == "fixed_product" or fixed:
             lines = ["🧑‍💼 پنل نمایندگی", "", "📦 موجودی محصولات شما:"]
@@ -2179,11 +2184,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             product_id = int(call.data.split(":", 1)[1])
         except Exception:
             await call.answer("محصول نامعتبر است.", show_alert=True); return
-        inventory = await asyncio.to_thread(db.get_reseller_product_inventory, call.from_user.id)
+        inventory = await asyncio.to_thread(reseller_backend.get_reseller_product_inventory, call.from_user.id)
         item = next((dict(x) for x in inventory if int(x["product_id"]) == product_id), None)
         if not item or int(item["qty_remaining"]) < 1:
             await call.answer("موجودی این محصول تمام شده است.", show_alert=True); return
-        server = await asyncio.to_thread(db.get_reseller_panel, call.from_user.id)
+        server = await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id)
         if not server or not server["is_active"]:
             await call.answer("پنل نمایندگی تنظیم نشده یا غیرفعال است.", show_alert=True); return
         await state.clear(); await state.set_state(ResellerFlow.waiting_fixed_product_username)
@@ -2206,21 +2211,23 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 break
         data = await state.get_data()
         product_id = int(data["fixed_product_id"])
+        server = await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id)
         try:
-            result = (await provision_reseller_fixed_product(db, call.from_user.id, product_id, 1, username_prefix=prefix or "r", username=candidate))[0]
+            result = (await provision_reseller_fixed_product(reseller_backend, call.from_user.id, product_id, 1, username_prefix=prefix or "r", username=candidate))[0]
         except ProvisionError as e:
             await state.clear(); await call.answer(str(e), show_alert=True); return
         try:
-            await asyncio.to_thread(db.add_custom_config, call.from_user.id, data["panel_server_id"], result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
+            local_panel_id = await asyncio.to_thread(db.get_or_create_mirror_panel_server, server)
+            await asyncio.to_thread(db.add_custom_config, call.from_user.id, local_panel_id, result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
         except Exception:
             try:
-                server=await asyncio.to_thread(db.get_panel_server, data["panel_server_id"])
+                server=await asyncio.to_thread(reseller_backend.get_panel_server, data["panel_server_id"])
                 if server:
                     provider=get_provider(server); await provider.delete_user(result["username"])
             except Exception: pass
-            await asyncio.to_thread(db.grant_reseller_product_credit, call.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
+            await asyncio.to_thread(reseller_backend.grant_reseller_product_credit, call.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
             await state.clear(); await call.answer("ثبت کانفیگ ناموفق بود.", show_alert=True); return
-        remaining=await asyncio.to_thread(db.get_reseller_product_credit, call.from_user.id, product_id)
+        remaining=await asyncio.to_thread(reseller_backend.get_reseller_product_credit, call.from_user.id, product_id)
         await state.clear(); await call.answer("کانفیگ ساخته شد.")
         await call.message.answer(f"✅ کانفیگ ساخته شد!\n\n🛠 نام کاربری: {escape_md(result['username'])}\n📦 محصول: {escape_md(result['product_name'])}\n📶 حجم: {result['volume_gb']} گیگ | ⏳ مدت: {result['duration_days']} روز\n\n`{result['subscription_url']}`\n\n📦 موجودی باقی‌مانده: {remaining:,} عدد", parse_mode="Markdown", reply_markup=kb.menu_for_user(db, call.from_user.id, is_main_bot))
 
@@ -2235,22 +2242,24 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("❌ این نام کاربری قبلاً استفاده شده است."); return
         data=await state.get_data()
         product_id=int(data["fixed_product_id"])
+        server=await asyncio.to_thread(reseller_backend.get_reseller_panel, message.from_user.id)
         try:
-            result=(await provision_reseller_fixed_product(db, message.from_user.id, product_id, 1, username_prefix=prefix or "r", username=username))[0]
+            result=(await provision_reseller_fixed_product(reseller_backend, message.from_user.id, product_id, 1, username_prefix=prefix or "r", username=username))[0]
         except ProvisionError as e:
             await state.clear(); await message.answer(f"⛔️ {e}"); return
         try:
-            await asyncio.to_thread(db.add_custom_config, message.from_user.id, data["panel_server_id"], result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
+            local_panel_id = await asyncio.to_thread(db.get_or_create_mirror_panel_server, server)
+            await asyncio.to_thread(db.add_custom_config, message.from_user.id, local_panel_id, result["username"], result["volume_gb"], result["duration_days"], result["subscription_url"], source="reseller")
         except Exception:
             # در صورت شکست ثبت رکورد، موجودی برگردانده و اکانت پنل حذف می‌شود.
             try:
-                server=await asyncio.to_thread(db.get_panel_server, data["panel_server_id"])
+                server=await asyncio.to_thread(reseller_backend.get_panel_server, data["panel_server_id"])
                 if server:
                     provider=get_provider(server); await provider.delete_user(result["username"])
             except Exception: pass
-            await asyncio.to_thread(db.grant_reseller_product_credit, message.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
+            await asyncio.to_thread(reseller_backend.grant_reseller_product_credit, message.from_user.id, product_id, 1, reason="بازگشت موجودی به‌دلیل خطای ثبت کانفیگ")
             await state.clear(); await message.answer("⛔️ ثبت کانفیگ ناموفق بود؛ موجودی شما برگشت داده شد."); return
-        remaining=await asyncio.to_thread(db.get_reseller_product_credit, message.from_user.id, product_id)
+        remaining=await asyncio.to_thread(reseller_backend.get_reseller_product_credit, message.from_user.id, product_id)
         await state.clear()
         await message.answer(
             f"✅ کانفیگ محصول آماده ساخته شد!\n\n🛠 نام کاربری: {escape_md(result['username'])}\n"
@@ -2265,11 +2274,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not (await asyncio.to_thread(db.is_reseller, call.from_user.id)):
             await call.answer("دسترسی نداری.", show_alert=True)
             return
-        credit = (await asyncio.to_thread(db.get_reseller_credit, call.from_user.id))
+        credit = (await asyncio.to_thread(reseller_backend.get_reseller_credit, call.from_user.id))
         if credit <= 0:
             await call.answer("اعتبار شما کافی نیست. با ادمین تماس بگیر.", show_alert=True)
             return
-        server = (await asyncio.to_thread(db.get_reseller_panel, call.from_user.id))
+        server = (await asyncio.to_thread(reseller_backend.get_reseller_panel, call.from_user.id))
         if not server:
             await call.answer("هنوز سروری برای نمایندگی توسط ادمین تنظیم نشده.", show_alert=True)
             return
@@ -2333,7 +2342,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("❌ لطفاً فقط عدد صحیح مثبت وارد کنید.")
             return
         volume_gb = int(text)
-        credit = (await asyncio.to_thread(db.get_reseller_credit, message.from_user.id))
+        credit = (await asyncio.to_thread(reseller_backend.get_reseller_credit, message.from_user.id))
         if volume_gb > credit:
             await message.answer(f"❌ اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
             return
@@ -2361,7 +2370,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # اعتبار را برده باشد، اینجا واقعاً رد می‌شود و اکانت تازه‌ساخته روی پنل هم
         # پاک می‌شود تا یتیم نماند.
         credit_ok = (await asyncio.to_thread(
-            db.consume_reseller_credit, message.from_user.id, volume_gb,
+            reseller_backend.consume_reseller_credit, message.from_user.id, volume_gb,
             reason=f"ساخت کانفیگ «{result.username}»",
         ))
         if not credit_ok:
@@ -2373,8 +2382,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         try:
+            local_panel_id = await asyncio.to_thread(db.get_or_create_mirror_panel_server, server)
             (await asyncio.to_thread(db.add_custom_config,
-                message.from_user.id, server["id"], result.username, volume_gb, duration_days, result.subscription_url,
+                message.from_user.id, local_panel_id, result.username, volume_gb, duration_days, result.subscription_url,
                 source="reseller",
             ))
         except Exception:
@@ -2385,7 +2395,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "ثبت کانفیگ دستی نماینده %s ناموفق بود", message.from_user.id
             )
             (await asyncio.to_thread(
-                db.adjust_reseller_credit, message.from_user.id, volume_gb,
+                reseller_backend.adjust_reseller_credit, message.from_user.id, volume_gb,
                 reason="بازگشت اعتبار به‌دلیل خطای ثبت کانفیگ",
             ))
             try:
@@ -2395,7 +2405,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("⛔️ خطایی در ثبت کانفیگ رخ داد؛ اعتبار شما بازگردانده شد. دوباره تلاش کن.")
             return
 
-        new_credit = (await asyncio.to_thread(db.get_reseller_credit, message.from_user.id))
+        new_credit = (await asyncio.to_thread(reseller_backend.get_reseller_credit, message.from_user.id))
         await state.clear()
         await message.answer(
             f"✅ کانفیگ ساخته شد!\n\n"
@@ -4723,6 +4733,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         دکمه‌ی تایید را زده). عمداً همه‌چیز (توکن/یوزرنیم/آیدی مالک) را از خودِ ردیف
         دیتابیسِ درخواست می‌خواند، نه از FSM state، چون در مسیر بیرونی این تابع از
         چتِ مالک صدا زده می‌شود که اصلاً به state چتِ درخواست‌دهنده دسترسی ندارد."""
+        if not (await asyncio.to_thread(db.claim_reseller_request_finalization, req["id"])):
+            return
+        req = await asyncio.to_thread(db.get_reseller_request, req["id"])
         owner_id = req["owner_telegram_id"]
         token = req["bot_token"]
         username = req["bot_username"]

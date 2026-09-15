@@ -6304,12 +6304,30 @@ class Database:
             )
 
     def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
-        """delta_gb مثبت (شارژ) یا منفی (کسر بابت ساخت کانفیگ) باشد."""
+        """شارژ/تنظیم اعتبار نماینده با تضمین اینکه موجودی هرگز منفی نشود.
+
+        delta مثبت = شارژ، delta منفی = کسر. کسر منفی به‌صورت اتمیک انجام می‌شود
+        تا پنل وب/بات نتوانند با مقدار نامعتبر یا درخواست‌های هم‌زمان اعتبار را
+        زیر صفر ببرند.
+        """
+        if not isinstance(delta_gb, int) or delta_gb == 0:
+            raise ValueError("delta_gb باید عدد صحیح و غیرصفر باشد")
         with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
-                (delta_gb, user_tg_id),
-            )
+            if delta_gb < 0:
+                cur = conn.execute(
+                    "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? "
+                    "WHERE telegram_id=? AND reseller_credit_gb >= ?",
+                    (delta_gb, user_tg_id, -delta_gb),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError("اعتبار نماینده برای این کسر کافی نیست")
+            else:
+                cur = conn.execute(
+                    "UPDATE users SET reseller_credit_gb = reseller_credit_gb + ? WHERE telegram_id=?",
+                    (delta_gb, user_tg_id),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError("نماینده یافت نشد")
             conn.execute(
                 "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
                 (user_tg_id, delta_gb, reason, admin_id),
@@ -6360,19 +6378,27 @@ class Database:
                 (reseller_id, product_id),
             ).fetchone()
             current = int(row["qty_remaining"]) if row else 0
-            new_qty = current + delta
-            if new_qty < 0:
-                raise ValueError("موجودی محصول نمی‌تواند منفی شود")
-            if row:
-                conn.execute(
-                    "UPDATE reseller_product_credit SET qty_remaining=?, updated_at=CURRENT_TIMESTAMP WHERE reseller_id=? AND product_id=?",
-                    (new_qty, reseller_id, product_id),
+            if delta < 0:
+                cur = conn.execute(
+                    "UPDATE reseller_product_credit SET qty_remaining=qty_remaining + ?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE reseller_id=? AND product_id=? AND qty_remaining >= ?",
+                    (delta, reseller_id, product_id, -delta),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError("موجودی محصول نمی‌تواند منفی شود")
+                new_qty = current + delta
             else:
-                conn.execute(
-                    "INSERT INTO reseller_product_credit (reseller_id, product_id, qty_remaining) VALUES (?, ?, ?)",
-                    (reseller_id, product_id, new_qty),
-                )
+                new_qty = current + delta
+                if row:
+                    conn.execute(
+                        "UPDATE reseller_product_credit SET qty_remaining=?, updated_at=CURRENT_TIMESTAMP WHERE reseller_id=? AND product_id=?",
+                        (new_qty, reseller_id, product_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO reseller_product_credit (reseller_id, product_id, qty_remaining) VALUES (?, ?, ?)",
+                        (reseller_id, product_id, new_qty),
+                    )
             conn.execute(
                 "INSERT INTO reseller_credit_log (user_id, delta_gb, reason, admin_id) VALUES (?, ?, ?, ?)",
                 (reseller_id, 0, reason or f"تنظیم موجودی محصول #{product_id}: {delta:+d}", admin_id),
@@ -6692,6 +6718,18 @@ class Database:
                 "UPDATE reseller_requests SET claimed_by=NULL WHERE id=? AND claimed_by=?",
                 (request_id, admin_id),
             )
+
+    def claim_reseller_request_finalization(self, request_id: int) -> bool:
+        """رزرو اتمیک مرحله‌ی نهایی‌سازی درخواست. فقط یک worker می‌تواند
+        درخواست awaiting_bot_info را وارد provisioning کند تا دبل‌تپ/دو callback
+        باعث ساخت دوباره‌ی بات، تخصیص دوباره‌ی اعتبار یا موجودی نشود."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE reseller_requests SET status='provisioning', updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='awaiting_bot_info'",
+                (request_id,),
+            )
+            return cur.rowcount > 0
 
     def set_reseller_request_status(self, request_id: int, status: str, **fields):
         cols, values = ["status=?", "updated_at=CURRENT_TIMESTAMP"], [status]
