@@ -3007,7 +3007,7 @@ def _resolved_admin_panel_url(request: Request) -> str:
 
 
 async def _deliver_reseller_webpanel_link(bot_id: int, request: Request) -> bool:
-    reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
+    reseller_bot = (await asyncio.to_thread(main_db.get_reseller_bot, bot_id))
     if not reseller_bot or not reseller_bot["web_panel_setup_token"]:
         return False
     panel_url = _resolved_admin_panel_url(request)
@@ -3017,9 +3017,14 @@ async def _deliver_reseller_webpanel_link(bot_id: int, request: Request) -> bool
         "🌐 لینک راه‌اندازی پنل وب نمایندگی شما:\n\n"
         f"{link}\n\n"
         "این لینک یک‌بارمصرف است؛ با باز کردنش یک یوزرنیم/پسورد دلخواه برای پنل وب "
-        "خودت (مستقل از پنل بات اصلی) تنظیم می‌کنی."
+        "خودت تنظیم می‌کنی."
     )
-    return await tg_send(reseller_bot["bot_token"], reseller_bot["owner_telegram_id"], text)
+    # نماینده‌ی بدون بات توکن واقعی تلگرام ندارد و با no-bot:* ذخیره می‌شود؛
+    # لینک چنین نماینده‌ای باید با بات اصلی ارسال شود.
+    send_token = reseller_bot["bot_token"]
+    if str(send_token or "").startswith("no-bot:"):
+        send_token = BOT_TOKEN
+    return await tg_send(send_token, reseller_bot["owner_telegram_id"], text)
 
 
 def _set_main_bot_fsm_state(chat_id: int, state: Optional[str], data: Optional[dict] = None) -> bool:
@@ -3339,6 +3344,84 @@ def api_set_reseller_panel(tg_id: int, body: ResellerPanelBody, admin=Depends(re
     return {"ok": True}
 
 
+class ResellerManageBody(BaseModel):
+    owner_name: Optional[str] = None
+    enabled: Optional[bool] = None
+    supply_model: Optional[str] = None
+    supply_product_id: Optional[int] = None
+    panel_server_id: Optional[int] = None
+
+
+@app.get("/api/resellers/{tg_id}/manage")
+def api_reseller_manage(tg_id: int, admin=Depends(require_permission("resellers"))):
+    user = row_to_dict(db.get_user(tg_id))
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    supply = db.get_reseller_supply(tg_id)
+    inventory = rows_to_list(db.get_reseller_product_inventory(tg_id))
+    bot_rows = [dict(x) for x in db.list_reseller_bots() if x["owner_telegram_id"] == tg_id]
+    for b in bot_rows:
+        b.pop("bot_token", None); b.pop("web_panel_setup_token", None)
+    return {"user": user, "supply": supply, "inventory": inventory, "bots": bot_rows}
+
+
+@app.patch("/api/resellers/{tg_id}")
+def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends(require_permission("resellers"))):
+    user = db.get_user(tg_id)
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    if body.supply_model is not None and body.supply_model not in ("volume_credit", "fixed_product"):
+        raise HTTPException(400, "مدل تامین نامعتبر است.")
+    if body.supply_model == "fixed_product":
+        if not body.supply_product_id:
+            raise HTTPException(400, "برای مدل محصول آماده، محصول را مشخص کنید.")
+        product = db.get_product(body.supply_product_id)
+        if not product or not product["is_active"] or not product["is_auto_provision"]:
+            raise HTTPException(400, "محصول انتخاب‌شده فعال یا خودکار-ساز نیست.")
+    if body.owner_name is not None:
+        db.update_user_profile(tg_id, first_name=body.owner_name)
+    if body.enabled is not None:
+        db.set_reseller_status(tg_id, body.enabled)
+    if body.supply_model is not None:
+        db.set_reseller_supply_model(tg_id, body.supply_model, body.supply_product_id if body.supply_model == "fixed_product" else None)
+    if body.panel_server_id is not None or body.supply_model is not None:
+        db.set_reseller_panel(tg_id, body.panel_server_id)
+    db.log_admin_action(admin["id"], "reseller_level2_edit", f"ویرایش نماینده سطح ۲ {tg_id} (پنل وب - {admin['username']})", "reseller", tg_id)
+    return {"ok": True}
+
+
+class ResellerProductInventoryBody(BaseModel):
+    delta: int
+    reason: Optional[str] = None
+
+
+@app.post("/api/resellers/{tg_id}/products/{product_id}/inventory")
+def api_adjust_level2_product_inventory(tg_id: int, product_id: int, body: ResellerProductInventoryBody, admin=Depends(require_permission("resellers"))):
+    if not db.is_reseller(tg_id):
+        raise HTTPException(400, "این کاربر نماینده فعال نیست.")
+    product = db.get_product(product_id)
+    if not product or not product["is_active"] or not product["is_auto_provision"]:
+        raise HTTPException(400, "محصول معتبر یا خودکار-ساز نیست.")
+    try:
+        qty = db.adjust_reseller_product_credit(tg_id, product_id, body.delta, admin_id=admin["id"], reason=body.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.log_admin_action(admin["id"], "reseller_product_inventory", f"نماینده {tg_id} | محصول {product_id} | {body.delta:+d}", "reseller", tg_id)
+    return {"ok": True, "qty_remaining": qty}
+
+
+@app.delete("/api/resellers/{tg_id}")
+def api_delete_level2_reseller(tg_id: int, admin=Depends(require_permission("resellers"))):
+    if not db.get_user(tg_id):
+        raise HTTPException(404, "کاربر یافت نشد.")
+    bots = [dict(x) for x in db.list_reseller_bots() if x["owner_telegram_id"] == tg_id]
+    for b in bots:
+        db.delete_reseller_bot(b["id"])
+    db.purge_reseller_leftovers(tg_id)
+    db.log_admin_action(admin["id"], "reseller_level2_delete", f"حذف نماینده سطح ۲ {tg_id} (پنل وب - {admin['username']})", "reseller", tg_id)
+    return {"ok": True}
+
+
 @app.get("/api/resellers/analytics/cohort")
 def api_reseller_cohort(days: int = 30, months: int = 6, admin=Depends(require_permission("resellers"))):
     """تحلیل کوهورت (نگهداشت ماهانه) و ریزش (churn) نمایندگی‌ها."""
@@ -3430,7 +3513,7 @@ async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuote
 
 
 @app.post("/api/reseller-requests/{request_id}/approve-payment")
-async def api_approve_reseller_request_payment(request_id: int, admin=Depends(require_permission("resellers"))):
+async def api_approve_reseller_request_payment(request_id: int, request: Request, admin=Depends(require_permission("resellers"))):
     req = (await asyncio.to_thread(db.get_reseller_request, request_id))
     if not req or req["status"] != "awaiting_payment_review":
         raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
@@ -3456,11 +3539,11 @@ async def api_approve_reseller_request_payment(request_id: int, admin=Depends(re
         # نمایندگی همین‌جا تکمیل می‌شود (معادل _finalize_no_bot_reseller_request
         # در handlers_admin.py، ولی با HTTP خام چون این پروسه aiogram Bot ندارد).
         req = (await asyncio.to_thread(db.get_reseller_request, request_id))
-        await _finalize_no_bot_reseller_request_web(req)
+        await _finalize_no_bot_reseller_request_web(req, request)
     return {"ok": True}
 
 
-async def _finalize_no_bot_reseller_request_web(req):
+async def _finalize_no_bot_reseller_request_web(req, request: Request = None):
     """معادل _finalize_no_bot_reseller_request در handlers_admin.py، برای وقتی که
     تایید پرداخت از پنل وب مستقل انجام می‌شود (نه از تلگرام). هر تغییری در منطق
     تکمیل درخواست باید در هر دو جا اعمال شود."""
@@ -3504,6 +3587,10 @@ async def _finalize_no_bot_reseller_request_web(req):
     if req["panel_server_id"]:
         (await asyncio.to_thread(db.set_reseller_panel, owner_id, req["panel_server_id"]))
     (await asyncio.to_thread(db.complete_reseller_request, req["id"], owner_id))
+    if req["wants_web_panel"] and request is not None:
+        fake_row = await asyncio.to_thread(db.get_reseller_bot_by_slug, f"noBot_{req['id']}_{owner_id}")
+        if fake_row:
+            await _deliver_reseller_webpanel_link(fake_row["id"], request)
 
     interface_bits = []
     if req["wants_web_panel"]:
@@ -3553,7 +3640,7 @@ class MakeResellerBody(BaseModel):
 
 
 @app.post("/api/users/{tg_id}/make-reseller")
-async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, admin=Depends(require_permission("resellers"))):
+async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Request, admin=Depends(require_permission("resellers"))):
     """نماینده‌کردن مستقیم یک کاربر از پنل ادمین، با همان گزینه‌های چندسطحیِ فرم
     درخواست نمایندگی سطح ۲ کاربر (بند ۶ اسپک) - بدون نیاز به این‌که خودِ کاربر
     درخواست بدهد. برای هر گزینه یک reseller_request با reviewed_by این ادمین ثبت
@@ -3611,7 +3698,7 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, admin=Depen
             reviewed_by=admin["id"], panel_server_id=body.panel_server_id,
         ))
         req = (await asyncio.to_thread(db.get_reseller_request, request_id))
-        await _finalize_no_bot_reseller_request_web(req)
+        await _finalize_no_bot_reseller_request_web(req, request)
 
     return {"ok": True, "request_id": request_id}
 
