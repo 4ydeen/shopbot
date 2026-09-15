@@ -3604,6 +3604,7 @@ class ResellerManageBody(BaseModel):
     enabled: Optional[bool] = None
     supply_model: Optional[str] = None
     supply_product_id: Optional[int] = None
+    supply_products: Optional[list] = None
     panel_server_id: Optional[int] = None
 
 
@@ -3628,11 +3629,19 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
     if body.supply_model is not None and body.supply_model not in ("volume_credit", "fixed_product"):
         raise HTTPException(400, "مدل تامین نامعتبر است.")
     if body.supply_model == "fixed_product":
-        if not body.supply_product_id:
-            raise HTTPException(400, "برای مدل محصول آماده، محصول را مشخص کنید.")
-        product = db.get_product(body.supply_product_id)
-        if not product or not product["is_active"] or not product["is_auto_provision"]:
-            raise HTTPException(400, "محصول انتخاب‌شده فعال یا خودکار-ساز نیست.")
+        items = body.supply_products or []
+        if not items and body.supply_product_id:
+            items = [{"product_id": body.supply_product_id, "qty": 1}]
+        normalized = []; seen = set()
+        for item in items:
+            try: pid, qty = int(item.get("product_id")), int(item.get("qty"))
+            except Exception: raise HTTPException(400, "فهرست محصولات نامعتبر است.")
+            if pid in seen or qty < 0: raise HTTPException(400, "محصول تکراری یا تعداد نامعتبر است.")
+            product = db.get_product(pid)
+            if not product or not product["is_active"] or not product["is_auto_provision"]:
+                raise HTTPException(400, f"محصول #{pid} فعال یا خودکار-ساز نیست.")
+            seen.add(pid); normalized.append((pid, qty))
+        if not normalized: raise HTTPException(400, "حداقل یک محصول را انتخاب کنید.")
     panel_was_sent = "panel_server_id" in getattr(body, "model_fields_set", set())
     if panel_was_sent and body.panel_server_id is not None:
         panel = db.get_panel_server(body.panel_server_id)
@@ -3643,7 +3652,20 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
     if body.enabled is not None:
         db.set_reseller_status(tg_id, body.enabled)
     if body.supply_model is not None:
-        db.set_reseller_supply_model(tg_id, body.supply_model, body.supply_product_id if body.supply_model == "fixed_product" else None)
+        normalized = normalized if body.supply_model == "fixed_product" else []
+        db.set_reseller_supply_model(tg_id, body.supply_model, normalized[0][0] if normalized else None)
+        if body.supply_model == "fixed_product" and "supply_products" in getattr(body, "model_fields_set", set()):
+            # تنظیم مستقیم موجودی چندمحصولی؛ هر محصول مقدار دقیقاً انتخاب‌شده را می‌گیرد.
+            existing = {int(x["product_id"]): int(x["qty_remaining"] or 0) for x in db.get_reseller_product_inventory(tg_id)}
+            wanted = {pid: qty for pid, qty in normalized}
+            for pid in set(existing) | set(wanted):
+                target = wanted.get(pid, 0)
+                current = existing.get(pid, 0)
+                if target != current:
+                    db.adjust_reseller_product_credit(tg_id, pid, target - current, admin_id=admin["id"], reason="تنظیم چندمحصولی نمایندگی از پنل مدیریت")
+        if body.supply_model == "fixed_product" and "supply_products" in getattr(body, "model_fields_set", set()):
+            # انتخاب جدید، موجودی همان نماینده را برای همه محصولات انتخاب‌شده دقیقاً تنظیم می‌کند.
+            db.replace_reseller_product_inventory(tg_id, normalized)
     if panel_was_sent:
         db.set_reseller_panel(tg_id, body.panel_server_id)
     elif body.supply_model is not None:
@@ -3836,12 +3858,16 @@ async def _finalize_no_bot_reseller_request_web(req, request: Request = None):
 
     (await asyncio.to_thread(db.set_reseller_status, owner_id, True))
     (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
-    if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
-        (await asyncio.to_thread(
-            db.set_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
-            admin_id=req["reviewed_by"],
-            reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']} (پنل وب)",
-        ))
+    if req["supply_model"] == "fixed_product":
+        items = _decode_reseller_supply_items(req.get("request_text") if hasattr(req, "get") else req["request_text"])
+        if not items and req["supply_product_id"] and req["supply_qty"]:
+            items = [{"product_id": int(req["supply_product_id"]), "quantity": int(req["supply_qty"])}]
+        for item in items:
+            (await asyncio.to_thread(
+                db.set_reseller_product_credit, owner_id, item["product_id"], item["quantity"],
+                admin_id=req["reviewed_by"],
+                reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']} (پنل وب)",
+            ))
     else:
         (await asyncio.to_thread(db.adjust_reseller_credit, 
             owner_id, req["volume_gb"], admin_id=req["reviewed_by"],
@@ -3958,6 +3984,7 @@ class MakeResellerBody(BaseModel):
     supply_model: str = "volume_credit"
     supply_product_id: Optional[int] = None
     supply_qty: Optional[int] = None
+    supply_products: Optional[list] = None
     supply_items: Optional[list[dict]] = None
     panel_server_id: Optional[int] = None
     note: Optional[str] = None
