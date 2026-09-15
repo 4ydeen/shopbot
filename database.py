@@ -2460,9 +2460,15 @@ class Database:
 
     def edit_product(self, product_id: int, name: str = None, price: int = None,
                       description: str = None, duration_days: int = None,
-                      is_auto_provision: bool = None, auto_provision_volume_gb: int = None,
-                      provision_server_id: int = None, payment_methods=...):
+                      is_auto_provision=..., auto_provision_volume_gb=...,
+                      provision_server_id=..., payment_methods=..., category_id: int = None):
+        # نکته: is_auto_provision/auto_provision_volume_gb/provision_server_id از سنتینل
+        # Ellipsis استفاده می‌کنند (مثل payment_methods) چون باید بتوان آن‌ها را عمداً
+        # NULL/False کرد (مثلاً وقتی محصول از «اتصال مستقیم به پنل» به «بانک کانفیگ»
+        # برمی‌گردد) و این با pattern قبلیِ «None یعنی بدون تغییر» فرق دارد.
         fields, values = [], []
+        if category_id is not None:
+            fields.append("category_id=?"); values.append(category_id)
         if name is not None:
             fields.append("name=?"); values.append(name)
         if price is not None:
@@ -2471,11 +2477,11 @@ class Database:
             fields.append("description=?"); values.append(description)
         if duration_days is not None:
             fields.append("duration_days=?"); values.append(duration_days)
-        if is_auto_provision is not None:
+        if is_auto_provision is not ...:
             fields.append("is_auto_provision=?"); values.append(1 if is_auto_provision else 0)
-        if auto_provision_volume_gb is not None:
+        if auto_provision_volume_gb is not ...:
             fields.append("auto_provision_volume_gb=?"); values.append(auto_provision_volume_gb)
-        if provision_server_id is not None:
+        if provision_server_id is not ...:
             fields.append("provision_server_id=?"); values.append(provision_server_id)
         if payment_methods is not ...:
             fields.append("payment_methods=?")
