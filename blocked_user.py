@@ -7,6 +7,7 @@ Middleware مسدودسازی کاربر.
 ادمین‌های بات از این محدودیت معاف هستند (تا خودشون هیچ‌وقت قفل نشن).
 """
 
+import asyncio
 import logging
 
 from aiogram import BaseMiddleware
@@ -34,16 +35,26 @@ class BlockedUserMiddleware(BaseMiddleware):
         # کاربر هرگز در دیتابیس ساخته نمی‌شد - حتی بعد از عضویت و زدن «بررسی
         # مجدد» هم (چون آن کال‌بک هم add_or_update_user را صدا نمی‌زد) - نتیجه:
         # کاربر برای همیشه در پنل وب و مینی‌اپ قابل جستجو نبود.
+        # این دو تماس هر دو sqlite3 synchronous هستند (SELECT/UPDATE-INSERT
+        # واقعی روی دیسک) و قبلاً مستقیم روی event loop مشترکِ همه‌ی بات‌ها
+        # اجرا می‌شدند - یعنی هر پیام هر کاربر (نه فقط ادمین‌ها) می‌توانست با
+        # برخورد به قفل نوشتن (مثلاً هم‌زمانی با Mini App/پنل ادمین) کل
+        # پردازش را تا busy_timeout فریز کند. با to_thread این دو کوئری روی
+        # یک ترد جدا اجرا می‌شوند و فقط همین یک آپدیت را منتظر نگه می‌دارند،
+        # نه بقیه‌ی بات‌ها/کاربران را.
         try:
-            self.db.add_or_update_user(user.id, user.username or "", user.first_name or "")
+            await asyncio.to_thread(
+                self.db.add_or_update_user, user.id, user.username or "", user.first_name or ""
+            )
         except Exception:
             logger.exception("ثبت/به‌روزرسانی کاربر %s ناموفق بود.", user.id)
 
-        # ادمین‌های بات از این محدودیت معاف هستند
+        # ادمین‌های بات از این محدودیت معاف هستند (is_admin از کش در حافظه
+        # می‌خواند، عملاً بلوکه‌کننده نیست - رجوع کنید به database.py)
         if self.db.is_admin(user.id):
             return await handler(event, data)
 
-        db_user = self.db.get_user(user.id)
+        db_user = await asyncio.to_thread(self.db.get_user, user.id)
         if not db_user or not db_user["is_blocked"]:
             return await handler(event, data)
 

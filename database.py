@@ -1714,18 +1714,18 @@ class Database:
     # -----------------------------------------------------------------------
 
     def add_or_update_user(self, tg_id: int, username: str, first_name: str):
+        # این تابع به‌ازای *هر* پیام/کلیک هر کاربری صدا زده می‌شود (از
+        # BlockedUserMiddleware)، یعنی داغ‌ترین مسیر کل دیتابیس است. قبلاً یک
+        # SELECT جدا برای تشخیص وجود کاربر + یک UPDATE/INSERT جدا (دو رفت‌وبرگشت
+        # به دیسک) بود؛ با UPSERT تک‌کوئری، هم مدت باز نگه‌داشتن قفل نوشتن کم
+        # می‌شود و هم به‌طور کلی سریع‌تر است - بدون تغییر در رفتار (فیلدهای
+        # دیگر همچنان مقدار پیش‌فرض جدول را در حالت INSERT می‌گیرند).
         with self._get_conn() as conn:
-            row = conn.execute("SELECT id FROM users WHERE telegram_id=?", (tg_id,)).fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE users SET username=?, first_name=? WHERE telegram_id=?",
-                    (username, first_name, tg_id),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO users (telegram_id, username, first_name) VALUES (?, ?, ?)",
-                    (tg_id, username, first_name),
-                )
+            conn.execute(
+                "INSERT INTO users (telegram_id, username, first_name) VALUES (?, ?, ?) "
+                "ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name",
+                (tg_id, username, first_name),
+            )
 
     def get_user(self, tg_id: int):
         with self._get_conn() as conn:

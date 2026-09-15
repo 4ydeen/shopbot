@@ -69,7 +69,10 @@ class AdminPresenceMiddleware:
             if now - last >= self.PRESENCE_WRITE_INTERVAL:
                 self._last_write[user.id] = now
                 try:
-                    self.db.touch_admin_presence(user.id)
+                    # throttle شده (هر ۲۰ ثانیه) ولی هنوز یک نوشتن sqlite
+                    # synchronous است؛ با to_thread تا مطمئن شویم دقیقاً همین
+                    # نوشتن نمی‌تواند کل بات را برای همه فریز کند.
+                    await asyncio.to_thread(self.db.touch_admin_presence, user.id)
                 except Exception:
                     pass
         return await handler(event, data)

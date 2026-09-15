@@ -11,6 +11,7 @@ Middleware عضویت اجباری در کانال.
 (fail-open) تا یک تنظیم اشتباه، بات را کاملاً از کار نیندازد.
 """
 
+import asyncio
 import logging
 
 from aiogram import BaseMiddleware
@@ -60,8 +61,12 @@ class ForceJoinMiddleware(BaseMiddleware):
         if self.db.is_admin(user.id):
             return await handler(event, data)
 
-        # کاربرانی که با دیپ‌لینک تبلیغاتی nofj وارد شده‌اند، برای همیشه معاف‌اند
-        if self.db.is_force_join_exempt(user.id):
+        # کاربرانی که با دیپ‌لینک تبلیغاتی nofj وارد شده‌اند، برای همیشه معاف‌اند.
+        # این یک SELECT synchronous واقعی روی دیتابیس است (کش نمی‌شود، چون
+        # به‌ازای هر کاربر جدا است)؛ فقط وقتی عضویت اجباری فعال باشد به اینجا
+        # می‌رسیم، ولی همان موقع هم باید با to_thread اجرا شود تا یک برخورد با
+        # قفل نوشتن، کل بات (همه‌ی کاربران/نمایندگی‌ها) را فریز نکند.
+        if await asyncio.to_thread(self.db.is_force_join_exempt, user.id):
             return await handler(event, data)
 
         # دکمه‌ی «بررسی مجدد» باید همیشه خودش اجرا شود (نه اینکه دوباره بلاک شود)
