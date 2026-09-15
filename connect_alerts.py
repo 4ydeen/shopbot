@@ -25,6 +25,10 @@ from sub_info import fetch_sub_info
 
 logger = logging.getLogger(__name__)
 
+
+async def _db(fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
 # کلیدهای settings برای نمایش فقط‌خواندنیِ وضعیت آخرین اجرا در پنل وب مدیریت
 STATUS_KEY_LAST_RUN = "_job_connect_alerts_last_run"
 STATUS_KEY_LAST_CONNECT_SENT = "_job_connect_alerts_last_connect_sent"
@@ -79,7 +83,7 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
                 await bot.send_message(user_id, text)
             except Exception:
                 logger.warning("ارسال هشدار اتصال به کاربر %s ناموفق بود.", user_id)
-            db.mark_connect_alert_sent(config_id, is_custom)
+            await _db(db.mark_connect_alert_sent, config_id, is_custom)
             connect_sent = True
 
     # --- هشدار عدم‌اتصال ---
@@ -100,7 +104,7 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
                         await bot.send_message(user_id, text)
                     except Exception:
                         logger.warning("ارسال هشدار عدم‌اتصال به کاربر %s ناموفق بود.", user_id)
-                    db.mark_no_connect_alert_sent(config_id, is_custom)
+                    await _db(db.mark_no_connect_alert_sent, config_id, is_custom)
                     no_connect_sent = True
             except (ValueError, TypeError):
                 logger.warning("assigned_at نامعتبر برای config=%s (custom=%s)", config_id, is_custom)
@@ -111,7 +115,7 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
 async def check_and_send_connect_alerts(bot, db) -> tuple:
     """یک بار همه‌ی سرویس‌های فعال (انبار کانفیگ + کانفیگ‌های پنلی) را بررسی
     می‌کند. خروجی: (تعداد هشدار اتصال ارسال‌شده, تعداد هشدار عدم‌اتصال ارسال‌شده)"""
-    settings = db.get_connect_alert_settings()
+    settings = await _db(db.get_connect_alert_settings)
     if not (settings["connect_enabled"] or settings["no_connect_enabled"]):
         return 0, 0
 
@@ -119,7 +123,7 @@ async def check_and_send_connect_alerts(bot, db) -> tuple:
     no_connect_sent = 0
 
     try:
-        rows = db.get_configs_due_for_connect_check()
+        rows = await _db(db.get_configs_due_for_connect_check)
     except Exception:
         logger.exception("خطا در دریافت لیست بررسی اتصال (انبار کانفیگ)")
         rows = []
@@ -129,7 +133,7 @@ async def check_and_send_connect_alerts(bot, db) -> tuple:
         no_connect_sent += int(n)
 
     try:
-        custom_rows = db.get_custom_configs_due_for_connect_check()
+        custom_rows = await _db(db.get_custom_configs_due_for_connect_check)
     except Exception:
         logger.exception("خطا در دریافت لیست بررسی اتصال (کانفیگ‌های پنلی)")
         custom_rows = []
@@ -153,9 +157,9 @@ async def connect_alert_loop(bot, db, interval_seconds: int = 900) -> None:
         except Exception:
             logger.exception("خطا در چرخه‌ی هشدار اتصال/عدم‌اتصال به کانفیگ")
         try:
-            db.set_setting(STATUS_KEY_LAST_RUN, datetime.now(timezone.utc).isoformat())
-            db.set_setting(STATUS_KEY_LAST_CONNECT_SENT, str(connect_sent))
-            db.set_setting(STATUS_KEY_LAST_NO_CONNECT_SENT, str(no_connect_sent))
+            await _db(db.set_setting, STATUS_KEY_LAST_RUN, datetime.now(timezone.utc).isoformat())
+            await _db(db.set_setting, STATUS_KEY_LAST_CONNECT_SENT, str(connect_sent))
+            await _db(db.set_setting, STATUS_KEY_LAST_NO_CONNECT_SENT, str(no_connect_sent))
         except Exception:
             logger.exception("خطا در ذخیره‌ی وضعیت آخرین اجرای هشدار اتصال/عدم‌اتصال")
         await asyncio.sleep(interval_seconds)

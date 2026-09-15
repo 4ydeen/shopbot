@@ -22,6 +22,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+async def _db(fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
 def create_backup(db_path: str, backup_dir: str, keep: int = 14) -> Optional[str]:
     """یک بکاپ امن از دیتابیس می‌سازد و بکاپ‌های قدیمی‌تر از `keep` نسخه‌ی آخر را
     حذف می‌کند. مسیر فایل بکاپ ساخته‌شده را برمی‌گرداند، یا None اگر دیتابیس
@@ -295,14 +299,15 @@ async def backup_and_notify(bot, db, db_path: str, backup_dir: str, keep: int = 
         f"📦 حجم: {file_size_mb:.1f} مگابایت"
     )
 
-    for admin_id in db.list_admins():
+    admin_ids = await _db(db.list_admins)
+    for admin_id in admin_ids:
         try:
             await bot.send_document(admin_id, FSInputFile(backup_path), caption=caption)
         except Exception:
             logger.warning("ارسال بکاپ به ادمین %s ناموفق بود.", admin_id)
 
     # کپی جانبی: ارسال به یک چت تلگرام دوم (مثلاً ادمین/کانال روی سرور دوم)
-    secondary_chat_id = (db.get_setting("backup_secondary_chat_id", "") or "").strip()
+    secondary_chat_id = (await _db(db.get_setting, "backup_secondary_chat_id", "") or "").strip()
     if secondary_chat_id:
         try:
             await bot.send_document(
@@ -312,16 +317,16 @@ async def backup_and_notify(bot, db, db_path: str, backup_dir: str, keep: int = 
             logger.warning("ارسال بکاپ به چت دوم (%s) ناموفق بود.", secondary_chat_id)
 
     # کپی جانبی: ارسال مستقیم فایل به سرور دوم با SFTP
-    if (db.get_setting("backup_sftp_enabled", "0") or "0") == "1":
+    if (await _db(db.get_setting, "backup_sftp_enabled", "0") or "0") == "1":
         try:
             await push_backup_sftp(
                 backup_path,
-                host=db.get_setting("backup_sftp_host", ""),
-                port=int(db.get_setting("backup_sftp_port", "22") or "22"),
-                username=db.get_setting("backup_sftp_username", ""),
-                password=(db.get_setting("backup_sftp_password", "") or None),
-                key_path=(db.get_setting("backup_sftp_key_path", "") or None),
-                remote_dir=db.get_setting("backup_sftp_remote_dir", "/root/vpn_backups") or "/root/vpn_backups",
+                host=await _db(db.get_setting, "backup_sftp_host", ""),
+                port=int(await _db(db.get_setting, "backup_sftp_port", "22") or "22"),
+                username=await _db(db.get_setting, "backup_sftp_username", ""),
+                password=(await _db(db.get_setting, "backup_sftp_password", "") or None),
+                key_path=(await _db(db.get_setting, "backup_sftp_key_path", "") or None),
+                remote_dir=await _db(db.get_setting, "backup_sftp_remote_dir", "/root/vpn_backups") or "/root/vpn_backups",
             )
         except Exception:
             logger.exception("ارسال بکاپ با SFTP به سرور دوم ناموفق بود.")
@@ -345,7 +350,7 @@ async def backup_loop(bot, db, db_path: str, interval_seconds: int = 86400, keep
             logger.exception("خطا در چرخه‌ی بکاپ‌گیری خودکار برای %s", db_path)
 
         sleep_seconds = interval_seconds
-        raw_hours = (db.get_setting("backup_interval_hours", "") or "").strip()
+        raw_hours = (await _db(db.get_setting, "backup_interval_hours", "") or "").strip()
         if raw_hours:
             try:
                 sleep_seconds = max(1, int(float(raw_hours) * 3600))

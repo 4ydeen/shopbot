@@ -25,13 +25,17 @@ from jalali import to_jalali_str
 logger = logging.getLogger(__name__)
 
 
+async def _db(fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
 async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
     user_id = row["assigned_user_id"]
     if not user_id:
-        mark_fn(row["config_id"])
+        await _db(mark_fn, row["config_id"])
         return False
 
-    settings = db.get_renewal_settings()
+    settings = await _db(db.get_renewal_settings)
 
     # زمان انقضا فقط از Subscription واقعی خوانده می‌شود.
     # cf.expires_at دیتابیس نباید روی زمان ارسال یادآوری اثر بگذارد.
@@ -70,7 +74,7 @@ async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
     real_days_left = int(seconds_left // (24 * 60 * 60))
     days_left = max(0, real_days_left)
 
-    code, discount_expires_at, percent, expiry_hours = db.generate_renewal_discount_code(user_id)
+    code, discount_expires_at, percent, expiry_hours = await _db(db.generate_renewal_discount_code, user_id)
 
     days_line = (
         f"⌛ حدود {days_left} روز از سرویس شما باقی مانده (انقضا: {to_jalali_str(exp_dt)}).\n\n"
@@ -95,7 +99,7 @@ async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
         logger.warning("ارسال یادآوری تمدید به کاربر %s ناموفق بود.", user_id)
 
     # صرف‌نظر از موفقیت ارسال پیام، برای جلوگیری از تلاش‌های مکرر، به‌عنوان ارسال‌شده علامت می‌زنیم
-    mark_fn(row["config_id"])
+    await _db(mark_fn, row["config_id"])
     return True
 
 
@@ -105,7 +109,7 @@ async def check_and_send_renewal_reminders(bot, db) -> int:
     تعداد یادآوری‌هایی که واقعاً ارسال شدند را برمی‌گرداند."""
     sent = 0
     try:
-        rows = db.get_configs_due_for_renewal_reminder()
+        rows = await _db(db.get_configs_due_for_renewal_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های تمدید سرویس (انبار کانفیگ)")
         rows = []
@@ -114,7 +118,7 @@ async def check_and_send_renewal_reminders(bot, db) -> int:
             sent += 1
 
     try:
-        custom_rows = db.get_custom_configs_due_for_renewal_reminder()
+        custom_rows = await _db(db.get_custom_configs_due_for_renewal_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های تمدید سرویس (کانفیگ‌های پنلی)")
         custom_rows = []
@@ -128,10 +132,10 @@ async def check_and_send_renewal_reminders(bot, db) -> int:
 async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
     user_id = row["assigned_user_id"]
     if not user_id:
-        mark_fn(row["config_id"])
+        await _db(mark_fn, row["config_id"])
         return False
 
-    settings = db.get_volume_reminder_settings()
+    settings = await _db(db.get_volume_reminder_settings)
 
     info = await fetch_sub_info(row["link"])
     if not info.get("ok"):
@@ -159,7 +163,7 @@ async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
     if not due:
         return False
 
-    code, discount_expires_at, percent, expiry_hours = db.generate_volume_discount_code(user_id)
+    code, discount_expires_at, percent, expiry_hours = await _db(db.generate_volume_discount_code, user_id)
 
     text = (
         "📉 یادآوری اتمام حجم\n\n"
@@ -178,7 +182,7 @@ async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
     except Exception:
         logger.warning("ارسال یادآوری اتمام حجم به کاربر %s ناموفق بود.", user_id)
 
-    db.mark_volume_reminder_sent(row["config_id"])
+    await _db(db.mark_volume_reminder_sent, row["config_id"])
     return True
 
 
@@ -188,7 +192,7 @@ async def check_and_send_volume_reminders(bot, db) -> int:
     تعداد یادآوری‌هایی که واقعاً ارسال شدند را برمی‌گرداند."""
     sent = 0
     try:
-        rows = db.get_configs_due_for_volume_reminder()
+        rows = await _db(db.get_configs_due_for_volume_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های اتمام حجم (انبار کانفیگ)")
         rows = []
@@ -197,7 +201,7 @@ async def check_and_send_volume_reminders(bot, db) -> int:
             sent += 1
 
     try:
-        custom_rows = db.get_custom_configs_due_for_volume_reminder()
+        custom_rows = await _db(db.get_custom_configs_due_for_volume_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های اتمام حجم (کانفیگ‌های پنلی)")
         custom_rows = []
@@ -218,13 +222,13 @@ async def check_and_process_auto_renewals(bot, db) -> int:
 
     renewed = 0
     try:
-        rows = db.get_custom_configs_due_for_auto_renew()
+        rows = await _db(db.get_custom_configs_due_for_auto_renew)
     except Exception:
         logger.exception("خطا در دریافت لیست تمدید خودکار کانفیگ‌های پنلی")
         rows = []
 
-    price_per_gb = int(db.get_setting("renewal_price_per_gb", "0") or "0")
-    price_per_day = int(db.get_setting("renewal_price_per_day", "0") or "0")
+    price_per_gb = int(await _db(db.get_setting, "renewal_price_per_gb", "0") or "0")
+    price_per_day = int(await _db(db.get_setting, "renewal_price_per_day", "0") or "0")
     today = datetime.now(timezone.utc).date().isoformat()
 
     for row in rows:
@@ -234,7 +238,7 @@ async def check_and_process_auto_renewals(bot, db) -> int:
         price = volume_gb * price_per_gb + duration_days * price_per_day
         label = row["display_name"] if ("display_name" in row.keys() and row["display_name"]) else row["username"]
 
-        wallet_credit = db.get_wallet_credit(user_id)
+        wallet_credit = await _db(db.get_wallet_credit, user_id)
         if price <= 0 or wallet_credit < price:
             if row["auto_renew_alert_date"] != today:
                 try:
@@ -246,10 +250,10 @@ async def check_and_process_auto_renewals(bot, db) -> int:
                     )
                 except Exception:
                     logger.warning("ارسال هشدار کمبود موجودی تمدید خودکار به کاربر %s ناموفق بود.", user_id)
-                db.mark_custom_config_auto_renew_alert(row["id"], today)
+                await _db(db.mark_custom_config_auto_renew_alert, row["id"], today)
             continue
 
-        server = db.get_panel_server(row["panel_server_id"]) if row["panel_server_id"] else None
+        server = await _db(db.get_panel_server, row["panel_server_id"]) if row["panel_server_id"] else None
         if not server or not server["is_active"]:
             continue
         try:
@@ -259,9 +263,10 @@ async def check_and_process_auto_renewals(bot, db) -> int:
             logger.exception("تمدید خودکار روی پنل برای کانفیگ «%s» ناموفق بود.", row["username"])
             continue
 
-        db.add_wallet_credit(user_id, -price)
-        db.apply_custom_config_renewal(row["id"], add_volume_gb=0, add_days=duration_days)
-        db.add_custom_config_history(
+        await _db(db.add_wallet_credit, user_id, -price)
+        await _db(db.apply_custom_config_renewal, row["id"], add_volume_gb=0, add_days=duration_days)
+        await _db(
+            db.add_custom_config_history,
             row["id"], "auto_renew", f"{volume_gb} گیگ / {duration_days} روز — {price:,} تومان از کیف پول",
         )
         renewed += 1
@@ -296,9 +301,9 @@ async def renewal_reminder_loop(bot, db, interval_seconds: int = 3600) -> None:
         except Exception:
             logger.exception("خطا در چرخه‌ی یادآوری اتمام حجم")
         try:
-            db.set_setting(STATUS_KEY_LAST_RUN, datetime.now(timezone.utc).isoformat())
-            db.set_setting(STATUS_KEY_LAST_DATE_SENT, str(date_sent))
-            db.set_setting(STATUS_KEY_LAST_VOLUME_SENT, str(volume_sent))
+            await _db(db.set_setting, STATUS_KEY_LAST_RUN, datetime.now(timezone.utc).isoformat())
+            await _db(db.set_setting, STATUS_KEY_LAST_DATE_SENT, str(date_sent))
+            await _db(db.set_setting, STATUS_KEY_LAST_VOLUME_SENT, str(volume_sent))
         except Exception:
             logger.exception("خطا در ذخیره‌ی وضعیت آخرین اجرای یادآوری‌ها")
         await asyncio.sleep(interval_seconds)
