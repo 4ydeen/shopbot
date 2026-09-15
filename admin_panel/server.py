@@ -2919,10 +2919,14 @@ def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog
 
 
 class ProductEditBody(BaseModel):
+    category_id: Optional[int] = None
     name: Optional[str] = None
     price: Optional[int] = None
     description: Optional[str] = None
     duration_days: Optional[int] = None
+    # اگر ارسال شود ("bank" یا "direct")، منبع تأمین محصول تغییر می‌کند (امکانی که
+    # قبلاً فقط موقع «ساخت» محصول بود و بعد از آن دیگر قابل تغییر نبود).
+    source: Optional[str] = None
     provision_server_id: Optional[int] = None
     auto_provision_volume_gb: Optional[int] = None
 
@@ -2933,17 +2937,52 @@ def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(requi
     if not old_product:
         raise HTTPException(status_code=404, detail="محصول یافت نشد.")
 
-    provision_server_id = None
-    if body.provision_server_id is not None:
-        if not old_product["is_auto_provision"]:
-            raise HTTPException(status_code=400, detail="این محصول به‌صورت خودکار ساخته نمی‌شود.")
+    if body.category_id is not None and not db.get_category(body.category_id):
+        raise HTTPException(status_code=404, detail="دسته‌بندی یافت نشد.")
+
+    if body.source is not None and body.source not in ("bank", "direct"):
+        raise HTTPException(status_code=400, detail="منبع تأمین نامعتبر است.")
+
+    # سنتینل Ellipsis یعنی «بدون تغییر» (به db.edit_product پاس داده می‌شود).
+    is_auto_provision = ...
+    provision_server_id = ...
+    auto_provision_volume_gb = ...
+
+    if body.source == "direct":
         if not db.is_full_access_bot(not admin["tenant"]):
             raise HTTPException(status_code=403, detail="اتصال مستقیم به پنل فقط برای بات اصلی یا نمایندگی «کامل» مجاز است.")
-        if not db.get_panel_server(body.provision_server_id):
+        if not body.provision_server_id or not db.get_panel_server(body.provision_server_id):
             raise HTTPException(status_code=404, detail="سرور پنل یافت نشد.")
+        if body.auto_provision_volume_gb is None or body.auto_provision_volume_gb < 0:
+            raise HTTPException(status_code=400, detail="برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
+        is_auto_provision = True
         provision_server_id = body.provision_server_id
+        auto_provision_volume_gb = body.auto_provision_volume_gb
+    elif body.source == "bank":
+        if body.duration_days is None and old_product["duration_days"] == 0:
+            raise HTTPException(status_code=400, detail="برای برگرداندن به «بانک کانفیگ» باید مدت اعتبار (روز) را هم مشخص کنید.")
+        is_auto_provision = False
+        provision_server_id = None
+        auto_provision_volume_gb = None
+    elif body.provision_server_id is not None or body.auto_provision_volume_gb is not None:
+        # سازگاری با نسخه‌ی قبلی: ویرایش تک‌فیلدیِ سرور/حجم روی محصولی که از قبل
+        # «اتصال مستقیم به پنل» بوده (بدون تغییر صریح source).
+        if not old_product["is_auto_provision"]:
+            raise HTTPException(status_code=400, detail="این محصول به‌صورت خودکار ساخته نمی‌شود.")
+        if body.provision_server_id is not None:
+            if not db.is_full_access_bot(not admin["tenant"]):
+                raise HTTPException(status_code=403, detail="اتصال مستقیم به پنل فقط برای بات اصلی یا نمایندگی «کامل» مجاز است.")
+            if not db.get_panel_server(body.provision_server_id):
+                raise HTTPException(status_code=404, detail="سرور پنل یافت نشد.")
+            provision_server_id = body.provision_server_id
+        if body.auto_provision_volume_gb is not None:
+            if body.auto_provision_volume_gb < 0:
+                raise HTTPException(status_code=400, detail="حجم نامعتبر است.")
+            auto_provision_volume_gb = body.auto_provision_volume_gb
 
-    effective_server_id = provision_server_id if provision_server_id is not None else old_product["provision_server_id"]
+    effective_server_id = (
+        provision_server_id if provision_server_id is not ... else old_product["provision_server_id"]
+    )
 
     if body.duration_days is not None:
         if body.duration_days < 0:
@@ -2951,15 +2990,10 @@ def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(requi
         if body.duration_days == 0 and not effective_server_id:
             raise HTTPException(status_code=400, detail="مدت نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
 
-    if body.auto_provision_volume_gb is not None:
-        if body.auto_provision_volume_gb < 0:
-            raise HTTPException(status_code=400, detail="حجم نامعتبر است.")
-        if body.auto_provision_volume_gb == 0 and not effective_server_id:
-            raise HTTPException(status_code=400, detail="حجم نامحدود فقط برای محصولات با اتصال مستقیم به پنل ممکن است.")
-
     db.edit_product(
         product_id, body.name, body.price, body.description, body.duration_days,
-        provision_server_id=provision_server_id, auto_provision_volume_gb=body.auto_provision_volume_gb,
+        is_auto_provision=is_auto_provision, provision_server_id=provision_server_id,
+        auto_provision_volume_gb=auto_provision_volume_gb, category_id=body.category_id,
     )
     db.log_admin_action(admin["id"], "product_edit", f"#{product_id} (پنل وب - {admin['username']})", "product", product_id)
     return {"ok": True}
