@@ -2291,6 +2291,7 @@ async function showUserDetail(tgId) {
         <span class="mono">ID: ${tgId}</span>
       </div>
       <span class="badge ${u.is_blocked ? 'badge-rejected' : 'badge-approved'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
+      ${(hasPerm('resellers') && !d.is_reseller) ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
       ${historyBtn('user', tgId)}
     </div>
 
@@ -2343,7 +2344,111 @@ async function showUserDetail(tgId) {
     });
     if (isSenior) wireUserServiceActions(body, tgId, close);
     if (isSenior) wireUserBankConfigActions(body, tgId, close);
+    const makeResellerBtn = $('#ud-make-reseller', body);
+    if (makeResellerBtn) makeResellerBtn.addEventListener('click', () => openMakeResellerModal(tgId, close));
   }, { wide: true });
+}
+
+/* نماینده‌کردن مستقیم یک کاربر توسط ادمین از پنل وب، با همان محورهای چندسطحیِ
+   فرم درخواست نمایندگی سطح ۲ خودِ کاربر (بات/پنل وب/مینی‌اپ/مدل تامین) - معادل
+   دقیقاً همان چیزی که کاربر خودش می‌تواند درخواست بدهد. */
+const MAKE_RESELLER_BOT_LABEL = {
+  dedicated: 'بات مستقل با توکن (بعد از ثبت، از کاربر توکن @BotFather خواسته می‌شود)',
+  inline_link: 'لینک اختصاصی فروش داخل بات اصلی',
+  none: 'بدون بات (فقط اعتبار/موجودی نمایندگی)',
+};
+
+function openMakeResellerModal(tgId, closeUserModal) {
+  openModal(`نماینده کردن کاربر ${tgId}`, `
+    <div class="form-grid">
+      <div><b>بات این نمایندگی چطور باشد؟</b></div>
+      <select class="input" id="mr-bot-choice">
+        ${Object.entries(MAKE_RESELLER_BOT_LABEL).map(([v, l]) => `<option value="${v}"${v === 'none' ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+      </select>
+
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-web-panel"> پنل وب اختصاصی می‌خواهد</label>
+      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-miniapp"> مینی‌اپ فروشگاه می‌خواهد</label>
+
+      <div><b>مدل تامین</b></div>
+      <select class="input" id="mr-supply-model">
+        <option value="volume_credit" selected>اعتبار حجمی</option>
+        <option value="fixed_product">محصول آماده</option>
+      </select>
+
+      <div id="mr-volume-wrap">
+        <div><b>حجم اعتبار اولیه (گیگ)</b></div>
+        <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
+      </div>
+
+      <div id="mr-fixed-wrap" style="display:none">
+        <div><b>محصول</b></div>
+        <select class="input" id="mr-fixed-product"><option value="">در حال بارگذاری...</option></select>
+        <div><b>تعداد موجودی اولیه</b></div>
+        <input class="input" id="mr-fixed-qty" type="number" placeholder="مثلاً 10">
+      </div>
+
+      <div><b>پنل اعتباری نمایندگی (اختیاری)</b></div>
+      <select class="input" id="mr-panel"><option value="">پیش‌فرض خودکار</option></select>
+
+      <div><b>یادداشت داخلی (اختیاری)</b></div>
+      <textarea class="input" id="mr-note" rows="2" placeholder="مثلاً دلیل نماینده‌کردن این کاربر..."></textarea>
+
+      <button class="btn btn-primary" id="mr-submit">✅ ثبت و نماینده کردن</button>
+    </div>
+  `, (body, close) => {
+    const supplySel = $('#mr-supply-model', body);
+    const syncSupplyVisibility = () => {
+      const isFixed = supplySel.value === 'fixed_product';
+      $('#mr-volume-wrap', body).style.display = isFixed ? 'none' : '';
+      $('#mr-fixed-wrap', body).style.display = isFixed ? '' : 'none';
+    };
+    supplySel.addEventListener('change', syncSupplyVisibility);
+    syncSupplyVisibility();
+
+    apiGet('/reseller-panels-lite').then(panels => {
+      const sel = $('#mr-panel', body);
+      if (sel) sel.insertAdjacentHTML('beforeend', panels.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join(''));
+    }).catch(() => {});
+
+    apiGet('/reseller-fixed-products').then(products => {
+      const sel = $('#mr-fixed-product', body);
+      if (!sel) return;
+      sel.innerHTML = products.length
+        ? products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')
+        : '<option value="">محصولی موجود نیست</option>';
+    }).catch(() => {});
+
+    $('#mr-submit', body).addEventListener('click', async () => {
+      const supply_model = supplySel.value;
+      const payload = {
+        bot_choice: $('#mr-bot-choice', body).value,
+        wants_web_panel: $('#mr-web-panel', body).checked,
+        wants_miniapp: $('#mr-miniapp', body).checked,
+        supply_model,
+        panel_server_id: $('#mr-panel', body).value ? Number($('#mr-panel', body).value) : null,
+        note: $('#mr-note', body).value.trim() || null,
+      };
+      if (supply_model === 'fixed_product') {
+        const productId = $('#mr-fixed-product', body).value;
+        const qty = Number($('#mr-fixed-qty', body).value);
+        if (!productId) { toast('یک محصول انتخاب کنید.', true); return; }
+        if (!qty || qty <= 0) { toast('تعداد موجودی نامعتبر است.', true); return; }
+        payload.supply_product_id = Number(productId);
+        payload.supply_qty = qty;
+      } else {
+        const volume_gb = Number($('#mr-volume', body).value);
+        if (!volume_gb || volume_gb <= 0) { toast('حجم اعتبار اولیه نامعتبر است.', true); return; }
+        payload.volume_gb = volume_gb;
+      }
+      try {
+        await apiPost(`/users/${tgId}/make-reseller`, payload);
+        toast('کاربر با موفقیت نماینده شد.');
+        close();
+        if (closeUserModal) closeUserModal();
+        showUserDetail(tgId);
+      } catch (e) { handleErr(e); }
+    });
+  });
 }
 
 /* سرویس‌های مستقیم-پنل یک کاربر - معادل «سرویس‌های من» در ربات، ولی از
