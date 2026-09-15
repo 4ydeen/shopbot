@@ -2762,7 +2762,7 @@ async def api_reseller_self_fixed(body: ResellerSelfFixedBody, admin=Depends(get
         raise HTTPException(400, "در حال حاضر هر بار فقط یک محصول برای استفاده شخصی دریافت می‌شود.")
     owner_id, _ = await asyncio.to_thread(_reseller_owner_id_or_404)
     supply = await asyncio.to_thread(main_db.get_reseller_supply, owner_id)
-    if supply["model"] != "fixed_product" or int(supply["product_id"] or 0) != body.product_id:
+    if supply["model"] != "fixed_product":
         raise HTTPException(403, "این محصول به موجودی نمایندگی شما اختصاص داده نشده است.")
     product = await asyncio.to_thread(main_db.get_product, body.product_id)
     if not product or not product["is_active"] or not product["is_auto_provision"]:
