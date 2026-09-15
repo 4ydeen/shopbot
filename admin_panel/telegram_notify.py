@@ -11,6 +11,24 @@ import aiohttp
 logger = logging.getLogger("admin_panel.telegram_notify")
 
 
+async def get_me(bot_token: str):
+    """اطلاعات بات (از جمله username) از طریق Bot API خام؛ برای ساخت لینک
+    resref_<id> نمایندگیِ لینک‌محور از داخل پنل وب مستقل (بدون aiogram)."""
+    if not bot_token:
+        return None
+    url = f"https://api.telegram.org/bot{bot_token}/getMe"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data.get("result")
+    except Exception:
+        logger.exception("getMe ناموفق بود")
+        return None
+
+
 async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str = None, reply_markup: dict = None) -> bool:
     if not bot_token:
         return False

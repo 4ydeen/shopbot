@@ -45,7 +45,7 @@ from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 import button_registry
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel import mobile_auth
-from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file
+from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file, get_me as tg_get_me
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 import fcm_client
@@ -130,8 +130,10 @@ def _lookup_reseller_bot_row(b: str):
 
 
 def resolve_tenant_by_slug(slug: str) -> Optional[Tenant]:
-    """فقط نماینده‌های «سطح ۱ (کامل)» که پنل وبشان صریحاً فعال شده اجازه‌ی
-    ورود دارند؛ نماینده‌ی سطح ۲ یا غیرفعال، حتی با اسلاگ درست هم رد می‌شود.
+    """نماینده‌های سطح ۱ (کامل) یا سطح ۲ که پنل وبشان صریحاً فعال شده (web_panel_enabled=1)
+    اجازه‌ی ورود دارند؛ نماینده‌ی غیرفعال یا بدون پنل وب فعال، حتی با اسلاگ درست هم رد می‌شود.
+    برای سطح ۲، فعال‌بودن web_panel_enabled یعنی خودِ نماینده هنگام درخواست نمایندگی
+    گزینه‌ی «پنل وب» را انتخاب کرده (ر.ک. wants_web_panel در reseller_requests).
     مثل مینی‌اپ، هم اسلاگ دلخواه و هم آیدی عددی بات (وقتی هنوز اسلاگ ست نشده) قبول می‌شود."""
     slug = (slug or "").strip()
     if not slug:
@@ -140,9 +142,6 @@ def resolve_tenant_by_slug(slug: str) -> Optional[Tenant]:
     if not row:
         return None
     if not row["is_active"] or not row["web_panel_enabled"]:
-        return None
-    level = row["reseller_level"] if "reseller_level" in row.keys() else 2
-    if level != 1:
         return None
     resolved_path = resolve_db_path(row["db_path"])
     if not os.path.exists(resolved_path):
@@ -507,9 +506,17 @@ async def _notifier_supervisor():
         try:
             active_slugs = set()
             for row in (await asyncio.to_thread(main_db.list_reseller_bots, active_only=True)):
-                level = row["reseller_level"] if "reseller_level" in row.keys() else 2
+                # رفع باگ: شرط قبلی (`level != 1`) اعلان زنده‌ی پنل وب (سفارش/تیکت
+                # جدید و ...) را فقط برای نماینده‌ی سطح ۱ (کامل) روشن می‌کرد، درحالی‌که
+                # resolve_tenant_by_slug (بالاتر در همین فایل) صراحتاً به نماینده‌ی
+                # سطح ۲ای هم که هنگام درخواست نمایندگی گزینه‌ی «پنل وب» را انتخاب کرده
+                # (web_panel_enabled=1) اجازه‌ی ورود به پنل وب می‌دهد. نتیجه: چنین
+                # نماینده‌ای وارد پنلش می‌شد ولی هیچ‌وقت پوش سفارش/تیکت جدید نمی‌گرفت.
+                # معیار درست همان چیزی است که resolve_tenant_by_slug برای اجازه‌ی ورود
+                # چک می‌کند: is_active (که همین حلقه با active_only=True تضمین کرده) و
+                # web_panel_enabled - مستقل از سطح نمایندگی.
                 enabled = bool(row["web_panel_enabled"]) if "web_panel_enabled" in row.keys() else False
-                if level != 1 or not enabled:
+                if not enabled:
                     continue
                 resolved_path = resolve_db_path(row["db_path"])
                 if not os.path.exists(resolved_path):
@@ -641,6 +648,17 @@ def require_main_tenant(admin=Depends(get_current_admin)):
     """برای بخش‌هایی که حتی برای owner پنل نماینده هم معنی ندارند (مثلاً منابع سخت‌افزاری سرور)."""
     if admin["tenant"]:
         raise HTTPException(403, "این بخش فقط در پنل بات اصلی در دسترس است.")
+    return admin
+
+
+def require_full_access_tenant(admin=Depends(get_current_admin)):
+    """بند ۳.۲ اسپک (ممیزی امنیتی): پنل‌های VPN شخصی، ساخت کانفیگ دستی و بانک لینک/قیمت‌گذاری
+    آن، امکاناتی هستند که طرف بات فقط با is_full_access_bot (بات اصلی یا نماینده‌ی «سطح ۱») در
+    دسترس‌اند. تا قبل از این‌که پنل وب برای نماینده‌ی سطح ۲ باز شود، همین که کاربر به این پنل وارد
+    می‌شد یعنی حتماً سطح ۱ بود؛ حالا که سطح ۲ هم می‌تواند پنل وب داشته باشد، owner پنل او از چک
+    require_permission معمولی عبور می‌کند (owner همیشه مجاز است) و باید همین‌جا صریحاً مسدود شود."""
+    if not db.is_full_access_bot(not admin["tenant"]):
+        raise HTTPException(403, "این بخش فقط برای بات اصلی یا نمایندگی «کامل» در دسترس است.")
     return admin
 
 
@@ -2638,6 +2656,13 @@ def api_add_product(body: ProductBody, admin=Depends(require_permission("catalog
     if body.provision_server_id:
         if body.auto_provision_volume_gb is None or body.auto_provision_volume_gb < 0:
             raise HTTPException(400, "برای اتصال مستقیم به پنل باید حجم (گیگابایت) را مشخص کنید.")
+    if not db.is_full_access_bot(not admin["tenant"]):
+        # نمایندگی سطح ۲ (بند ۳.۲ اسپک): نه پنل شخصی دارد، نه بانک کانفیگ دستی؛ فقط
+        # محصول خودکار از اعتبار حجمی/موجودی خودش مجاز است (مطابق منطق طرف بات).
+        if body.provision_server_id:
+            raise HTTPException(403, "اتصال مستقیم به پنل فقط برای بات اصلی یا نمایندگی «کامل» مجاز است.")
+        if not body.is_auto_provision:
+            raise HTTPException(403, "این نمایندگی فقط می‌تواند محصول خودکار (از اعتبار حجمی) بسازد؛ نه بانک کانفیگ دستی.")
     pid = db.add_product(
         body.category_id, body.name, body.price, body.description, body.duration_days,
         body.is_auto_provision or bool(body.provision_server_id), body.auto_provision_volume_gb,
@@ -2667,6 +2692,8 @@ def api_edit_product(product_id: int, body: ProductEditBody, admin=Depends(requi
     if body.provision_server_id is not None:
         if not old_product["is_auto_provision"]:
             raise HTTPException(status_code=400, detail="این محصول به‌صورت خودکار ساخته نمی‌شود.")
+        if not db.is_full_access_bot(not admin["tenant"]):
+            raise HTTPException(status_code=403, detail="اتصال مستقیم به پنل فقط برای بات اصلی یا نمایندگی «کامل» مجاز است.")
         if not db.get_panel_server(body.provision_server_id):
             raise HTTPException(status_code=404, detail="سرور پنل یافت نشد.")
         provision_server_id = body.provision_server_id
@@ -2738,13 +2765,13 @@ class ConfigsAddBody(BaseModel):
 
 
 @app.get("/api/products/{product_id}/configs")
-def api_product_configs(product_id: int, admin=Depends(require_permission("catalog"))):
+def api_product_configs(product_id: int, admin=Depends(require_permission("catalog")), _fa=Depends(require_full_access_tenant)):
     stats = db.get_config_stats(product_id)
     return {"items": rows_to_list(db.get_unused_configs(product_id)), "used_count": stats["used"]}
 
 
 @app.post("/api/products/{product_id}/configs")
-def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require_permission("catalog"))):
+def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require_permission("catalog")), _fa=Depends(require_full_access_tenant)):
     links = [l.strip() for l in body.links.splitlines() if l.strip()]
     added, duplicates = db.add_configs(product_id, links)
     db.log_admin_action(admin["id"], "configs_add", f"{added} لینک به محصول #{product_id} (پنل وب - {admin['username']})", "product", product_id)
@@ -2752,7 +2779,7 @@ def api_add_configs(product_id: int, body: ConfigsAddBody, admin=Depends(require
 
 
 @app.delete("/api/configs/{config_id}")
-def api_delete_config(config_id: int, admin=Depends(require_permission("catalog"))):
+def api_delete_config(config_id: int, admin=Depends(require_permission("catalog")), _fa=Depends(require_full_access_tenant)):
     db.delete_config(config_id)
     db.log_admin_action(admin["id"], "config_delete", str(config_id), "config", config_id)
     return {"ok": True}
@@ -3109,7 +3136,16 @@ def api_edit_reseller_bot(bot_id: int, body: ResellerBotEditBody, admin=Depends(
     reseller_bot = db.get_reseller_bot(bot_id)
     if not reseller_bot:
         raise HTTPException(404, "یافت نشد.")
-    db.edit_reseller_bot(bot_id, owner_telegram_id=body.owner_telegram_id, owner_name=body.owner_name)
+    # رفع باگ: قبلاً اینجا فقط edit_reseller_bot صدا زده می‌شد که صرفاً ستون‌های
+    # reseller_bots را عوض می‌کرد - یعنی تغییر owner_telegram_id از این مسیر کاملاً
+    # ظاهری بود (مالکیت واقعی/اعتبار حجمی همچنان مال مالک قبلی می‌ماند؛ جزئیات در
+    # database.transfer_reseller_ownership). حالا وقتی owner_telegram_id واقعاً عوض
+    # شده باشد، از تابعی استفاده می‌شود که مالکیت را کامل (فلگ‌های نمایندگی در
+    # دیتابیس اصلی + role='owner' در دیتابیس محلی بات) منتقل می‌کند.
+    if body.owner_telegram_id is not None and body.owner_telegram_id != reseller_bot["owner_telegram_id"]:
+        db.transfer_reseller_ownership(bot_id, body.owner_telegram_id, new_owner_name=body.owner_name)
+    elif body.owner_name is not None:
+        db.edit_reseller_bot(bot_id, owner_name=body.owner_name)
     db.log_admin_action(
         admin["id"], "reseller_bot_edit", f"نماینده #{bot_id} (پنل وب - {admin['username']})", "reseller_bot", bot_id
     )
@@ -3133,14 +3169,66 @@ def api_delete_reseller_bot(bot_id: int, purge_db: bool = False, admin=Depends(r
     return {"ok": True}
 
 
+@app.get("/api/resellers/inline-commissions")
+def api_list_inline_resellers(admin=Depends(require_permission("resellers"))):
+    """دید ادمین به نماینده‌های «لینک اختصاصی داخل بات اصلی» و کارمزدشان
+    (بند ۴ از موارد باقی‌مانده - چون خودِ نماینده فقط /reseller_link دارد و
+    پنل مدیریتی جدا برایش ساخته نشده)."""
+    rows = rows_to_list(db.list_inline_resellers())
+    return {"items": rows}
+
+
+_RESELLER_AXIS_SETTING_KEYS = (
+    "reseller_axis_bot_dedicated_enabled", "reseller_axis_bot_inline_link_enabled",
+    "reseller_axis_bot_none_enabled", "reseller_axis_webpanel_enabled", "reseller_axis_miniapp_enabled",
+    "reseller_axis_supply_volume_enabled", "reseller_axis_supply_fixed_product_enabled",
+)
+
+
+@app.get("/api/resellers/axis-settings")
+async def api_get_reseller_axis_settings(admin=Depends(require_permission("resellers"))):
+    """وضعیت روشن/خاموش سراسری ۴ محور فرم درخواست نمایندگی سطح ۲ + لیست محصولات
+    مجاز برای مدل تامین «محصول آماده» (بند ۶ اسپک)."""
+    settings = {k: (await asyncio.to_thread(db.get_setting, k, "1")) == "1" for k in _RESELLER_AXIS_SETTING_KEYS}
+    raw_ids = (await asyncio.to_thread(db.get_setting, "reseller_fixed_product_ids", "")) or ""
+    allowed_ids = {int(x) for x in raw_ids.split(",") if x.strip().isdigit()}
+    products = (await asyncio.to_thread(db.get_all_products))
+    return {
+        "ok": True,
+        "axes": settings,
+        "products": [
+            {"id": p["id"], "name": p["name"], "category_name": p["category_name"],
+             "is_active": bool(p["is_active"]), "allowed_for_fixed_product": p["id"] in allowed_ids}
+            for p in products
+        ],
+    }
+
+
+class ResellerAxisSettingsBody(BaseModel):
+    axes: dict = {}
+    fixed_product_ids: Optional[list] = None
+
+
+@app.post("/api/resellers/axis-settings")
+async def api_set_reseller_axis_settings(body: ResellerAxisSettingsBody, admin=Depends(require_permission("resellers"))):
+    for key, value in (body.axes or {}).items():
+        if key not in _RESELLER_AXIS_SETTING_KEYS:
+            continue
+        (await asyncio.to_thread(db.set_setting, key, "1" if value else "0"))
+    if body.fixed_product_ids is not None:
+        clean_ids = ",".join(str(int(x)) for x in body.fixed_product_ids)
+        (await asyncio.to_thread(db.set_setting, "reseller_fixed_product_ids", clean_ids))
+    (await asyncio.to_thread(db.log_admin_action, 
+        admin["id"], "reseller_axis_settings_update", f"تنظیمات محورهای نمایندگی سطح ۲ (پنل وب - {admin['username']})",
+    ))
+    return {"ok": True}
+
+
 @app.post("/api/reseller-bots/{bot_id}/web-panel/enable")
 async def api_enable_reseller_webpanel(bot_id: int, request: Request, admin=Depends(require_permission("resellers"))):
     reseller_bot = (await asyncio.to_thread(db.get_reseller_bot, bot_id))
     if not reseller_bot:
         raise HTTPException(404, "یافت نشد.")
-    level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
-    if level != 1:
-        raise HTTPException(400, "پنل وب فقط برای نمایندگی «کامل» قابل فعال‌سازی است.")
     if reseller_bot["web_panel_enabled"]:
         raise HTTPException(400, "قبلاً فعال است؛ برای لینک جدید از «ساخت لینک جدید» استفاده کنید.")
     (await asyncio.to_thread(db.enable_reseller_web_panel, bot_id))
@@ -3346,17 +3434,186 @@ async def api_approve_reseller_request_payment(request_id: int, admin=Depends(re
     req = (await asyncio.to_thread(db.get_reseller_request, request_id))
     if not req or req["status"] != "awaiting_payment_review":
         raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
-    (await asyncio.to_thread(db.approve_reseller_request_payment, request_id, admin["id"]))
+    # رفع باگ ریس‌کاندیشن: approve_reseller_request_payment حالا اتمیک است؛ اگر
+    # هم‌زمان از یک سطح دیگر (بات/مینی‌اپ) همین درخواست تایید شده باشد، False
+    # برمی‌گردد و اینجا متوقف می‌شویم تا اعتبار/بات نماینده دوبار ساخته نشود.
+    if not (await asyncio.to_thread(db.approve_reseller_request_payment, request_id, admin["id"])):
+        raise HTTPException(400, "این درخواست همین الان از جای دیگری تایید شد.")
     (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_payment_approve",
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {(req['price_toman'] or 0):,} (پنل وب - {admin['username']})",
     ))
-    _set_main_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
-    await notify_user(
-        req["user_id"],
-        "✅ پرداخت شما تایید شد!\n\nحالا توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
-    )
+
+    bot_choice = req["bot_choice"] if "bot_choice" in req.keys() else "dedicated"
+    if bot_choice == "dedicated":
+        _set_main_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
+        await notify_user(
+            req["user_id"],
+            "✅ پرداخت شما تایید شد!\n\nحالا توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+        )
+    else:
+        # «لینک اختصاصی داخل بات اصلی» یا «بدون بات»: نیازی به توکن/آیدی مالک نیست،
+        # نمایندگی همین‌جا تکمیل می‌شود (معادل _finalize_no_bot_reseller_request
+        # در handlers_admin.py، ولی با HTTP خام چون این پروسه aiogram Bot ندارد).
+        req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+        await _finalize_no_bot_reseller_request_web(req)
     return {"ok": True}
+
+
+async def _finalize_no_bot_reseller_request_web(req):
+    """معادل _finalize_no_bot_reseller_request در handlers_admin.py، برای وقتی که
+    تایید پرداخت از پنل وب مستقل انجام می‌شود (نه از تلگرام). هر تغییری در منطق
+    تکمیل درخواست باید در هر دو جا اعمال شود."""
+    owner_id = req["user_id"]
+    bot_token = _bot_token()
+    if req["wants_web_panel"] or req["wants_miniapp"]:
+        os.makedirs(RESELLER_DBS_DIR, exist_ok=True)
+        fake_slug = f"noBot_{req['id']}_{owner_id}"
+        fake_token = f"no-bot:{req['id']}:{owner_id}"
+        db_path = os.path.join(RESELLER_DBS_DIR, f"{fake_slug}.db")
+        # قبلاً اینجا req["request_text"] (متن آزادِ توضیحِ درخواست) به‌جای اسم
+        # صاحب بات ذخیره می‌شد؛ get_reseller_owner_display_name اسم/یوزرنیم واقعی را برمی‌گرداند.
+        owner_name = (await asyncio.to_thread(db.get_reseller_owner_display_name, owner_id))
+        reseller_bot_id = (await asyncio.to_thread(
+            db.register_reseller_bot, fake_token, fake_slug, owner_id,
+            owner_name, db_path, reseller_level=2, has_live_bot=0,
+        ))
+        if req["wants_web_panel"]:
+            (await asyncio.to_thread(db.enable_reseller_web_panel, reseller_bot_id))
+        (await asyncio.to_thread(db.set_reseller_miniapp_enabled, reseller_bot_id, bool(req["wants_miniapp"])))
+        reseller_db = Database(db_path)
+        (await asyncio.to_thread(reseller_db.init_db, owner_id=owner_id))
+        if req["wants_miniapp"]:
+            (await asyncio.to_thread(reseller_db.set_setting, "miniapp_tenant_id", str(reseller_bot_id)))
+        (await asyncio.to_thread(reseller_db.set_setting, "reseller_level", "2"))
+        (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", "0"))
+
+    (await asyncio.to_thread(db.set_reseller_status, owner_id, True))
+    (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
+    if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
+        (await asyncio.to_thread(
+            db.grant_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
+            admin_id=req["reviewed_by"],
+            reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']} (پنل وب)",
+        ))
+    else:
+        (await asyncio.to_thread(db.adjust_reseller_credit, 
+            owner_id, req["volume_gb"], admin_id=req["reviewed_by"],
+            reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']} (پنل وب)",
+        ))
+    if req["panel_server_id"]:
+        (await asyncio.to_thread(db.set_reseller_panel, owner_id, req["panel_server_id"]))
+    (await asyncio.to_thread(db.complete_reseller_request, req["id"], owner_id))
+
+    interface_bits = []
+    if req["wants_web_panel"]:
+        interface_bits.append("پنل وب")
+    if req["wants_miniapp"]:
+        interface_bits.append("مینی‌اپ")
+    interface_label = " و ".join(interface_bits) if interface_bits else "بدون رابط (فقط اعتبار/موجودی)"
+    note = ""
+    if req["bot_choice"] == "inline_link":
+        (await asyncio.to_thread(db.enable_inline_reseller, owner_id))
+        me = await tg_get_me(bot_token)
+        username = (me or {}).get("username")
+        if username:
+            ref_link = f"https://t.me/{username}?start=resref_{owner_id}"
+            percent = (await asyncio.to_thread(db.get_setting, "reseller_inline_commission_percent", "10"))
+            note = (
+                f"\n\n🔗 لینک اختصاصی فروش شما داخل همین بات:\n{ref_link}\n\n"
+                f"هر مشتری که با این لینک وارد شود و از شما خرید کند، {percent}٪ از مبلغ هر خرید "
+                f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد. برای دیدن آمار، دستور /reseller_link را بفرستید."
+            )
+    await notify_user(owner_id, f"✅ نمایندگی سطح ۲ شما تکمیل شد.\n🧩 رابط: {interface_label}{note}")
+    try:
+        for a in (await asyncio.to_thread(db.list_admins_with_roles)):
+            if a["role"] in ("owner", "admin"):
+                await notify_user(a["telegram_id"], f"✅ نمایندگی سطح ۲ #{req['id']} (بدون بات مستقل) تکمیل شد.\n👤 مالک: {owner_id}")
+    except Exception:
+        pass
+
+
+@app.get("/api/reseller-fixed-products")
+def api_reseller_fixed_products(admin=Depends(require_permission("resellers"))):
+    """محصولات مجاز برای مدل تامین «محصول آماده»، همان لیستی که در فرم درخواست
+    نمایندگی سطح ۲ کاربر هم استفاده می‌شود."""
+    return [{"id": p["id"], "name": p["name"]} for p in db.get_reseller_fixed_products()]
+
+
+class MakeResellerBody(BaseModel):
+    volume_gb: int = 0
+    bot_choice: str = "none"
+    wants_web_panel: bool = False
+    wants_miniapp: bool = False
+    supply_model: str = "volume_credit"
+    supply_product_id: Optional[int] = None
+    supply_qty: Optional[int] = None
+    panel_server_id: Optional[int] = None
+    note: Optional[str] = None
+
+
+@app.post("/api/users/{tg_id}/make-reseller")
+async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, admin=Depends(require_permission("resellers"))):
+    """نماینده‌کردن مستقیم یک کاربر از پنل ادمین، با همان گزینه‌های چندسطحیِ فرم
+    درخواست نمایندگی سطح ۲ کاربر (بند ۶ اسپک) - بدون نیاز به این‌که خودِ کاربر
+    درخواست بدهد. برای هر گزینه یک reseller_request با reviewed_by این ادمین ثبت
+    می‌شود تا هم در تاریخچه‌ی «درخواست‌های نمایندگی» دیده شود و هم منطق تکمیل
+    (اعتبار/موجودی، پنل وب، مینی‌اپ، لینک اینلاین) دقیقاً همان مسیر تاییدشده‌ی
+    فعلی را طی کند - نه یک کپیِ جدا که ممکن است رفتارش با گذر زمان از مسیر اصلی
+    جدا بیفتد."""
+    if body.bot_choice not in ("dedicated", "inline_link", "none"):
+        raise HTTPException(400, "انتخاب بات نامعتبر است.")
+    if body.supply_model not in ("volume_credit", "fixed_product"):
+        raise HTTPException(400, "مدل تامین نامعتبر است.")
+    user = (await asyncio.to_thread(db.get_user, tg_id))
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    if (await asyncio.to_thread(db.is_reseller, tg_id)):
+        raise HTTPException(400, "این کاربر همین الان هم نماینده است.")
+    if (await asyncio.to_thread(db.get_open_reseller_request, tg_id)):
+        raise HTTPException(400, "این کاربر یک درخواست نمایندگی باز دارد؛ ابتدا از تب «درخواست‌های نمایندگی» آن را ببندید.")
+
+    if body.supply_model == "fixed_product":
+        if not body.supply_product_id or not body.supply_qty or body.supply_qty <= 0:
+            raise HTTPException(400, "برای مدل «محصول آماده» انتخاب محصول و تعداد الزامی است.")
+        volume_gb = 0
+    else:
+        if body.volume_gb <= 0:
+            raise HTTPException(400, "حجم اعتبار اولیه باید عددی مثبت باشد.")
+        volume_gb = body.volume_gb
+
+    request_text = (body.note or "").strip() or "ثبت مستقیم توسط ادمین از پنل وب"
+    request_id = (await asyncio.to_thread(
+        db.create_reseller_request, tg_id, volume_gb, request_text, 0,
+        body.supply_model, body.supply_product_id, body.supply_qty, body.bot_choice,
+        int(body.wants_web_panel), int(body.wants_miniapp),
+    ))
+    (await asyncio.to_thread(db.log_admin_action,
+        admin["id"], "reseller_make_direct",
+        f"کاربر {tg_id} مستقیم نماینده شد (درخواست #{request_id}) (پنل وب - {admin['username']})",
+        "user", tg_id,
+    ))
+
+    if body.bot_choice == "dedicated":
+        (await asyncio.to_thread(
+            db.set_reseller_request_status, request_id, "awaiting_bot_info",
+            reviewed_by=admin["id"], panel_server_id=body.panel_server_id,
+        ))
+        _set_main_bot_fsm_state(tg_id, "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
+        await notify_user(
+            tg_id,
+            "✅ شما توسط مدیریت به‌عنوان نماینده‌ی سطح ۲ انتخاب شدید!\n\n"
+            "برای تکمیل، توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+        )
+    else:
+        (await asyncio.to_thread(
+            db.set_reseller_request_status, request_id, "awaiting_payment_review",
+            reviewed_by=admin["id"], panel_server_id=body.panel_server_id,
+        ))
+        req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+        await _finalize_no_bot_reseller_request_web(req)
+
+    return {"ok": True, "request_id": request_id}
 
 
 class ResellerRequestRejectBody(BaseModel):
@@ -3452,12 +3709,12 @@ def _panel_server_public(s) -> dict:
 
 
 @app.get("/api/panel-servers")
-def api_panel_servers(admin=Depends(require_permission("panels"))):
+def api_panel_servers(admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     return [_panel_server_public(s) for s in db.get_panel_servers()]
 
 
 @app.get("/api/panel-servers/panel-types")
-def api_panel_server_types(admin=Depends(require_permission("panels"))):
+def api_panel_server_types(admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     """لیست انواع پنل پشتیبانی‌شده - برای ساخت فرم افزودن سرور در فرانت."""
     return [
         {
@@ -3471,7 +3728,7 @@ def api_panel_server_types(admin=Depends(require_permission("panels"))):
 
 
 @app.post("/api/panel-servers")
-async def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels"))):
+async def api_add_panel_server(body: PanelServerBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     if not body.name.strip() or not body.api_url.strip() or not body.api_password.strip():
         raise HTTPException(400, "نام، آدرس و پسورد/توکن الزامی هستند.")
     if body.panel_type not in PROVIDERS:
@@ -3523,7 +3780,7 @@ async def api_add_panel_server(body: PanelServerBody, admin=Depends(require_perm
 
 
 @app.get("/api/panel-servers/{server_id}/inbounds")
-async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permission("panels"))):
+async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     server = (await asyncio.to_thread(db.get_panel_server, server_id))
     if not server:
         raise HTTPException(404, "یافت نشد.")
@@ -3536,7 +3793,7 @@ async def api_panel_server_inbounds(server_id: int, admin=Depends(require_permis
 
 
 @app.post("/api/panel-servers/{server_id}/xui-config")
-async def api_set_panel_server_xui_config(server_id: int, body: PanelServerXuiConfigBody, admin=Depends(require_permission("panels"))):
+async def api_set_panel_server_xui_config(server_id: int, body: PanelServerXuiConfigBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     """تکمیل ساخت سرور برای پنل‌های نیازمند «آدرس پایه‌ی Subscription» (3X-UI/Hiddify)."""
     server = db.get_panel_server(server_id)
     if not server:
@@ -3557,7 +3814,7 @@ async def api_set_panel_server_xui_config(server_id: int, body: PanelServerXuiCo
 
 
 @app.post("/api/panel-servers/{server_id}/template")
-async def api_set_panel_server_template(server_id: int, body: PanelServerTemplateBody, admin=Depends(require_permission("panels"))):
+async def api_set_panel_server_template(server_id: int, body: PanelServerTemplateBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     """گرفتن/به‌روزرسانی قالب (group_ids/proxy_settings) از روی یک کاربر نمونه‌ی
     دیگر روی پنل - برای پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin."""
     server = db.get_panel_server(server_id)
@@ -3577,7 +3834,7 @@ async def api_set_panel_server_template(server_id: int, body: PanelServerTemplat
 
 
 @app.post("/api/panel-servers/{server_id}/toggle")
-def api_toggle_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
+def api_toggle_panel_server(server_id: int, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     server = db.get_panel_server(server_id)
     if not server:
         raise HTTPException(404, "یافت نشد.")
@@ -3587,7 +3844,7 @@ def api_toggle_panel_server(server_id: int, admin=Depends(require_permission("pa
 
 
 @app.post("/api/panel-servers/{server_id}/usage/{kind}")
-def api_toggle_panel_server_usage(server_id: int, kind: str, admin=Depends(require_permission("panels"))):
+def api_toggle_panel_server_usage(server_id: int, kind: str, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     """مشخص‌کردن این‌که این سرور برای «کانفیگ شخصی» و/یا «کانفیگ تست» استفاده شود؛
     قبلاً این کلیدها فقط از داخل ربات/مینی‌اپ قابل تنظیم بودند."""
     if kind not in ("custom", "test"):
@@ -3602,7 +3859,7 @@ def api_toggle_panel_server_usage(server_id: int, kind: str, admin=Depends(requi
 
 
 @app.put("/api/panel-servers/{server_id}")
-def api_update_panel_server(server_id: int, body: PanelServerUpdateBody, admin=Depends(require_permission("panels"))):
+def api_update_panel_server(server_id: int, body: PanelServerUpdateBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     server = db.get_panel_server(server_id)
     if not server:
         raise HTTPException(404, "یافت نشد.")
@@ -3616,7 +3873,7 @@ def api_update_panel_server(server_id: int, body: PanelServerUpdateBody, admin=D
 
 
 @app.delete("/api/panel-servers/{server_id}")
-def api_delete_panel_server(server_id: int, force: bool = False, admin=Depends(require_permission("panels"))):
+def api_delete_panel_server(server_id: int, force: bool = False, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     try:
         removed = db.delete_panel_server(server_id, force=force)
     except ValueError as e:
@@ -3630,7 +3887,7 @@ def api_delete_panel_server(server_id: int, force: bool = False, admin=Depends(r
 
 
 @app.post("/api/panel-servers/{server_id}/test")
-async def api_test_panel_server(server_id: int, admin=Depends(require_permission("panels"))):
+async def api_test_panel_server(server_id: int, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     server = (await asyncio.to_thread(db.get_panel_server, server_id))
     if not server:
         raise HTTPException(404, "یافت نشد.")
@@ -4477,12 +4734,12 @@ class CustomConfigSettingsBody(BaseModel):
 
 
 @app.get("/api/custom-config/settings")
-def api_get_custom_config_settings(admin=Depends(require_permission("panels"))):
+def api_get_custom_config_settings(admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     return db.get_custom_config_settings()
 
 
 @app.post("/api/custom-config/settings")
-def api_set_custom_config_settings(body: CustomConfigSettingsBody, admin=Depends(require_permission("panels"))):
+def api_set_custom_config_settings(body: CustomConfigSettingsBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     if body.min_gb <= 0 or body.max_gb <= 0 or body.min_gb > body.max_gb:
         raise HTTPException(400, "بازه‌ی حجم نامعتبر است.")
     if body.duration_days <= 0:
@@ -4496,7 +4753,7 @@ def api_set_custom_config_settings(body: CustomConfigSettingsBody, admin=Depends
 
 
 @app.get("/api/custom-config/pricing-tiers")
-def api_get_pricing_tiers(admin=Depends(require_permission("panels"))):
+def api_get_pricing_tiers(admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     return rows_to_list(db.get_pricing_tiers())
 
 
@@ -4507,7 +4764,7 @@ class PricingTierBody(BaseModel):
 
 
 @app.post("/api/custom-config/pricing-tiers")
-def api_add_pricing_tier(body: PricingTierBody, admin=Depends(require_permission("panels"))):
+def api_add_pricing_tier(body: PricingTierBody, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     if body.from_gb < 0 or body.price_per_gb <= 0:
         raise HTTPException(400, "مقادیر نامعتبر است.")
     if body.to_gb is not None and body.to_gb <= body.from_gb:
@@ -4518,7 +4775,7 @@ def api_add_pricing_tier(body: PricingTierBody, admin=Depends(require_permission
 
 
 @app.delete("/api/custom-config/pricing-tiers/{tier_id}")
-def api_delete_pricing_tier(tier_id: int, admin=Depends(require_permission("panels"))):
+def api_delete_pricing_tier(tier_id: int, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     db.delete_pricing_tier(tier_id)
     db.log_admin_action(admin["id"], "pricing_tier_delete", str(tier_id), "setting", "pricing_tier")
     return {"ok": True}
