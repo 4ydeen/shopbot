@@ -2719,18 +2719,21 @@ async function openProductPaymentMethodsModal(product) {
   });
 }
 
-function productProvisionFieldsHtml(panelServers) {
+function productProvisionFieldsHtml(panelServers, prefill) {
   if (!panelServers || !panelServers.length) return '';
+  const isDirect = !!(prefill && prefill.provision_server_id);
+  const durUnlimited = !!(prefill && prefill.duration_days === 0);
+  const volUnlimited = !!(prefill && prefill.auto_provision_volume_gb === 0);
   return `
     <div class="form-row" style="gap:12px;align-items:center">
-      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="bank" checked> بانک کانفیگ</label>
-      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="direct"> اتصال مستقیم به پنل</label>
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="bank" ${isDirect ? '' : 'checked'}> بانک کانفیگ</label>
+      <label style="display:flex;align-items:center;gap:4px"><input type="radio" name="prod-source" value="direct" ${isDirect ? 'checked' : ''}> اتصال مستقیم به پنل</label>
     </div>
-    <div id="prod-direct-fields" class="form-grid" style="display:none">
-      <select class="input" id="prod-server">${panelServers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
-      <label class="field field-row"><span>♾ مدت اعتبار نامحدود (هیچ‌وقت روی پنل منقضی نمی‌شود)</span><input type="checkbox" id="prod-duration-unlimited"></label>
-      <input class="input" id="prod-volume" type="number" placeholder="حجم (گیگابایت)">
-      <label class="field field-row"><span>♾ حجم نامحدود</span><input type="checkbox" id="prod-volume-unlimited"></label>
+    <div id="prod-direct-fields" class="form-grid" style="display:${isDirect ? '' : 'none'}">
+      <select class="input" id="prod-server">${panelServers.map(s => `<option value="${s.id}" ${prefill && prefill.provision_server_id === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+      <label class="field field-row"><span>♾ مدت اعتبار نامحدود (هیچ‌وقت روی پنل منقضی نمی‌شود)</span><input type="checkbox" id="prod-duration-unlimited" ${durUnlimited ? 'checked' : ''}></label>
+      <input class="input" id="prod-volume" type="number" placeholder="حجم (گیگابایت)" value="${prefill && prefill.auto_provision_volume_gb ? prefill.auto_provision_volume_gb : ''}" ${volUnlimited ? 'disabled' : ''}>
+      <label class="field field-row"><span>♾ حجم نامحدود</span><input type="checkbox" id="prod-volume-unlimited" ${volUnlimited ? 'checked' : ''}></label>
     </div>`;
 }
 
@@ -2741,8 +2744,9 @@ function wireProductProvisionToggle(b) {
   }));
   const durUnlimitedCb = $('#prod-duration-unlimited', b);
   if (durUnlimitedCb) {
+    const durInput = $('#prod-duration', b);
+    if (durInput) durInput.disabled = durUnlimitedCb.checked;
     durUnlimitedCb.addEventListener('change', () => {
-      const durInput = $('#prod-duration', b);
       if (durInput) durInput.disabled = durUnlimitedCb.checked;
     });
   }
@@ -2763,7 +2767,7 @@ function readProductProvisionFields(b) {
   const durationUnlimited = isDirect && durUnlimitedCb && durUnlimitedCb.checked;
   const durInput = $('#prod-duration', b);
   const duration_days = durationUnlimited ? 0 : (Number(durInput ? durInput.value : 0) || 30);
-  if (!isDirect) return { ok: true, provision_server_id: null, auto_provision_volume_gb: null, duration_days };
+  if (!isDirect) return { ok: true, source: 'bank', provision_server_id: null, auto_provision_volume_gb: null, duration_days };
   const provision_server_id = Number($('#prod-server', b).value);
   const volUnlimitedCb = $('#prod-volume-unlimited', b);
   const volumeUnlimited = volUnlimitedCb && volUnlimitedCb.checked;
@@ -2772,7 +2776,7 @@ function readProductProvisionFields(b) {
     toast('برای اتصال مستقیم به پنل، پنل و حجم (گیگابایت) را مشخص کنید.', true);
     return { ok: false };
   }
-  return { ok: true, provision_server_id, auto_provision_volume_gb, duration_days };
+  return { ok: true, source: 'direct', provision_server_id, auto_provision_volume_gb, duration_days };
 }
 
 // روش‌های پرداخت مجاز حین «ساخت» محصول جدید (پیش‌فرض: همه تیک‌خورده = بدون
@@ -2797,6 +2801,49 @@ function readProductPaymentMethodsFields(b) {
   if (!boxes.length) return null;
   const checked = boxes.filter(i => i.checked).map(i => i.dataset.newprodPm);
   return (checked.length === 0 || checked.length === boxes.length) ? null : checked;
+}
+
+// فرم کامل «ویرایش محصول»: نام/قیمت/توضیحات/دسته + امکان تغییر منبع تأمین
+// (بانک کانفیگ ⇄ اتصال مستقیم به پنل) و در حالت مستقیم، تغییر خودِ پنل/حجم.
+function productEditFormHtml(product, categories, panelServers) {
+  return `
+    <div class="form-grid">
+      <select class="input" id="pe-cat">${categories.map(c => `<option value="${c.id}" ${c.id === product.category_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+      <input class="input" id="pe-name" placeholder="نام محصول" value="${esc(product.name)}">
+      <div class="form-row">
+        <input class="input" id="pe-price" type="number" placeholder="قیمت (تومان)" value="${product.price}">
+        <input class="input" id="prod-duration" type="number" placeholder="مدت (روز)" value="${product.duration_days || 30}">
+      </div>
+      <textarea class="input" id="pe-desc" placeholder="توضیحات (اختیاری)" rows="2">${esc(product.description || '')}</textarea>
+      ${productProvisionFieldsHtml(panelServers, product)}
+      <button class="btn btn-primary" id="pe-save">ذخیره</button>
+    </div>`;
+}
+
+function openProductEditModal(product, categories, panelServers) {
+  openModal('ویرایش محصول', productEditFormHtml(product, categories, panelServers), (b, close) => {
+    wireProductProvisionToggle(b);
+    $('#pe-save', b).addEventListener('click', async () => {
+      const name = $('#pe-name', b).value.trim();
+      const price = Number($('#pe-price', b).value);
+      if (!name || !price) return toast('نام و قیمت الزامی است.', true);
+      const prov = readProductProvisionFields(b);
+      if (!prov.ok) return;
+      const payload = {
+        category_id: Number($('#pe-cat', b).value), name, price,
+        description: $('#pe-desc', b).value, duration_days: prov.duration_days,
+        source: prov.source,
+      };
+      if (prov.source === 'direct') {
+        payload.provision_server_id = prov.provision_server_id;
+        payload.auto_provision_volume_gb = prov.auto_provision_volume_gb;
+      }
+      try {
+        await apiPut(`/products/${product.id}`, payload);
+        toast('محصول ویرایش شد.'); close(); renderCatalog();
+      } catch (e) { handleErr(e); }
+    });
+  });
 }
 
 async function renderCatalog() {
@@ -2852,6 +2899,7 @@ async function renderCatalog() {
       <td>${p.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
       <td>
         ${!p.is_auto_provision ? `<button class="btn btn-sm" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+        <button class="btn btn-sm" data-edit-prod="${p.id}">ویرایش</button>
         <button class="btn btn-sm" data-pay-methods="${p.id}">💳 پرداخت</button>
         <button class="btn btn-sm" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
         <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
@@ -2896,6 +2944,10 @@ async function renderCatalog() {
     try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
   }));
   $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+  $$('[data-edit-prod]', body).forEach(b => b.addEventListener('click', () => {
+    const p = products.find(x => x.id === Number(b.dataset.editProd));
+    if (p) openProductEditModal(p, categories, panelServers);
+  }));
   $$('[data-pay-methods]', body).forEach(b => b.addEventListener('click', () => {
     const p = products.find(x => x.id === Number(b.dataset.payMethods));
     if (p) openProductPaymentMethodsModal(p);
@@ -2964,6 +3016,7 @@ function renderCatalogBento(categories, products, panelServers, paymentMethods) 
           ${bnPill(p.is_active ? 'فعال' : 'غیرفعال', p.is_active ? 'ok' : 'no')}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
             ${!p.is_auto_provision ? `<button class="bn-btn bn-btn-ghost" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+            <button class="bn-btn bn-btn-ghost" data-edit-prod="${p.id}">ویرایش</button>
             <button class="bn-btn bn-btn-ghost" data-pay-methods="${p.id}">💳 پرداخت</button>
             <button class="bn-btn bn-btn-ghost" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
             <button class="bn-btn bn-btn-no" data-del-prod="${p.id}">حذف</button>
@@ -3010,6 +3063,10 @@ function renderCatalogBento(categories, products, panelServers, paymentMethods) 
     try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
   }));
   $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+  $$('[data-edit-prod]', body).forEach(b => b.addEventListener('click', () => {
+    const p = products.find(x => x.id === Number(b.dataset.editProd));
+    if (p) openProductEditModal(p, categories, panelServers);
+  }));
   $$('[data-pay-methods]', body).forEach(b => b.addEventListener('click', () => {
     const p = products.find(x => x.id === Number(b.dataset.payMethods));
     if (p) openProductPaymentMethodsModal(p);
@@ -3090,6 +3147,7 @@ function renderCatalogBrutalist(categories, products, panelServers, paymentMetho
           </div>
           <div class="bru-coupon-actions" style="flex-wrap:wrap">
             ${!p.is_auto_provision ? `<button class="btn btn-sm" data-configs="${p.id}">بانک کانفیگ</button>` : ''}
+            <button class="btn btn-sm" data-edit-prod="${p.id}">ویرایش</button>
             <button class="btn btn-sm" data-pay-methods="${p.id}">💳 پرداخت</button>
             <button class="btn btn-sm" data-toggle-prod="${p.id}">${p.is_active ? 'غیرفعال' : 'فعال'}</button>
             <button class="btn btn-danger btn-sm" data-del-prod="${p.id}">حذف</button>
@@ -3136,6 +3194,10 @@ function renderCatalogBrutalist(categories, products, panelServers, paymentMetho
     try { await apiDelete(`/products/${b.dataset.delProd}`); toast('حذف شد.'); renderCatalog(); } catch (e) { handleErr(e); }
   }));
   $$('[data-configs]', body).forEach(b => b.addEventListener('click', () => showConfigBank(Number(b.dataset.configs))));
+  $$('[data-edit-prod]', body).forEach(b => b.addEventListener('click', () => {
+    const p = products.find(x => x.id === Number(b.dataset.editProd));
+    if (p) openProductEditModal(p, categories, panelServers);
+  }));
   $$('[data-pay-methods]', body).forEach(b => b.addEventListener('click', () => {
     const p = products.find(x => x.id === Number(b.dataset.payMethods));
     if (p) openProductPaymentMethodsModal(p);
@@ -5263,8 +5325,11 @@ function renderPanelsBento(servers) {
           </div>
           <div class="bn-row-sub">${esc(s.type_label)}</div>
           <div class="bn-row-sub mono" style="direction:ltr;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.api_url)}</div>
-          <div style="display:flex;gap:8px;margin-top:6px">
+          <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
             <button class="bn-btn bn-btn-ghost" data-test="${s.id}">تست اتصال</button>
+            <button class="bn-btn bn-btn-ghost" data-edit="${s.id}">ویرایش</button>
+            ${PANEL_INBOUND_SELECT_TYPES.includes(s.panel_type) ? `<button class="bn-btn bn-btn-ghost" data-edit-inbounds="${s.id}">Inbound ها</button>` : ''}
+            ${PANEL_TEMPLATE_BASED_TYPES.includes(s.panel_type) ? `<button class="bn-btn bn-btn-ghost" data-retemplate="${s.id}">قالب جدید</button>` : ''}
             <button class="bn-btn bn-btn-no" data-del="${s.id}">حذف</button>
           </div>
         </div>
@@ -5280,6 +5345,17 @@ function renderPanelsBento(servers) {
     } catch (e) { handleErr(e); }
     finally { b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
+  $$('[data-edit]', content()).forEach(b => b.addEventListener('click', () => openPanelEditModal(servers.find(s => s.id === Number(b.dataset.edit)))));
+  $$('[data-edit-inbounds]', content()).forEach(b => b.addEventListener('click', async () => {
+    const server = servers.find(s => s.id === Number(b.dataset.editInbounds));
+    b.textContent = '⏳...'; b.disabled = true;
+    try {
+      const inbounds = await apiGet(`/panel-servers/${server.id}/inbounds`);
+      openXuiInboundModal(server.id, inbounds, server.xui_inbound_ids || [], server.xui_sub_base_url || '');
+    } catch (e) { handleErr(e); }
+    finally { b.textContent = 'Inbound ها'; b.disabled = false; }
+  }));
+  $$('[data-retemplate]', content()).forEach(b => b.addEventListener('click', () => openPanelRetemplateModal(Number(b.dataset.retemplate))));
   wirePanelDeleteButtons();
 }
 
@@ -5315,8 +5391,11 @@ function renderPanelsBrutalist(servers) {
           </div>
           <div class="bru-coupon-row"><span>نوع</span><b>${esc(s.type_label)}</b></div>
           <div class="bru-server-url mono">${esc(s.api_url)}</div>
-          <div class="bru-coupon-actions" style="padding:0;border:none;margin-top:8px">
+          <div class="bru-coupon-actions" style="padding:0;border:none;margin-top:8px;flex-wrap:wrap">
             <button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
+            <button class="btn btn-sm" data-edit="${s.id}">ویرایش</button>
+            ${PANEL_INBOUND_SELECT_TYPES.includes(s.panel_type) ? `<button class="btn btn-sm" data-edit-inbounds="${s.id}">Inbound ها</button>` : ''}
+            ${PANEL_TEMPLATE_BASED_TYPES.includes(s.panel_type) ? `<button class="btn btn-sm" data-retemplate="${s.id}">قالب جدید</button>` : ''}
             <button class="btn btn-danger btn-sm" data-del="${s.id}">حذف</button>
           </div>
         </div>
@@ -5332,6 +5411,17 @@ function renderPanelsBrutalist(servers) {
     } catch (e) { handleErr(e); }
     finally { b.classList.remove('bru-testing'); b.textContent = 'تست اتصال'; b.disabled = false; }
   }));
+  $$('[data-edit]', content()).forEach(b => b.addEventListener('click', () => openPanelEditModal(servers.find(s => s.id === Number(b.dataset.edit)))));
+  $$('[data-edit-inbounds]', content()).forEach(b => b.addEventListener('click', async () => {
+    const server = servers.find(s => s.id === Number(b.dataset.editInbounds));
+    b.textContent = '⏳...'; b.disabled = true;
+    try {
+      const inbounds = await apiGet(`/panel-servers/${server.id}/inbounds`);
+      openXuiInboundModal(server.id, inbounds, server.xui_inbound_ids || [], server.xui_sub_base_url || '');
+    } catch (e) { handleErr(e); }
+    finally { b.textContent = 'Inbound ها'; b.disabled = false; }
+  }));
+  $$('[data-retemplate]', content()).forEach(b => b.addEventListener('click', () => openPanelRetemplateModal(Number(b.dataset.retemplate))));
   wirePanelDeleteButtons();
 }
 
