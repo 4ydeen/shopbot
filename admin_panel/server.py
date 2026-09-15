@@ -3605,10 +3605,41 @@ async def _finalize_no_bot_reseller_request_web(req, request: Request = None):
     if req["panel_server_id"]:
         (await asyncio.to_thread(db.set_reseller_panel, owner_id, req["panel_server_id"]))
     (await asyncio.to_thread(db.complete_reseller_request, req["id"], owner_id))
-    if req["wants_web_panel"] and request is not None:
-        fake_row = await asyncio.to_thread(db.get_reseller_bot_by_slug, f"noBot_{req['id']}_{owner_id}")
-        if fake_row:
-            await _deliver_reseller_webpanel_link(fake_row["id"], request)
+
+    # در مسیر تایید از پنل وب، لینک setup باید در همان پیام نهایی به مالک برسد.
+    # ارسال جداگانه‌ی لینک قبلاً ممکن بود بی‌صدا شکست بخورد و مالک فقط «رابط: پنل وب» را ببیند.
+    web_panel_note = ""
+    if req["wants_web_panel"] and reseller_bot_id:
+        try:
+            row = await asyncio.to_thread(db.get_reseller_bot, reseller_bot_id)
+            if row:
+                setup_token = row["web_panel_setup_token"]
+                if not setup_token:
+                    setup_token = await asyncio.to_thread(
+                        db.regenerate_reseller_web_panel_token, reseller_bot_id
+                    )
+                panel_url = _resolved_admin_panel_url(request) if request is not None else ""
+                if setup_token and panel_url:
+                    b_value = row["link_slug"] or str(reseller_bot_id)
+                    setup_link = f"{panel_url}/setup?b={b_value}&t={setup_token}"
+                    login_link = f"{panel_url}/?b={b_value}"
+                    web_panel_note = (
+                        "\n\n🌐 لینک اولیه فعال‌سازی پنل وب نمایندگی:\n"
+                        f"{setup_link}\n\n"
+                        "این لینک یک‌بارمصرف است؛ با باز کردن آن یوزرنیم و رمز پنل را خودت تعیین می‌کنی.\n"
+                        f"🔗 لینک ورود بعدی: {login_link}"
+                    )
+                else:
+                    web_panel_note = (
+                        "\n\n⚠️ پنل وب فعال شد، اما لینک فعال‌سازی ساخته نشد. "
+                        "از مدیریت نماینده‌ها گزینه «تولید مجدد لینک راه‌اندازی» را بزنید."
+                    )
+        except Exception:
+            logger.exception("ساخت لینک اولیه پنل وب نماینده #%s ناموفق بود", reseller_bot_id)
+            web_panel_note = (
+                "\n\n⚠️ پنل وب فعال شد، اما ساخت لینک فعال‌سازی با خطا مواجه شد. "
+                "از مدیریت نماینده‌ها لینک راه‌اندازی را مجدداً تولید کنید."
+            )
 
     interface_bits = []
     if req["wants_web_panel"]:
@@ -3629,7 +3660,7 @@ async def _finalize_no_bot_reseller_request_web(req, request: Request = None):
                 f"هر مشتری که با این لینک وارد شود و از شما خرید کند، {percent}٪ از مبلغ هر خرید "
                 f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد. برای دیدن آمار، دستور /reseller_link را بفرستید."
             )
-    await notify_user(owner_id, f"✅ نمایندگی سطح ۲ شما تکمیل شد.\n🧩 رابط: {interface_label}{note}")
+    await notify_user(owner_id, f"✅ نمایندگی سطح ۲ شما تکمیل شد.\n🧩 رابط: {interface_label}{note}{web_panel_note}")
     try:
         for a in (await asyncio.to_thread(db.list_admins_with_roles)):
             if a["role"] in ("owner", "admin"):
