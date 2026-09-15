@@ -4842,12 +4842,34 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         (await asyncio.to_thread(db.set_reseller_status, owner_id, True))
         (await asyncio.to_thread(db.set_reseller_supply_model, owner_id, req["supply_model"], req["supply_product_id"]))
-        if req["supply_model"] == "fixed_product" and req["supply_product_id"] and req["supply_qty"]:
-            (await asyncio.to_thread(
-                db.set_reseller_product_credit, owner_id, req["supply_product_id"], req["supply_qty"],
-                admin_id=req["reviewed_by"],
-                reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
-            ))
+        if req["supply_model"] == "fixed_product":
+            # درخواست‌های جدید ادمین می‌توانند چند محصول داشته باشند؛ درخواست‌های
+            # قدیمی همچنان با supply_product_id/supply_qty کار می‌کنند.
+            import json as _json
+            items = []
+            marker = "[[RESSELLER_SUPPLY_ITEMS:"
+            text = req["request_text"] or ""
+            if marker in text:
+                try:
+                    start = text.index(marker) + len(marker)
+                    end = text.index("]]", start)
+                    raw = _json.loads(text[start:end])
+                    if isinstance(raw, list):
+                        for item in raw:
+                            pid = int(item.get("product_id") or 0)
+                            qty = int(item.get("quantity") or 0)
+                            if pid > 0 and qty > 0:
+                                items.append((pid, qty))
+                except Exception:
+                    items = []
+            if not items and req["supply_product_id"] and req["supply_qty"]:
+                items = [(int(req["supply_product_id"]), int(req["supply_qty"]))]
+            for product_id, quantity in items:
+                (await asyncio.to_thread(
+                    db.set_reseller_product_credit, owner_id, product_id, quantity,
+                    admin_id=req["reviewed_by"],
+                    reason=f"تخصیص خودکار پس از تایید درخواست نمایندگی #{req['id']}",
+                ))
         else:
             (await asyncio.to_thread(db.adjust_reseller_credit,
                 owner_id, req["volume_gb"], admin_id=req["reviewed_by"],
