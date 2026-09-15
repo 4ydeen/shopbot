@@ -2782,12 +2782,13 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
             ]
         )
-        if level == 1:
-            web_panel_enabled = bool(r["web_panel_enabled"]) if "web_panel_enabled" in r.keys() else False
-            wp_label = "🌐 پنل وب: فعال (مدیریت)" if web_panel_enabled else "🌐 فعالسازی پنل وب"
-            rows.append(
-                [InlineKeyboardButton(text=wp_label, callback_data=f"adm_resbot_webpanel:{r['id']}")]
-            )
+        # پنل وب برای هر دو سطح قابل فعال‌سازی است؛ سطح ۲ هم ممکن است
+        # پنل وب اختصاصی بخواهد (دسترسی‌ها در خود پنل با tenant/level محدود می‌شوند).
+        web_panel_enabled = bool(r["web_panel_enabled"]) if "web_panel_enabled" in r.keys() else False
+        wp_label = "🌐 پنل وب: فعال (مدیریت)" if web_panel_enabled else "🌐 فعالسازی پنل وب"
+        rows.append(
+            [InlineKeyboardButton(text=wp_label, callback_data=f"adm_resbot_webpanel:{r['id']}")]
+        )
     rows.append([InlineKeyboardButton(text="➕ افزودن بات نمایندگی جدید", callback_data="adm_resbot_add")])
     rows.append([InlineKeyboardButton(text="⚙️ آدرس پنل مدیریت وب", callback_data="adm_set_panel_domain")])
     rows.append([InlineKeyboardButton(text="🧹 پاکسازی داده‌های باقی‌مانده نمایندگی", callback_data="adm_reseller_orphans")])

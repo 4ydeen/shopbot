@@ -160,31 +160,43 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
     link = f"{panel_url}/setup?b={b_value}&t={reseller_bot['web_panel_setup_token']}"
     login_link = f"{panel_url}/?b={b_value}"
 
+    is_no_bot = str(reseller_bot["bot_token"] or "").startswith("no-bot:")
     await answerable.answer(
         "🌐 لینک راه‌اندازی پنل وب این نماینده:\n\n"
         f"{link}\n\n"
         "این لینک یک‌بارمصرف است؛ نماینده با باز کردنش یک یوزرنیم/پسورد دلخواه برای پنل وب "
         "خودش تنظیم می‌کند (مستقل از پنل بات اصلی، فقط روی دیتابیس خودش).\n\n"
-        "این لینک همین الان از طریق بات خودِ نماینده براش ارسال شد.",
+        f"این لینک از طریق {'بات اصلی' if is_no_bot else 'بات خودِ نماینده'} برای نماینده ارسال می‌شود.",
         reply_markup=kb.resbot_webpanel_kb(bot_id),
     )
     (await asyncio.to_thread(db.log_admin_action, 
         admin_id, "reseller_webpanel_enable", f"نماینده #{bot_id} (@{reseller_bot['bot_username'] or ''})",
     ))
 
-    sent = await _send_via_reseller_bot(
-        reseller_bot["bot_token"],
-        reseller_bot["owner_telegram_id"],
+    text = (
         "🌐 پنل مدیریت وب برای نمایندگی شما آماده است!\n\n"
         "با باز کردن لینک زیر، یک‌بار یوزرنیم و پسورد دلخواه برای پنل وب خودتان تنظیم کنید "
         "(این لینک فقط یک‌بار کار می‌کند):\n\n"
         f"{link}\n\n"
         "🔗 لینک ثابت ورود پنل وب (برای دفعات بعد، بعد از تنظیم یوزرنیم/پسورد این را بوکمارک کنید):\n"
-        f"{login_link}",
+        f"{login_link}"
     )
+    if is_no_bot:
+        try:
+            temp_bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            try:
+                await temp_bot.send_message(reseller_bot["owner_telegram_id"], text)
+                sent = True
+            finally:
+                await temp_bot.session.close()
+        except Exception:
+            logger.warning("ارسال لینک پنل وب نماینده no-bot از بات اصلی ناموفق بود.", exc_info=True)
+            sent = False
+    else:
+        sent = await _send_via_reseller_bot(reseller_bot["bot_token"], reseller_bot["owner_telegram_id"], text)
     if not sent:
         await answerable.answer(
-            "⚠️ ارسال خودکار لینک به نماینده (از طریق بات خودش) ناموفق بود؛ لینک بالا را خودت برایش بفرست."
+            "⚠️ ارسال خودکار لینک به نماینده ناموفق بود؛ لینک بالا را خودت برایش بفرست."
         )
 
 
@@ -5196,10 +5208,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not reseller_bot:
                 return await call.answer("یافت نشد.", show_alert=True)
 
-            level = reseller_bot["reseller_level"] if "reseller_level" in reseller_bot.keys() else 2
-            if level != 1:
-                return await call.answer("پنل وب فقط برای نمایندگی «کامل» قابل فعال‌سازی است.", show_alert=True)
-
+            # پنل وب برای نمایندگی سطح ۲ نیز مجاز است؛ tenant پنل همان سطح
+            # دسترسی محدود نماینده را اعمال می‌کند.
             already_enabled = bool(reseller_bot["web_panel_enabled"]) if "web_panel_enabled" in reseller_bot.keys() else False
             if already_enabled:
                 await replace_admin_view(
@@ -5919,10 +5929,31 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                     f"هر مشتری که با این لینک وارد شود و از شما خرید کند، {percent}٪ از مبلغ هر خرید "
                     f"به‌صورت اعتبار کیف پول به شما تعلق می‌گیرد. برای دیدن آمار، دستور /reseller_link را بفرستید."
                 )
+            # اگر پنل وب خواسته شده، لینک راه‌اندازی باید حتماً در همان پیام
+            # تکمیل برای مالک ارسال شود. نماینده‌ی no-bot نمی‌تواند از بات
+            # خودش پیام بگیرد، بنابراین بات اصلی ارسال‌کننده است.
+            web_panel_note = ""
+            if req["wants_web_panel"] and reseller_bot_id:
+                try:
+                    row = await asyncio.to_thread(db.get_reseller_bot, reseller_bot_id)
+                    panel_url = _get_admin_panel_url(db)
+                    if row and row["web_panel_setup_token"] and panel_url:
+                        b_value = row["link_slug"] or str(reseller_bot_id)
+                        setup_link = f"{panel_url}/setup?b={b_value}&t={row['web_panel_setup_token']}"
+                        login_link = f"{panel_url}/?b={b_value}"
+                        web_panel_note = (
+                            f"\n\n🌐 لینک راه‌اندازی پنل وب نمایندگی:\n{setup_link}\n\n"
+                            "این لینک یک‌بارمصرف است؛ با باز کردن آن، یوزرنیم و رمز پنل را خودت تعیین می‌کنی.\n"
+                            f"🔗 لینک ورود بعدی: {login_link}"
+                        )
+                    elif req["wants_web_panel"]:
+                        web_panel_note = "\n\n⚠️ پنل وب فعال شد ولی آدرس پنل مدیریت تنظیم نشده؛ پس از تنظیم دامنه، لینک راه‌اندازی را از مدیریت نماینده‌ها بساز."
+                except Exception:
+                    logger.exception("ساخت لینک پنل وب برای نماینده no-bot #%s ناموفق بود", reseller_bot_id)
             try:
                 await bot.send_message(
                     owner_id,
-                    f"✅ نمایندگی سطح ۲ شما تکمیل شد.\n🧩 رابط: {interface_label}{note}",
+                    f"✅ نمایندگی سطح ۲ شما تکمیل شد.\n🧩 رابط: {interface_label}{note}{web_panel_note}",
                 )
             except Exception:
                 pass
