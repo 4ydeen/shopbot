@@ -2480,10 +2480,11 @@ function openMakeResellerModal(tgId, closeUserModal) {
       </div>
 
       <div id="mr-fixed-wrap" style="display:none">
-        <div><b>محصول</b></div>
-        <select class="input" id="mr-fixed-product"><option value="">در حال بارگذاری...</option></select>
-        <div><b>تعداد موجودی اولیه</b></div>
-        <input class="input" id="mr-fixed-qty" type="number" placeholder="مثلاً 10">
+        <div><b>محصولات اولیه نماینده</b></div>
+        <div class="hint-text">چند محصول را هم‌زمان انتخاب کن و برای هرکدام تعداد جداگانه بده.</div>
+        <div id="mr-fixed-products" style="display:grid;gap:8px;max-height:260px;overflow:auto;padding:4px 0">
+          <div class="hint-text">در حال بارگذاری...</div>
+        </div>
       </div>
 
       <div><b>پنل اعتباری نمایندگی (اختیاری)</b></div>
@@ -2510,11 +2511,16 @@ function openMakeResellerModal(tgId, closeUserModal) {
     }).catch(() => {});
 
     apiGet('/reseller-fixed-products').then(products => {
-      const sel = $('#mr-fixed-product', body);
-      if (!sel) return;
-      sel.innerHTML = products.length
-        ? products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')
-        : '<option value="">محصولی موجود نیست</option>';
+      const wrap = $('#mr-fixed-products', body);
+      if (!wrap) return;
+      wrap.innerHTML = products.length
+        ? products.map(p => `
+          <label style="display:grid;grid-template-columns:auto 1fr 95px;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border,#333);border-radius:10px">
+            <input type="checkbox" class="mr-product-check" data-product-id="${p.id}">
+            <span>${esc(p.name)}</span>
+            <input class="input mr-product-qty" data-product-id="${p.id}" type="number" min="1" value="1" placeholder="تعداد">
+          </label>`).join('')
+        : '<div class="hint-text">محصول خودکار فعالی برای تخصیص وجود ندارد.</div>';
     }).catch(() => {});
 
     $('#mr-submit', body).addEventListener('click', async () => {
@@ -2528,12 +2534,15 @@ function openMakeResellerModal(tgId, closeUserModal) {
         note: $('#mr-note', body).value.trim() || null,
       };
       if (supply_model === 'fixed_product') {
-        const productId = $('#mr-fixed-product', body).value;
-        const qty = Number($('#mr-fixed-qty', body).value);
-        if (!productId) { toast('یک محصول انتخاب کنید.', true); return; }
-        if (!qty || qty <= 0) { toast('تعداد موجودی نامعتبر است.', true); return; }
-        payload.supply_product_id = Number(productId);
-        payload.supply_qty = qty;
+        const items = $$('.mr-product-check', body).filter(x => x.checked).map(ch => {
+          const qtyEl = $$(`.mr-product-qty[data-product-id="${ch.dataset.productId}"]`, body)[0];
+          return { product_id: Number(ch.dataset.productId), quantity: Number(qtyEl?.value || 0) };
+        }).filter(x => x.quantity > 0);
+        if (!items.length) { toast('حداقل یک محصول را انتخاب کنید.', true); return; }
+        payload.supply_items = items;
+        // سازگاری با backendهای قدیمی/گزارش‌های موجود: اولین محصول primary است.
+        payload.supply_product_id = items[0].product_id;
+        payload.supply_qty = items[0].quantity;
       } else {
         const volume_gb = Number($('#mr-volume', body).value);
         if (!volume_gb || volume_gb <= 0) { toast('حجم اعتبار اولیه نامعتبر است.', true); return; }
