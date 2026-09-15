@@ -3697,9 +3697,6 @@ def api_edit_level2_reseller(tg_id: int, body: ResellerManageBody, admin=Depends
                 current = existing.get(pid, 0)
                 if target != current:
                     db.adjust_reseller_product_credit(tg_id, pid, target - current, admin_id=admin["id"], reason="تنظیم چندمحصولی نمایندگی از پنل مدیریت")
-        if body.supply_model == "fixed_product" and "supply_products" in getattr(body, "model_fields_set", set()):
-            # انتخاب جدید، موجودی همان نماینده را برای همه محصولات انتخاب‌شده دقیقاً تنظیم می‌کند.
-            db.replace_reseller_product_inventory(tg_id, normalized)
     if panel_was_sent:
         db.set_reseller_panel(tg_id, body.panel_server_id)
     elif body.supply_model is not None:
