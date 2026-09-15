@@ -180,6 +180,19 @@ def get_tenant(b: str = Query("", description="شناسه یا اسلاگ لین
     return Tenant(db=tenant_db, bot_token=row["bot_token"], tenant_id=b)
 
 
+def get_reseller_backend(tg_id: int, db: Database, tenant: Tenant):
+    """برای tenant نمایندگی، منبع اعتبار/پنل را از دیتابیس اصلی بگیر و
+    داده‌های کاربر/سرویس را در دیتابیس محلی همان tenant نگه دار."""
+    if not tenant.tenant_id:
+        return db, None
+    try:
+        row = main_db.get_reseller_bot_by_slug(tenant.tenant_id)
+        if not row and str(tenant.tenant_id).isdigit():
+            row = main_db.get_reseller_bot(int(tenant.tenant_id))
+    except Exception:
+        row = None
+    return main_db, (row["owner_telegram_id"] if row else None)
+
 def get_verified_user(x_init_data: str = Header(...), tenant: Tenant = Depends(get_tenant)):
     """initData را با توکن همان مستأجر تایید می‌کند. خروجی: (tg_id, db, tenant)
 
@@ -824,9 +837,10 @@ def api_custom_config_info(auth=Depends(get_verified_user)):
     settings = db.get_custom_config_settings()
     tiers = db.get_pricing_tiers()
     server = db.get_panel_server_for_usage("custom_config")
-    is_reseller = db.is_reseller(tg_id)
-    reseller_credit = db.get_reseller_credit(tg_id) if is_reseller else 0
-    reseller_server = db.get_reseller_panel(tg_id) if is_reseller else None
+    reseller_db, reseller_owner_id = get_reseller_backend(tg_id, db, tenant)
+    is_reseller = reseller_db.is_reseller(tg_id)
+    reseller_credit = reseller_db.get_reseller_credit(tg_id) if is_reseller else 0
+    reseller_server = reseller_db.get_reseller_panel(tg_id) if is_reseller else None
     return {
         "enabled": settings["enabled"] and bool(server) and bool(tiers)
         and bool(db.is_full_access_bot(not tenant.tenant_id)),
@@ -872,12 +886,13 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
 
     # --- مسیر نمایندگی اعتباری: رایگان از استخر حجم خودِ نماینده ---
     if body.use_credit:
-        if not db.is_reseller(tg_id):
+        reseller_db, _ = get_reseller_backend(tg_id, db, tenant)
+        if not reseller_db.is_reseller(tg_id):
             raise HTTPException(status_code=403, detail="شما نماینده نیستید.")
-        credit = db.get_reseller_credit(tg_id)
+        credit = reseller_db.get_reseller_credit(tg_id)
         if body.volume_gb <= 0 or body.volume_gb > credit:
             raise HTTPException(status_code=400, detail=f"اعتبار شما کافی نیست. اعتبار باقی‌مانده: {credit:,} گیگ.")
-        server = db.get_reseller_panel(tg_id)
+        server = reseller_db.get_reseller_panel(tg_id)
         if not server or not server["is_active"]:
             raise HTTPException(status_code=400, detail="سرور نمایندگی در دسترس نیست.")
         duration_days = db.get_custom_config_settings()["duration_days"]
@@ -902,7 +917,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
         # reseller_credit_gb >= ?) انجام می‌شود؛ اگر هم‌زمان توسط یک ساخت
         # دیگر مصرف شده باشد، اینجا واقعاً رد می‌شود و اکانت تازه‌ساخته روی
         # پنل هم پاک می‌شود تا یتیم نماند.
-        credit_ok = db.consume_reseller_credit(
+        credit_ok = reseller_db.consume_reseller_credit(
             tg_id, body.volume_gb, reason=f"ساخت کانفیگ «{result.username}» (مینی‌اپ)"
         )
         if not credit_ok:
@@ -922,8 +937,9 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
         # (نه در «سرویس‌های من»، نه قابل بازگشت). الان در صورت شکست، هم اعتبار
         # برگردانده می‌شود هم اکانت پنل پاک می‌شود.
         try:
+            local_panel_id = await asyncio.to_thread(db.get_or_create_mirror_panel_server, server) if tenant.tenant_id else server["id"]
             db.add_custom_config(
-                tg_id, server["id"], result.username, body.volume_gb, duration_days,
+                tg_id, local_panel_id, result.username, body.volume_gb, duration_days,
                 result.subscription_url, source="reseller",
             )
         except Exception:
@@ -931,7 +947,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
                 "ثبت کانفیگ نمایندگی (مینی‌اپ) برای کاربر %s ناموفق بود؛ اعتبار بازگردانده و اکانت پنل پاک شد.",
                 tg_id,
             )
-            db.adjust_reseller_credit(
+            reseller_db.adjust_reseller_credit(
                 tg_id, body.volume_gb, reason="بازگشت اعتبار به‌دلیل خطای ثبت کانفیگ (مینی‌اپ)"
             )
             try:
@@ -944,7 +960,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
             )
         return {
             "status": "approved", "link": result.subscription_url,
-            "reseller_credit_left": db.get_reseller_credit(tg_id),
+            "reseller_credit_left": reseller_db.get_reseller_credit(tg_id),
         }
 
     # --- مسیر خرید عادی (پرداخت از کیف‌پول/کارت/کریپتو) ---
