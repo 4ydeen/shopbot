@@ -340,6 +340,7 @@ function openModal(title, bodyHtml, onMount, opts = {}) {
 const NAV = [
   // نمای کلی
   { key: 'dashboard', label: 'داشبورد', icon: 'dashboard', role: 'any', section: null },
+  { key: 'analytics', label: 'آمار پیشرفته', icon: 'revenue', role: 'any', section: null },
   { key: 'reseller-self', label: 'نمایندگی من', icon: 'resellers', role: 'reseller-self', section: 'عملیات نمایندگی' },
 
   // عملیات مالی
@@ -822,6 +823,7 @@ async function renderPage(tab) {
   try {
     switch (tab) {
       case 'dashboard': return await renderDashboard();
+      case 'analytics': return await renderAnalytics();
       case 'reseller-self': return await renderResellerSelfService();
       case 'orders': return await renderOrders();
       case 'topups': return await renderTopups();
@@ -981,13 +983,14 @@ function dashRangeBarHtml(s) {
       </div>
     </div>`;
 }
-function wireDashRangeBar() {
+function wireDashRangeBar(onChange) {
+  const refresh = onChange || renderDashboard;
   const root = content();
   if (!root) return;
   $$('.dash-range-chip[data-preset]', root).forEach(btn => btn.addEventListener('click', () => {
     const days = Number(btn.dataset.preset);
     setDashRange({ preset: btn.dataset.preset, start: isoDaysAgo(days - 1), end: isoDaysAgo(0) });
-    renderDashboard();
+    refresh();
   }));
   const customToggle = $('#dash-range-custom-toggle', root);
   const customBox = $('#dash-range-custom', root);
@@ -1001,7 +1004,7 @@ function wireDashRangeBar() {
     if (!start || !end) { toast('هر دو تاریخ رو انتخاب کن.'); return; }
     if (start > end) { toast('تاریخ شروع نباید بعد از تاریخ پایان باشه.'); return; }
     setDashRange({ preset: null, start, end });
-    renderDashboard();
+    refresh();
   });
 }
 async function renderDashboard() {
@@ -1062,6 +1065,169 @@ function appendExtraStatsPanel(s) {
     ${low.length ? `<div class="card-sub" style="margin-top:12px;color:#FB7185">⚠️ موجودی کم: ${low.map(p => esc(p.name)).join('، ')}</div>` : ''}
   `;
   root.appendChild(el);
+}
+
+/* ============================================================ analytics === */
+// نموداری بزرگ‌تر و با محور/برچسب برای صفحه‌ی «آمار پیشرفته» (برخلاف
+// sparklinePath که برای کارت‌های کوچک داشبورد است و برچسب ندارد).
+function trendChartSvg(points, w = 720, h = 220, pad = 36) {
+  if (!points.length) return '<div class="card-sub">داده‌ای در این بازه نیست.</div>';
+  const values = points.map(p => p.revenue);
+  const max = Math.max(...values, 1);
+  const step = (w - pad * 2) / Math.max(points.length - 1, 1);
+  const xy = (v, i) => [pad + i * step, h - pad - (v / max) * (h - pad * 2)];
+  const linePts = values.map((v, i) => xy(v, i));
+  const line = linePts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L${linePts[linePts.length - 1][0].toFixed(1)},${h - pad} L${linePts[0][0].toFixed(1)},${h - pad} Z`;
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const y = h - pad - f * (h - pad * 2);
+    return `<line x1="${pad}" y1="${y}" x2="${w - pad}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,4"/>
+            <text x="${pad - 8}" y="${y + 3}" font-size="10" fill="var(--text-muted)" text-anchor="end">${fmt(Math.round(max * f))}</text>`;
+  }).join('');
+  // برای این‌که محور افقی شلوغ نشود، حداکثر ۸ برچسب پخش‌شده نشان داده می‌شود
+  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
+  const xLabels = points.map((p, i) => i % labelEvery === 0 || i === points.length - 1
+    ? `<text x="${xy(0, i)[0]}" y="${h - 10}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${esc(p.bucket.slice(5))}</text>` : '').join('');
+  const dots = linePts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--brand,#8B5CF6)"><title>${esc(points[i].bucket)}: ${fmt(points[i].revenue)} تومان (${fmt(points[i].orders)} سفارش)</title></circle>`).join('');
+  return `
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">
+      ${gridLines}
+      <path d="${area}" fill="var(--brand,#8B5CF6)" fill-opacity="0.14" stroke="none"/>
+      <path d="${line}" fill="none" stroke="var(--brand,#8B5CF6)" stroke-width="2.2" stroke-linejoin="round"/>
+      ${dots}
+      ${xLabels}
+    </svg>`;
+}
+function analyticsGatewayHtml(rows) {
+  if (!rows.length) return '<div class="card-sub">تراکنشی در این بازه ثبت نشده.</div>';
+  const colors = ['#8B5CF6', '#22D3EE', '#EC4899', '#F59E0B', '#34D399', '#60A5FA', '#F87171'];
+  const total = rows.reduce((a, r) => a + r.revenue, 0) || 1;
+  const donut = donutSegments(70, 70, 54, rows.map(r => ({ value: r.revenue })), colors, 20);
+  const legend = rows.map((r, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border,rgba(128,128,128,.15))">
+      <span style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i % colors.length]};display:inline-block"></span>
+        ${esc(r.gateway)}
+      </span>
+      <span class="mono" style="text-align:left">
+        ${fmt(r.revenue)} تومان · ${((r.revenue / total) * 100).toFixed(1)}٪<br>
+        <span style="font-size:11px;color:var(--text-muted)">${fmt(r.success)}/${fmt(r.attempts)} موفق (${r.success_rate}٪)</span>
+      </span>
+    </div>`).join('');
+  return `
+    <div class="grid grid-2" style="gap:16px;align-items:center">
+      <svg viewBox="0 0 140 140" style="width:150px;height:150px;margin:0 auto;display:block">${donut}</svg>
+      <div>${legend}</div>
+    </div>`;
+}
+function analyticsFunnelHtml(f) {
+  const stages = [
+    { label: 'عضو شدند', v: f.new_users, pct: 100 },
+    { label: 'سفارش ثبت کردند', v: f.attempted_purchase, pct: f.start_to_attempt_rate },
+    { label: 'خرید موفق', v: f.completed_purchase, pct: f.overall_conversion_rate },
+  ];
+  return stages.map(s => `
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+        <span>${s.label}</span><span class="mono">${fmt(s.v)} (${s.pct}٪)</span>
+      </div>
+      <div style="height:10px;border-radius:5px;background:var(--border,rgba(128,128,128,.15));overflow:hidden">
+        <div class="bar-fill" data-w="${Math.max(2, s.pct)}" style="height:100%;border-radius:5px;background:var(--brand,#8B5CF6);width:0"></div>
+      </div>
+    </div>`).join('');
+}
+function analyticsHeatmapHtml(heat) {
+  const dayLabels = ['ی', 'د', 'س', 'چ', 'پ', 'ج', 'ش']; // sqlite %w: یکشنبه=۰ .. شنبه=۶
+  const max = Math.max(...heat.flat(), 1);
+  const rows = heat.map((rowVals, d) => `
+    <div style="display:flex;align-items:center;gap:4px">
+      <span style="width:16px;font-size:11px;color:var(--text-muted)">${dayLabels[d]}</span>
+      <div style="display:flex;gap:2px;flex:1">
+        ${rowVals.map((v, h) => `<div title="${dayLabels[d]} ساعت ${h}:00 — ${v} سفارش"
+          style="flex:1;aspect-ratio:1;border-radius:2px;background:var(--brand,#8B5CF6);opacity:${v ? (0.12 + (v / max) * 0.88).toFixed(2) : 0.06}"></div>`).join('')}
+      </div>
+    </div>`).join('');
+  return `<div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+    <div class="card-sub" style="margin-top:6px">هر ستون یک ساعت از ۰۰ تا ۲۳ (به وقت تهران) — رنگ پررنگ‌تر یعنی سفارش بیشتر.</div>`;
+}
+function analyticsTableHtml(rows, cols) {
+  if (!rows.length) return '<div class="card-sub">داده‌ای نیست.</div>';
+  const head = cols.map(c => `<th>${esc(c.label)}</th>`).join('');
+  const body = rows.map(r => `<tr>${cols.map(c => `<td>${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`).join('')}</tr>`).join('');
+  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+const ANALYTICS_GRANULARITIES = [{ key: 'day', label: 'روزانه' }, { key: 'week', label: 'هفتگی' }, { key: 'month', label: 'ماهانه' }];
+function getAnalyticsGranularity() {
+  return localStorage.getItem('sv-analytics-granularity') || 'day';
+}
+async function renderAnalytics() {
+  const range = getDashRange();
+  const granularity = getAnalyticsGranularity();
+  const q = (range ? `?start=${range.start}&end=${range.end}&` : '?') + `granularity=${granularity}`;
+  const s = await apiGet('/dashboard/advanced' + q);
+  const gChips = ANALYTICS_GRANULARITIES.map(g => `
+    <button class="btn btn-sm dash-range-chip ${g.key === granularity ? 'active' : ''}" data-gran="${g.key}">${g.label}</button>`).join('');
+  setContent(`
+    <div class="hero" style="margin-bottom:16px">
+      <div><h2>📈 آمار پیشرفته</h2><p class="card-sub">روند فروش، درگاه‌های پرداخت، منابع ورودی و نمایندگان، قیف تبدیل و ساعات پرفروش.</p></div>
+    </div>
+    <div id="analytics-range-slot"></div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><h3>روند درآمد و تعداد سفارش</h3><div class="dash-range-chips">${gChips}</div></div>
+      ${trendChartSvg(s.revenue_trend.points)}
+    </div>
+
+    <div class="grid grid-2" style="gap:16px;align-items:start;margin-bottom:16px">
+      <div class="card">
+        <div class="card-head"><h3>تفکیک درگاه‌های پرداخت</h3></div>
+        ${analyticsGatewayHtml(s.gateway_breakdown)}
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>قیف تبدیل کاربران تازه‌وارد</h3></div>
+        ${analyticsFunnelHtml(s.funnel)}
+        <div class="card-sub" style="margin-top:8px">
+          🔁 بازگشتی: ${fmt(s.retention.returning_customers)} · 🆕 اولین‌خرید: ${fmt(s.retention.first_time_customers)} ·
+          ⚠️ ریزش‌کرده (${s.retention.churn_window_days} روز): ${fmt(s.retention.churned_customers)}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="gap:16px;align-items:start;margin-bottom:16px">
+      <div class="card">
+        <div class="card-head"><h3>منابع ورودی کاربر (کمپین‌ها)</h3></div>
+        ${analyticsTableHtml(s.campaign_performance, [
+          { key: 'source', label: 'منبع' },
+          { key: 'new_users', label: 'کاربر جدید', render: r => fmt(r.new_users) },
+          { key: 'buyers', label: 'خریدار', render: r => fmt(r.buyers) },
+          { key: 'conversion_rate', label: 'تبدیل', render: r => r.conversion_rate + '٪' },
+          { key: 'revenue', label: 'درآمد', render: r => fmt(r.revenue) },
+        ])}
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>عملکرد نمایندگان داخلی</h3></div>
+        ${analyticsTableHtml(s.reseller_performance, [
+          { key: 'name', label: 'نماینده' },
+          { key: 'customers', label: 'مشتری', render: r => fmt(r.customers) },
+          { key: 'orders', label: 'فروش', render: r => fmt(r.orders) },
+          { key: 'revenue', label: 'درآمد', render: r => fmt(r.revenue) },
+          { key: 'commission_paid', label: 'کمیسیون', render: r => fmt(r.commission_paid) },
+        ])}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>شلوغ‌ترین ساعات (نقشه‌ی حرارتی، به وقت تهران)</h3></div>
+      ${analyticsHeatmapHtml(s.hourly_heatmap)}
+    </div>
+  `);
+  $('#analytics-range-slot').insertAdjacentHTML('afterbegin', dashRangeBarHtml(s));
+  wireDashRangeBar(renderAnalytics);
+  $$('.dash-range-chip[data-gran]').forEach(btn => btn.addEventListener('click', () => {
+    localStorage.setItem('sv-analytics-granularity', btn.dataset.gran);
+    renderAnalytics();
+  }));
+  activateBarFills(content());
 }
 
 /* ----------------------------------------------------- dashboard: glass --- */
