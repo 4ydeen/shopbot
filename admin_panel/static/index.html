@@ -22,9 +22,9 @@
 <link rel="stylesheet" href="/assets/style.css?v=5">
 <script>
 (function(){
-  var t = { theme:'bento', mode:'light' };
+  var t = { theme:'android', mode:'light' };
   try{ t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || t; }catch(e){}
-  var theme = t.theme || 'bento', mode = t.mode || 'light';
+  var theme = t.theme || 'android', mode = t.mode || 'light';
   document.documentElement.setAttribute('data-theme', theme);
   document.documentElement.setAttribute('data-mode', mode);
 
@@ -154,6 +154,6 @@
 
 <div id="toast-root" class="toast-root"></div>
 
-<script src="/assets/app.js?v=4"></script>
+<script src="/assets/app.js?v=5"></script>
 </body>
 </html>

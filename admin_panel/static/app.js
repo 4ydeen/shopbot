@@ -57,13 +57,14 @@ const THEMES = [
     swatch: ['#6750A4', '#EADDFF', '#1D1B20'],
   },
 ];
-const DEFAULT_THEME = 'bento';
+const DEFAULT_THEME = 'android';
 
 function loadTheme() {
+  const fallbackMode = (THEMES.find(t => t.id === DEFAULT_THEME) || {}).defaultMode || 'dark';
   try {
     const t = JSON.parse(localStorage.getItem('sv-theme')) || {};
-    return { theme: t.theme || DEFAULT_THEME, mode: t.mode || 'dark' };
-  } catch (e) { return { theme: DEFAULT_THEME, mode: 'dark' }; }
+    return { theme: t.theme || DEFAULT_THEME, mode: t.mode || fallbackMode };
+  } catch (e) { return { theme: DEFAULT_THEME, mode: fallbackMode }; }
 }
 // هر تم حالت روشن/تیره‌ی دلخواه خودش رو جدا به خاطر می‌سپاره — با defaultMode
 // خود تم به عنوان مقدار اول، پیش از اینکه کاربر چیزی انتخاب کرده باشه.
@@ -695,6 +696,18 @@ function openPushSettingsModal() {
 /* اندروید (کروم): با beforeinstallprompt یک دیالوگ نصب بومی نشون میدیم.
    آیفون (سافاری): هیچ API ای برای نصب برنامه‌ای وجود نداره، پس فقط راهنمای
    دستی «Share -> Add to Home Screen» رو نشون می‌دیم. */
+
+// نکته‌ی مهم: قبلاً Service Worker فقط وقتی ثبت می‌شد که ادمین دستی روی
+// دکمه‌ی 🔔 (اعلان Push) می‌زد. چون کروم بدون یک Service Worker فعال، سایت
+// رو یک PWA قابل‌نصب واقعی نمی‌بینه (و به‌جاش فقط گزینه‌ی عمومی «Install and
+// create shortcut» رو تو منو نشون می‌ده، نه دیالوگ واقعی نصب اپ)، اینجا
+// همون اول لود صفحه (بدون نیاز به فعال کردن Push) ثبتش می‌کنیم.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 let deferredInstallPrompt = null;
 
 function isStandalonePwa() {
