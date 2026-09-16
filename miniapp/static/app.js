@@ -2836,8 +2836,95 @@ async function renderAdminStatsSection() {
       adminStatsRange = { preset: 0, startDate: sd, endDate: ed };
       renderAdminStatsSection();
     };
+
+    renderAdminAdvancedStatsCards(start, end);
   } catch (e) {
     body.innerHTML = errorState(e.message);
+  }
+}
+
+// آمار پیشرفته (روند/درگاه‌ها/کمپین‌ها/نماینده‌ها/قیف تبدیل) - جدا و بعد از
+// بخش اصلی بارگذاری می‌شود تا صفحه‌ی اول دیرتر ظاهر نشود؛ کارت‌های خودش را
+// زیر همان بخش آمار اضافه می‌کند (بدون تب جدا، برای سادگی روی موبایل).
+async function renderAdminAdvancedStatsCards(start, end) {
+  const anchor = document.getElementById("admin-section-body");
+  if (!anchor) return;
+  const holder = document.createElement("div");
+  holder.id = "admin-advanced-stats";
+  holder.innerHTML = `<div class="card"><div class="eyebrow" style="margin-top:0">📈 آمار پیشرفته</div>${skeleton(2)}</div>`;
+  anchor.appendChild(holder);
+  try {
+    const a = await api(`/api/admin/dashboard/advanced?start_date=${start}&end_date=${end}`);
+    const gwMax = Math.max(...a.gateway_breakdown.map((g) => g.revenue), 1);
+    const heat = a.hourly_heatmap;
+    const dayNamesFa = ["یک‌شنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنج‌شنبه", "جمعه", "شنبه"]; // sqlite %w: 0=یکشنبه
+    const totalsByDay = heat.map((row, i) => [dayNamesFa[i], row.reduce((x, y) => x + y, 0)]);
+    const totalsByHour = Array.from({ length: 24 }, (_, h) => heat.reduce((s2, row) => s2 + row[h], 0));
+    const hasOrders = totalsByDay.some(([, c]) => c > 0);
+    const bestDay = hasOrders ? totalsByDay.reduce((m, x) => (x[1] > m[1] ? x : m)) : null;
+    const bestHour = hasOrders ? totalsByHour.indexOf(Math.max(...totalsByHour)) : null;
+
+    holder.innerHTML = `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">💳 تفکیک درگاه‌های پرداخت</div>
+        ${a.gateway_breakdown.length === 0 ? `<div class="hint-text" style="margin:0">تراکنشی ثبت نشده.</div>` : a.gateway_breakdown.map((g) => `
+          <div class="admin-list-row" style="flex-direction:column;align-items:stretch;gap:4px">
+            <div class="admin-list-row-main">
+              <span>${escHtml(g.gateway)}</span>
+              <span class="hint-text" style="margin:0">${g.success}/${g.attempts} موفق (${g.success_rate}٪)</span>
+            </div>
+            <div class="bar-track" style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden">
+              <div style="height:100%;width:${Math.max(2, (g.revenue / gwMax) * 100)}%;border-radius:3px;background:var(--cyan)"></div>
+            </div>
+            <div class="admin-list-row-actions" style="justify-content:flex-start"><b>${fmt(g.revenue)} تومان</b></div>
+          </div>
+        `).join("")}
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-num">${fmt(a.funnel.new_users)}</span><span class="stat-label">عضو جدید</span></div>
+        <div class="stat-card"><span class="stat-num">${a.funnel.start_to_attempt_rate}٪</span><span class="stat-label">سفارش ثبت کردند</span></div>
+        <div class="stat-card"><span class="stat-num">${a.funnel.overall_conversion_rate}٪</span><span class="stat-label">نرخ تبدیل کلی</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(a.retention.returning_customers)}</span><span class="stat-label">مشتری بازگشتی</span></div>
+        <div class="stat-card"><span class="stat-num">${fmt(a.retention.churned_customers)}</span><span class="stat-label">ریزش‌کرده (${a.retention.churn_window_days} روز)</span></div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🎯 منابع ورودی کاربر (کمپین‌ها)</div>
+        ${a.campaign_performance.length === 0 ? `<div class="hint-text" style="margin:0">داده‌ای نیست.</div>` : a.campaign_performance.slice(0, 8).map((c) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${escHtml(c.source)}</span>
+              <span class="hint-text" style="margin:0">${fmt(c.new_users)} کاربر → ${fmt(c.buyers)} خریدار (${c.conversion_rate}٪)</span>
+            </div>
+            <div class="admin-list-row-actions"><b>${fmt(c.revenue)} تومان</b></div>
+          </div>
+        `).join("")}
+      </div>
+
+      ${a.reseller_performance.length ? `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">🤝 عملکرد نمایندگان داخلی</div>
+        ${a.reseller_performance.slice(0, 8).map((r) => `
+          <div class="admin-list-row">
+            <div class="admin-list-row-main">
+              <span>${escHtml(r.name)}</span>
+              <span class="hint-text" style="margin:0">${fmt(r.customers)} مشتری · ${fmt(r.orders)} فروش · کمیسیون ${fmt(r.commission_paid)}</span>
+            </div>
+            <div class="admin-list-row-actions"><b>${fmt(r.revenue)} تومان</b></div>
+          </div>
+        `).join("")}
+      </div>` : ""}
+
+      ${hasOrders ? `
+      <div class="card">
+        <div class="eyebrow" style="margin-top:0">⏰ شلوغ‌ترین زمان‌ها (وقت تهران)</div>
+        <div class="stat-row"><span>پرفروش‌ترین روز هفته</span><b>${bestDay[0]} (${fmt(bestDay[1])} سفارش)</b></div>
+        <div class="stat-row"><span>پرفروش‌ترین ساعت</span><b>${String(bestHour).padStart(2, "0")}:00 تا ${String(bestHour + 1).padStart(2, "0")}:00 (${fmt(totalsByHour[bestHour])} سفارش)</b></div>
+      </div>` : ""}
+    `;
+  } catch (e) {
+    holder.innerHTML = `<div class="card">${errorState(e.message)}</div>`;
   }
 }
 
