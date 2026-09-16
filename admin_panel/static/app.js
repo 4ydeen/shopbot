@@ -3982,6 +3982,7 @@ let resellerReqFilter = 'open';
 const RESELLERS_SUBTABS = [
   ['bots', 'نماینده‌های کامل'],
   ['credit', 'نمایندگی اعتباری'],
+  ['commission', 'نمایندگی کمیسیونی'],
   ['requests', 'درخواست‌های نمایندگی'],
 ];
 
@@ -4426,6 +4427,7 @@ async function renderResellers() {
   try {
     if (resellersSubTab === 'bots') await renderResellersBotsTab();
     else if (resellersSubTab === 'requests') await renderResellersRequestsTab();
+    else if (resellersSubTab === 'commission') await renderResellersCommissionTab();
     else await renderResellersCreditTab();
   } catch (e) { handleErr(e); }
 }
@@ -4755,6 +4757,155 @@ async function renderResellersCreditTab() {
       box.style.display = box.style.display === 'none' ? '' : 'none';
     }));
   }
+}
+
+/* --------------------------------- نمایندگی کمیسیونی (لینک اختصاصی داخل بات) -- */
+// بدون حجم و بدون محصول آماده؛ فقط درصد کمیسیون دائمی روی خریدهای مشتریان
+// زیرمجموعه، تا وقتی ادمین خودش نمایندگی را غیرفعال کند. مستقل کامل از
+// نمایندگی حجمی/سطح ۲ بالا و از درخواست‌های آن (تب renderResellersCreditTab).
+async function renderResellersCommissionTab() {
+  const [activeRes, pending] = await Promise.all([
+    apiGet('/resellers/inline-commissions'),
+    apiGet('/resellers/commission-requests?status=pending'),
+  ]);
+  const active = activeRes.items || [];
+  const pendingList = pending.items || [];
+
+  const introHtml = `
+    <div class="card" style="padding:18px 20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div style="min-width:240px">
+          <h3 style="margin:0 0 6px">نمایندگی کمیسیونی (لینک اختصاصی داخل بات اصلی)</h3>
+          <span class="card-sub">بدون حجم و بدون محصول آماده؛ نماینده فقط یک لینک اختصاصی می‌گیرد و روی هر خرید مشتریانی که با آن لینک وارد شوند، درصدی کمیسیون دائمی به کیف پولش اضافه می‌شود — تا وقتی خودت غیرفعالش کنی. یا خودت مستقیم درصد را تعیین می‌کنی، یا کاربر با یک درصد پیشنهادی درخواست می‌دهد و تو تایید/رد می‌کنی.</span>
+        </div>
+        <button class="btn btn-primary btn-sm" id="comres-add" style="white-space:nowrap">➕ ساخت مستقیم نماینده جدید</button>
+      </div>
+    </div>
+  `;
+
+  const pendingHtml = `
+    <div class="card">
+      <div class="card-head"><h3>درخواست‌های در انتظار (${fmt(pendingList.length)})</h3>
+        <span class="card-sub">درصد پیشنهادی خودِ کاربر است؛ تایید یعنی همین درصد فعال می‌شود.</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>کاربر</th><th>درصد پیشنهادی</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+        <tbody>${pendingList.map(r => `<tr>
+          <td>${r.username ? `<div>@${esc(r.username)}</div>` : ''}<div class="mono" style="${r.username ? 'opacity:.6;font-size:12px' : ''}">${r.user_id}</div></td>
+          <td class="mono">${fmt(r.proposed_percent)}٪</td>
+          <td class="mono">${fmtDate ? fmtDate(r.created_at) : esc(r.created_at || '—')}</td>
+          <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" data-comres-approve="${r.id}">✅ تایید</button>
+            <button class="btn btn-sm btn-danger" data-comres-reject="${r.id}">❌ رد</button>
+          </div></td>
+        </tr>`).join('') || `<tr><td colspan="4" class="empty-state">${svg('empty')}<div>درخواست در انتظاری نیست</div></td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `;
+
+  const activeHtml = `
+    <div class="card">
+      <div class="card-head"><h3>نماینده‌های کمیسیونی فعال (${fmt(active.length)} نفر)</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>کاربر</th><th>درصد کمیسیون</th><th>مشتریان</th><th>خریدهای تسویه‌شده</th><th>مجموع کارمزد</th><th>عملیات</th></tr></thead>
+        <tbody>${active.map(r => `<tr>
+          <td>${r.username ? `<div>@${esc(r.username)}</div>` : ''}<div class="mono" style="${r.username ? 'opacity:.6;font-size:12px' : ''}">${r.telegram_id}</div></td>
+          <td class="mono">${fmt(r.percent)}٪</td>
+          <td class="mono">${fmt(r.customers)}</td>
+          <td class="mono">${fmt(r.paid_orders)}</td>
+          <td class="mono">${fmt(r.total_commission)} تومان</td>
+          <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm" data-comres-edit="${r.telegram_id}" data-cur-percent="${r.percent}">✏️ درصد</button>
+            <button class="btn btn-sm btn-danger" data-comres-disable="${r.telegram_id}">⛔️ غیرفعال</button>
+          </div></td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty-state">${svg('empty')}<div>نماینده‌ی کمیسیونیِ فعالی نیست</div></td></tr>`}</tbody>
+      </table></div>
+    </div>
+  `;
+
+  setContent(`
+    ${resellersSubtabsHtml()}
+    ${introHtml}
+    ${pendingHtml}
+    ${activeHtml}
+  `);
+  bindResellersSubtabs(content());
+
+  $('#comres-add', content()).addEventListener('click', openCommissionResellerDirectModal);
+
+  $$('[data-comres-approve]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('این درخواست با همان درصد پیشنهادی تایید شود؟')) return;
+    try {
+      await apiPost(`/resellers/commission-requests/${b.dataset.comresApprove}/approve`);
+      toast('تایید شد.'); renderResellers();
+    } catch (e) { handleErr(e); }
+  }));
+
+  $$('[data-comres-reject]', content()).forEach(b => b.addEventListener('click', () => {
+    openModal('رد درخواست نمایندگی کمیسیونی', `
+      <div class="form-grid">
+        <input class="input" id="comres-reject-reason" placeholder="دلیل رد (برای کاربر ارسال می‌شود)">
+        <button class="btn btn-danger" id="comres-reject-go">رد درخواست</button>
+      </div>
+    `, (body, close) => {
+      $('#comres-reject-go', body).addEventListener('click', async () => {
+        const reason = $('#comres-reject-reason', body).value.trim();
+        if (!reason) { toast('دلیل رد را وارد کن.', true); return; }
+        try {
+          await apiPost(`/resellers/commission-requests/${b.dataset.comresReject}/reject`, { reason });
+          toast('رد شد و به کاربر اطلاع داده شد.'); close(); renderResellers();
+        } catch (e) { handleErr(e); }
+      });
+    });
+  }));
+
+  $$('[data-comres-edit]', content()).forEach(b => b.addEventListener('click', () => {
+    openModal(`ویرایش درصد کمیسیون #${b.dataset.comresEdit}`, `
+      <div class="form-grid">
+        <input class="input" id="comres-edit-percent" type="number" min="1" max="100" value="${b.dataset.curPercent}">
+        <button class="btn btn-primary" id="comres-edit-go">ذخیره</button>
+      </div>
+    `, (body, close) => {
+      $('#comres-edit-go', body).addEventListener('click', async () => {
+        const percent = Number($('#comres-edit-percent', body).value);
+        if (!percent || percent < 1 || percent > 100) { toast('درصد باید بین ۱ تا ۱۰۰ باشد.', true); return; }
+        try {
+          await apiPut(`/resellers/inline-commissions/${b.dataset.comresEdit}`, { percent });
+          toast('درصد به‌روزرسانی شد.'); close(); renderResellers();
+        } catch (e) { handleErr(e); }
+      });
+    });
+  }));
+
+  $$('[data-comres-disable]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('نمایندگی کمیسیونی این کاربر غیرفعال شود؟')) return;
+    try {
+      await apiDelete(`/resellers/inline-commissions/${b.dataset.comresDisable}`);
+      toast('غیرفعال شد.'); renderResellers();
+    } catch (e) { handleErr(e); }
+  }));
+}
+
+function openCommissionResellerDirectModal() {
+  openModal('ساخت مستقیم نماینده‌ی کمیسیونی', `
+    <div class="form-grid">
+      <div style="opacity:.7;font-size:12.5px">آیدی عددی تلگرام کاربر را وارد کن؛ کاربر باید قبلاً حداقل یک‌بار بات را استارت کرده باشد. این نمایندگی بدون حجم و بدون محصول آماده است — فقط یک درصد کمیسیون دائمی.</div>
+      <input class="input" id="comres-direct-id" type="number" placeholder="آیدی عددی تلگرام">
+      <input class="input" id="comres-direct-percent" type="number" min="1" max="100" placeholder="درصد کمیسیون (مثلاً 10)">
+      <button class="btn btn-primary" id="comres-direct-go">ساخت نمایندگی</button>
+    </div>
+  `, (body, close) => {
+    $('#comres-direct-go', body).addEventListener('click', async () => {
+      const owner_telegram_id = Number($('#comres-direct-id', body).value);
+      const percent = Number($('#comres-direct-percent', body).value);
+      if (!owner_telegram_id) { toast('آیدی عددی نامعتبر است.', true); return; }
+      if (!percent || percent < 1 || percent > 100) { toast('درصد باید بین ۱ تا ۱۰۰ باشد.', true); return; }
+      try {
+        await apiPost('/resellers/inline-commissions', { owner_telegram_id, percent });
+        toast('نمایندگی کمیسیونی ساخته شد.'); close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+  });
 }
 
 async function openLevel2ResellerManageModal(tgId) {
