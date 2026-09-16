@@ -431,6 +431,22 @@ class AdminResellerRequestFlow(StatesGroup):
     waiting_reject_reason = State()
 
 
+class CommissionResellerRequestFlow(StatesGroup):
+    """درخواست نمایندگی کمیسیونی توسط خودِ کاربر: بدون حجم، بدون محصول آماده،
+    فقط یک درصد کمیسیون پیشنهادی که برای تایید/رد به ادمین ارسال می‌شود."""
+    waiting_percent = State()
+
+
+class AdminCommissionResellerFlow(StatesGroup):
+    """اقدامات ادمین روی نمایندگی کمیسیونی: هم تایید/رد درخواست کاربر، هم
+    ساخت مستقیم یک نماینده‌ی کمیسیونی جدید بدون درخواست قبلی."""
+    waiting_approve_percent = State()
+    waiting_reject_reason = State()
+    waiting_direct_user_id = State()
+    waiting_direct_percent = State()
+    waiting_edit_percent = State()
+
+
 class AdminTempMessage(StatesGroup):
     waiting_target_id = State()
     waiting_text = State()

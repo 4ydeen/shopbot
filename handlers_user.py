@@ -24,7 +24,7 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, Teleg
 
 from md_utils import escape_md, escape_html
 import keyboards as kb
-from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow
+from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
 import ai_support
 from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path, DB_PATH, ADMIN_PANEL_URL
 from database import Database, DuplicateBotTokenError
@@ -3850,16 +3850,95 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         me = await bot.get_me()
         link = f"https://t.me/{me.username}?start=resref_{message.from_user.id}"
-        percent = (await asyncio.to_thread(db.get_setting, "reseller_inline_commission_percent", "10"))
         stats = (await asyncio.to_thread(db.get_inline_reseller_stats, message.from_user.id))
+        percent = stats["percent"]
         await message.answer(
-            "🔗 نمایندگی شما (لینک اختصاصی داخل بات)\n\n"
+            "🔗 نمایندگی کمیسیونی شما (لینک اختصاصی داخل بات)\n\n"
             f"لینک فروش شما:\n{link}\n\n"
             f"روی هر خرید مشتریانی که با این لینک وارد شده‌اند، {percent}٪ کارمزد به کیف پول شما اضافه می‌شود.\n\n"
             f"👥 تعداد مشتریان شما: {stats['customers']}\n"
             f"🧾 تعداد خریدهای تسویه‌شده: {stats['paid_orders']}\n"
             f"👛 مجموع کارمزد دریافتی: {stats['total_commission']:,} تومان"
         )
+
+    # -----------------------------------------------------------------------
+    # درخواست نمایندگی کمیسیونی (مستقل کامل از نمایندگی سطح ۲ حجمی؛ بدون حجم،
+    # بدون محصول آماده - فقط یک درصد کمیسیون که ادمین تایید/رد می‌کند و در
+    # صورت تایید، تا وقتی ادمین غیرفعالش نکند روی همه‌ی خریدهای بعدی می‌ماند)
+    # -----------------------------------------------------------------------
+
+    @router.message(F.text.func(lambda t: t == db.get_setting(
+        "btn_commission_reseller_request", "💼 درخواست نمایندگی کمیسیونی"
+    )))
+    async def commission_reseller_request_start(message: Message, state: FSMContext):
+        if not is_main_bot:
+            return
+        if (await asyncio.to_thread(db.get_setting, "commission_reseller_request_enabled", "1")) != "1":
+            await message.answer("در حال حاضر امکان درخواست نمایندگی کمیسیونی غیرفعال است.")
+            return
+        if (await asyncio.to_thread(db.is_inline_reseller, message.from_user.id)):
+            await message.answer(
+                "شما همین الان هم نماینده‌ی کمیسیونی هستید. برای دیدن لینک و آمار خودتان، "
+                "دستور /reseller_link را بفرستید."
+            )
+            return
+        pending = (await asyncio.to_thread(db.get_pending_commission_reseller_request_for_user, message.from_user.id))
+        if pending:
+            await message.answer(
+                f"شما همین الان یک درخواست نمایندگی کمیسیونی باز دارید (درصد پیشنهادی: {pending['proposed_percent']}٪)؛ "
+                "منتظر بررسی ادمین بمانید."
+            )
+            return
+        await state.set_state(CommissionResellerRequestFlow.waiting_percent)
+        await message.answer(
+            "💼 درخواست نمایندگی کمیسیونی\n\n"
+            "این نوع نمایندگی بدون حجم و بدون محصول آماده است؛ فقط یک لینک اختصاصی فروش می‌گیرید و "
+            "روی هر خرید مشتریانی که از طریق آن لینک وارد شوند، درصدی کمیسیون به کیف پول شما اضافه می‌شود "
+            "— تا زمانی که ادمین نمایندگی‌تان را غیرفعال کند.\n\n"
+            "چند درصد کمیسیون پیشنهاد می‌دهید؟ فقط عدد بین ۱ تا ۱۰۰ ارسال کنید (مثلاً 10):",
+            reply_markup=kb.cancel_kb(),
+        )
+
+    @router.message(CommissionResellerRequestFlow.waiting_percent)
+    async def commission_reseller_request_percent(message: Message, state: FSMContext, bot: Bot):
+        text = (message.text or "").strip()
+        if not text.isdigit() or not (1 <= int(text) <= 100):
+            await message.answer("لطفاً یک عدد صحیح بین ۱ تا ۱۰۰ ارسال کنید.")
+            return
+        percent = int(text)
+        await state.clear()
+        user_id = message.from_user.id
+
+        request_id = (await asyncio.to_thread(db.create_commission_reseller_request, user_id, percent))
+        if not request_id:
+            await message.answer(
+                "⚠️ ثبت درخواست ممکن نشد؛ شاید همین الان نماینده‌ی کمیسیونی هستید یا یک درخواست باز دیگر دارید.",
+                reply_markup=kb.menu_for_user(db, user_id, is_main_bot),
+            )
+            await _send_inline_main_menu(message, user_id)
+            return
+
+        user_row = (await asyncio.to_thread(db.get_user, user_id))
+        first_name = (user_row["first_name"] if user_row else "") or ""
+        username = (user_row["username"] if user_row else "") or "---"
+        caption = (
+            f"💼 درخواست نمایندگی کمیسیونی #{request_id}\n"
+            f"👤 کاربر: {first_name} (@{username})\n"
+            f"🆔 آیدی عددی: {user_id}\n"
+            f"📊 درصد پیشنهادی: {percent}٪\n\n"
+            "این نمایندگی بدون حجم و بدون محصول آماده است؛ فقط کمیسیون دائمی روی خریدهای زیرمجموعه."
+        )
+        for admin_id in _senior_admin_ids():
+            try:
+                await bot.send_message(admin_id, caption, reply_markup=kb.commission_reseller_request_review_kb(request_id))
+            except Exception:
+                pass
+
+        await message.answer(
+            "✅ درخواست نمایندگی کمیسیونی شما ثبت شد. پس از بررسی ادمین، نتیجه (تایید یا رد به همراه علت) برایتان ارسال می‌شود.",
+            reply_markup=kb.menu_for_user(db, user_id, is_main_bot),
+        )
+        await _send_inline_main_menu(message, user_id)
 
     # -----------------------------------------------------------------------
     # کیف پول (جدا از زیرمجموعه‌گیری)
@@ -4273,9 +4352,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     async def _resreq_step_bot_choice(event, state: FSMContext):
         axes = await _resreq_axes(state)
+        # گزینه‌ی «inline_link» عمداً از این لیست حذف شد: نمایندگی کمیسیونیِ
+        # «لینک اختصاصی داخل بات اصلی» حالا یک مسیر کاملاً مستقل و جدا شده است
+        # (دکمه‌ی «💼 درخواست نمایندگی کمیسیونی» + CommissionResellerRequestFlow)،
+        # بدون حجم/محصول آماده و با تایید/رد درصد کمیسیون توسط ادمین. این محور
+        # فقط برای سازگاری با درخواست‌های قدیمیِ ثبت‌شده با این گزینه نگه داشته
+        # شده (_finalize_no_bot_reseller_request هنوز bot_choice=='inline_link' را
+        # می‌شناسد)، ولی دیگر به کاربر پیشنهاد نمی‌شود.
         options = [o for o, key in (
             ("dedicated", "reseller_axis_bot_dedicated_enabled"),
-            ("inline_link", "reseller_axis_bot_inline_link_enabled"),
             ("none", "reseller_axis_bot_none_enabled"),
         ) if axes.get(key, True)] or ["dedicated"]
         if len(options) == 1:

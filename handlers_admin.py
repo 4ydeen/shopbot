@@ -73,6 +73,7 @@ from states import (
     AdminEditWelcome,
     AdminReplyFlow,
     AdminTicketReplyFlow,
+    AdminCommissionResellerFlow,
     AdminSetSupportContact,
     AdminAIFaqAdd,
     AdminSetGeminiKey,
@@ -6203,6 +6204,310 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 reply_markup=kb.credit_reseller_view_kb(target_id, is_res),
             )
             await call.answer("تنظیم شد.")
+
+        # ---------------------------------------------------------------
+        # نمایندگی کمیسیونی (لینک اختصاصی داخل بات اصلی) - بدون حجم، بدون
+        # محصول آماده؛ فقط درصد کمیسیون دائمی روی خریدهای مشتریان زیرمجموعه.
+        # مستقل کامل از نمایندگی سطح ۲ حجمی (بالا) و از reseller_requests.
+        # ---------------------------------------------------------------
+
+        @router.callback_query(F.data == "adm_commission_resellers_menu")
+        async def cb_admin_commission_resellers_menu(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            pending = (await asyncio.to_thread(db.list_commission_reseller_requests, "pending"))
+            await replace_admin_view(
+                call,
+                "💼 نمایندگی کمیسیونی\n\n"
+                "بدون حجم و بدون محصول آماده؛ فقط یک لینک اختصاصی و درصد کمیسیون دائمی روی خریدهای "
+                "مشتریانی که با آن لینک وارد شده‌اند - تا وقتی خودتان غیرفعالش کنید.",
+                reply_markup=kb.commission_resellers_menu_kb(len(pending)),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data == "adm_comres_pending")
+        async def cb_admin_comres_pending(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            pending = (await asyncio.to_thread(db.list_commission_reseller_requests, "pending"))
+            if not pending:
+                await replace_admin_view(
+                    call, "📋 هیچ درخواست نمایندگی کمیسیونیِ در انتظاری وجود ندارد.",
+                    reply_markup=kb.admin_back_kb("adm_commission_resellers_menu"),
+                )
+                await call.answer()
+                return
+            await replace_admin_view(
+                call, f"📋 {len(pending)} درخواست در انتظار بررسی:",
+                reply_markup=kb.commission_resellers_pending_kb(pending),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("comres_view:"))
+        async def cb_admin_comres_view(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = (await asyncio.to_thread(db.get_commission_reseller_request, request_id))
+            if not req or req["status"] != "pending":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            user_row = (await asyncio.to_thread(db.get_user, req["user_id"]))
+            first_name = (user_row["first_name"] if user_row else "") or ""
+            username = (user_row["username"] if user_row else "") or "---"
+            await replace_admin_view(
+                call,
+                f"💼 درخواست نمایندگی کمیسیونی #{request_id}\n"
+                f"👤 کاربر: {first_name} (@{username})\n"
+                f"🆔 آیدی عددی: {req['user_id']}\n"
+                f"📊 درصد پیشنهادی: {req['proposed_percent']}٪",
+                reply_markup=kb.commission_reseller_request_review_kb(request_id),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("comres_approve:"))
+        async def cb_comres_approve(call: CallbackQuery, bot: Bot):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = (await asyncio.to_thread(db.get_commission_reseller_request, request_id))
+            if not req or req["status"] != "pending":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            # اتمیک: approve_commission_reseller_request خودش با WHERE status='pending'
+            # چک می‌کند، پس اگر ادمین دیگری لحظه‌ای زودتر همین درخواست را تایید/رد کرده
+            # باشد، None برمی‌گردد و اینجا با یک پیام واضح متوقف می‌شویم.
+            approved = (await asyncio.to_thread(
+                db.approve_commission_reseller_request, request_id, req["proposed_percent"], call.from_user.id,
+            ))
+            if not approved:
+                await call.answer("این درخواست همین الان توسط ادمین دیگری بررسی شد.", show_alert=True)
+                return
+            (await asyncio.to_thread(db.log_admin_action, 
+                call.from_user.id, "commission_reseller_approve",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | {req['proposed_percent']}٪",
+            ))
+            me = await bot.get_me()
+            link = f"https://t.me/{me.username}?start=resref_{req['user_id']}"
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    "✅ درخواست نمایندگی کمیسیونی شما تایید شد!\n\n"
+                    f"🔗 لینک اختصاصی فروش شما:\n{link}\n\n"
+                    f"روی هر خرید مشتریانی که با این لینک وارد شوند، {req['proposed_percent']}٪ کارمزد به کیف "
+                    "پول شما اضافه می‌شود - تا وقتی ادمین نمایندگی‌تان را غیرفعال کند.\n"
+                    "برای دیدن لینک و آمار، دستور /reseller_link را بفرستید.",
+                )
+                await _notify_user_inline_menu(bot, req["user_id"])
+            except Exception:
+                pass
+            try:
+                await call.message.edit_text((call.message.text or "") + "\n\n✅ تایید شد.")
+            except Exception:
+                pass
+            await call.answer("تایید شد.")
+
+        @router.callback_query(F.data.startswith("comres_reject:"))
+        async def cb_comres_reject(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = (await asyncio.to_thread(db.get_commission_reseller_request, request_id))
+            if not req or req["status"] != "pending":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            await state.update_data(comres_reject_id=request_id)
+            await state.set_state(AdminCommissionResellerFlow.waiting_reject_reason)
+            await call.message.answer("دلیل رد درخواست را بنویسید (برای کاربر ارسال می‌شود):")
+            await call.answer()
+
+        @router.message(AdminCommissionResellerFlow.waiting_reject_reason)
+        async def process_comres_reject_reason(message: Message, state: FSMContext, bot: Bot):
+            reason = (message.text or "").strip()
+            data = await state.get_data()
+            request_id = data.get("comres_reject_id")
+            req = (await asyncio.to_thread(db.get_commission_reseller_request, request_id)) if request_id else None
+            await state.clear()
+            if not req or req["status"] != "pending":
+                await message.answer("این درخواست دیگر معتبر نیست.")
+                return
+            rejected = (await asyncio.to_thread(
+                db.reject_commission_reseller_request, request_id, reason, message.from_user.id,
+            ))
+            if not rejected:
+                await message.answer("این درخواست همین الان توسط ادمین دیگری بررسی شد.")
+                return
+            (await asyncio.to_thread(db.log_admin_action, 
+                message.from_user.id, "commission_reseller_reject",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | دلیل: {reason}",
+            ))
+            await message.answer("✅ ثبت شد و به کاربر اطلاع داده شد.")
+            try:
+                await bot.send_message(
+                    req["user_id"],
+                    f"❌ متاسفانه درخواست نمایندگی کمیسیونی شما (#{request_id}) رد شد.\n\nدلیل: {reason}",
+                )
+                await _notify_user_inline_menu(bot, req["user_id"])
+            except Exception:
+                pass
+
+        @router.callback_query(F.data == "adm_comres_active")
+        async def cb_admin_comres_active(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            resellers = (await asyncio.to_thread(db.list_inline_resellers))
+            if not resellers:
+                await replace_admin_view(
+                    call, "📊 هیچ نماینده‌ی کمیسیونیِ فعالی وجود ندارد.",
+                    reply_markup=kb.admin_back_kb("adm_commission_resellers_menu"),
+                )
+                await call.answer()
+                return
+            await replace_admin_view(
+                call, f"📊 {len(resellers)} نماینده‌ی کمیسیونیِ فعال:",
+                reply_markup=kb.commission_reseller_active_kb(resellers),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("comres_view_active:"))
+        async def cb_admin_comres_view_active(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            stats = (await asyncio.to_thread(db.get_inline_reseller_stats, target_id))
+            await replace_admin_view(
+                call,
+                f"👤 نماینده‌ی کمیسیونی {target_id}\n\n"
+                f"📊 درصد کمیسیون: {stats['percent']}٪\n"
+                f"👥 تعداد مشتریان: {stats['customers']}\n"
+                f"🧾 خریدهای تسویه‌شده: {stats['paid_orders']}\n"
+                f"👛 مجموع کارمزد پرداختی: {stats['total_commission']:,} تومان",
+                reply_markup=kb.commission_reseller_active_view_kb(target_id),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("comres_disable:"))
+        async def cb_admin_comres_disable(call: CallbackQuery, bot: Bot):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            (await asyncio.to_thread(db.disable_inline_reseller, target_id))
+            (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "commission_reseller_disable", f"کاربر {target_id}"))
+            try:
+                await bot.send_message(target_id, "⛔️ نمایندگی کمیسیونی شما توسط ادمین غیرفعال شد.")
+            except Exception:
+                pass
+            resellers = (await asyncio.to_thread(db.list_inline_resellers))
+            await replace_admin_view(
+                call, f"✅ نمایندگی این کاربر غیرفعال شد.\n\n📊 {len(resellers)} نماینده‌ی کمیسیونیِ فعال:",
+                reply_markup=kb.commission_reseller_active_kb(resellers),
+            )
+            await call.answer("غیرفعال شد.")
+
+        @router.callback_query(F.data.startswith("comres_edit:"))
+        async def cb_admin_comres_edit(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            target_id = int(call.data.split(":")[1])
+            await state.update_data(comres_edit_target=target_id)
+            await state.set_state(AdminCommissionResellerFlow.waiting_edit_percent)
+            await call.message.answer("درصد کمیسیون جدید را ارسال کنید (عدد بین ۱ تا ۱۰۰):")
+            await call.answer()
+
+        @router.message(AdminCommissionResellerFlow.waiting_edit_percent)
+        async def process_comres_edit_percent(message: Message, state: FSMContext, bot: Bot):
+            text = (message.text or "").strip()
+            if not text.isdigit() or not (1 <= int(text) <= 100):
+                await message.answer("لطفاً یک عدد صحیح بین ۱ تا ۱۰۰ ارسال کنید.")
+                return
+            percent = int(text)
+            data = await state.get_data()
+            target_id = data.get("comres_edit_target")
+            await state.clear()
+            if not target_id:
+                await message.answer("⚠️ این عملیات منقضی شده؛ دوباره تلاش کنید.")
+                return
+            (await asyncio.to_thread(db.set_inline_reseller_commission_percent, target_id, percent))
+            (await asyncio.to_thread(db.log_admin_action, 
+                message.from_user.id, "commission_reseller_edit_percent", f"کاربر {target_id} → {percent}٪",
+            ))
+            try:
+                await bot.send_message(target_id, f"📊 درصد کمیسیون نمایندگی شما به {percent}٪ تغییر کرد.")
+            except Exception:
+                pass
+            await message.answer(
+                f"✅ درصد کمیسیون کاربر {target_id} به {percent}٪ تغییر کرد.",
+                reply_markup=kb.commission_reseller_active_view_kb(target_id),
+            )
+
+        @router.callback_query(F.data == "adm_comres_direct_new")
+        async def cb_admin_comres_direct_new(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            await state.set_state(AdminCommissionResellerFlow.waiting_direct_user_id)
+            await safe_edit(
+                call,
+                "آیدی عددی کاربری که می‌خواهید مستقیماً نماینده‌ی کمیسیونی کنید را ارسال کنید:",
+                reply_markup=kb.admin_back_kb("adm_commission_resellers_menu"),
+            )
+            await call.answer()
+
+        @router.message(AdminCommissionResellerFlow.waiting_direct_user_id)
+        async def process_comres_direct_user_id(message: Message, state: FSMContext):
+            raw = (message.text or "").strip()
+            if not raw.isdigit():
+                await message.answer("لطفاً فقط آیدی عددی ارسال کنید.")
+                return
+            target_id = int(raw)
+            if not (await asyncio.to_thread(db.get_user, target_id)):
+                await message.answer("این کاربر هنوز با بات /start نزده. اول باید کاربر یک‌بار بات را استارت کند.")
+                return
+            if (await asyncio.to_thread(db.is_inline_reseller, target_id)):
+                await state.clear()
+                await message.answer(
+                    "این کاربر همین الان هم نماینده‌ی کمیسیونی فعال است؛ از «لیست نماینده‌های فعال» درصدش را ویرایش کنید.",
+                    reply_markup=kb.admin_back_kb("adm_commission_resellers_menu"),
+                )
+                return
+            await state.update_data(comres_direct_target=target_id)
+            await state.set_state(AdminCommissionResellerFlow.waiting_direct_percent)
+            await message.answer("چند درصد کمیسیون برای این نماینده تعیین می‌کنید؟ عدد بین ۱ تا ۱۰۰ ارسال کنید:")
+
+        @router.message(AdminCommissionResellerFlow.waiting_direct_percent)
+        async def process_comres_direct_percent(message: Message, state: FSMContext, bot: Bot):
+            text = (message.text or "").strip()
+            if not text.isdigit() or not (1 <= int(text) <= 100):
+                await message.answer("لطفاً یک عدد صحیح بین ۱ تا ۱۰۰ ارسال کنید.")
+                return
+            percent = int(text)
+            data = await state.get_data()
+            target_id = data.get("comres_direct_target")
+            await state.clear()
+            if not target_id:
+                await message.answer("⚠️ این عملیات منقضی شده؛ دوباره تلاش کنید.")
+                return
+            (await asyncio.to_thread(db.enable_inline_reseller, target_id, percent))
+            (await asyncio.to_thread(db.log_admin_action, 
+                message.from_user.id, "commission_reseller_direct_create", f"کاربر {target_id} | {percent}٪",
+            ))
+            me = await bot.get_me()
+            link = f"https://t.me/{me.username}?start=resref_{target_id}"
+            try:
+                await bot.send_message(
+                    target_id,
+                    "🎉 شما توسط ادمین به‌عنوان نماینده‌ی کمیسیونی تعیین شدید!\n\n"
+                    f"🔗 لینک اختصاصی فروش شما:\n{link}\n\n"
+                    f"روی هر خرید مشتریانی که با این لینک وارد شوند، {percent}٪ کارمزد به کیف پول شما اضافه "
+                    "می‌شود - تا وقتی ادمین نمایندگی‌تان را غیرفعال کند.\n"
+                    "برای دیدن لینک و آمار، دستور /reseller_link را بفرستید.",
+                )
+                await _notify_user_inline_menu(bot, target_id)
+            except Exception:
+                pass
+            await message.answer(
+                f"✅ کاربر {target_id} با {percent}٪ کمیسیون، نماینده‌ی کمیسیونی شد.",
+                reply_markup=kb.commission_reseller_active_view_kb(target_id),
+            )
 
     # -------------------------------------------------------------------
     # ویرایش متن دکمه‌ها

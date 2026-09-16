@@ -58,7 +58,8 @@ def miniapp_inline_kb(miniapp_url: str) -> InlineKeyboardMarkup:
     ])
 
 
-def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_reseller_request: bool):
+def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_reseller_request: bool,
+                 show_commission_reseller_request: bool = False):
     """لیست مشترک آیتم‌های منوی اصلی را برمی‌گرداند: (key, text, style).
     این تابع پایه‌ی هر دو نوع منو (معمولی/پایین و شیشه‌ای/بالا) است تا منطق
     نمایش/عدم‌نمایش هر دکمه دقیقاً یک‌بار نوشته شده و همیشه هماهنگ بماند."""
@@ -119,6 +120,16 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
             return None
         return (settings.get("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲"), settings.get("btn_reseller_request_style", "primary"))
 
+    def item_commission_reseller_request():
+        if not show_commission_reseller_request:
+            return None
+        if settings.get("commission_reseller_request_enabled", "1") != "1":
+            return None
+        return (
+            settings.get("btn_commission_reseller_request", "💼 درخواست نمایندگی کمیسیونی"),
+            settings.get("btn_commission_reseller_request_style", "primary"),
+        )
+
     builders = {
         "miniapp": item_miniapp,
         "btn_buy": item_buy,
@@ -130,6 +141,7 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
         "btn_admin_panel": item_admin_panel,
         "btn_reseller_panel": item_reseller_panel,
         "btn_reseller_request": item_reseller_request,
+        "btn_commission_reseller_request": item_commission_reseller_request,
     }
 
     items = []
@@ -187,24 +199,25 @@ def _menu_item_rows(db, items: list) -> list:
 
 
 def main_menu_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: bool = True,
-                  show_reseller_request: bool = False):
+                  show_reseller_request: bool = False, show_commission_reseller_request: bool = False):
     """منوی پایین (Reply Keyboard). اگر از تنظیمات غیرفعال شده باشد،
     ReplyKeyboardRemove برمی‌گردد تا کیبورد قبلی از پایین صفحه‌ی کاربر جمع شود."""
     if db.get_setting("main_menu_reply_enabled", "1") != "1":
         return ReplyKeyboardRemove()
 
-    items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request)
+    items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request, show_commission_reseller_request)
     item_rows = _menu_item_rows(db, items)
     rows = [[_styled_button(text, style) for _key, text, style in row] for row in item_rows]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def main_menu_inline_kb(db, is_admin: bool, is_reseller: bool = False, is_main_bot: bool = True,
-                         show_reseller_request: bool = False) -> InlineKeyboardMarkup:
+                         show_reseller_request: bool = False,
+                         show_commission_reseller_request: bool = False) -> InlineKeyboardMarkup:
     """منوی شیشه‌ای بالا (Inline Keyboard) - همان آیتم‌های منوی پایین، به شکل inline.
     روی کلیک هر دکمه، callback_data به‌صورت 'mm:<key>' ارسال می‌شود که در
     handlers_user.py / handlers_admin.py به همان هندلر متنی متناظرش وصل شده."""
-    items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request)
+    items = _menu_items(db, is_admin, is_reseller, is_main_bot, show_reseller_request, show_commission_reseller_request)
     item_rows = _menu_item_rows(db, items)
     miniapp_url = _miniapp_url(db)
 
@@ -218,13 +231,23 @@ def main_menu_inline_kb(db, is_admin: bool, is_reseller: bool = False, is_main_b
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _show_commission_reseller_request(db, user_tg_id: int, is_main_bot: bool) -> bool:
+    return (
+        is_main_bot
+        and not db.is_inline_reseller(user_tg_id)
+        and not db.get_pending_commission_reseller_request_for_user(user_tg_id)
+    )
+
+
 def menu_for_user(db, user_tg_id: int, is_main_bot: bool = True):
     show_reseller_request = (
         is_main_bot
         and not db.is_reseller(user_tg_id)
         and not db.get_open_reseller_request(user_tg_id)
     )
-    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), is_main_bot, show_reseller_request)
+    show_commission_reseller_request = _show_commission_reseller_request(db, user_tg_id, is_main_bot)
+    return main_menu_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), is_main_bot,
+                         show_reseller_request, show_commission_reseller_request)
 
 
 def inline_menu_for_user(db, user_tg_id: int, is_main_bot: bool = True) -> InlineKeyboardMarkup:
@@ -237,7 +260,9 @@ def inline_menu_for_user(db, user_tg_id: int, is_main_bot: bool = True) -> Inlin
         and not db.is_reseller(user_tg_id)
         and not db.get_open_reseller_request(user_tg_id)
     )
-    return main_menu_inline_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), is_main_bot, show_reseller_request)
+    show_commission_reseller_request = _show_commission_reseller_request(db, user_tg_id, is_main_bot)
+    return main_menu_inline_kb(db, db.is_admin(user_tg_id), db.is_reseller(user_tg_id), is_main_bot,
+                                show_reseller_request, show_commission_reseller_request)
 
 
 # ---------------------------------------------------------------------------
@@ -936,6 +961,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_referral_settings", "🤝 تنظیمات زیرمجموعه‌گیری", "adm_referral_settings"),
     ("adm_resellers_menu", "🏪 مدیریت بات‌های نمایندگی", "adm_resellers_menu"),
     ("adm_credit_resellers_menu", "💳 نمایندگی حجمی (اعتبار)", "adm_credit_resellers_menu"),
+    ("adm_commission_resellers_menu", "💼 نمایندگی کمیسیونی", "adm_commission_resellers_menu"),
     ("adm_reseller_requests_menu", "📋 درخواست‌های نمایندگی", "adm_reseller_requests_menu"),
     ("adm_edit_buttons", "✏️ ویرایش متن دکمه‌ها", "adm_edit_buttons"),
     ("adm_account_settings", "🧾 تنظیمات حساب کاربری کاربران", "adm_account_settings"),
@@ -995,6 +1021,7 @@ ADMIN_PANEL_CATEGORIES = [
     ("resellers", "🤝 نمایندگی‌ها", [
         "adm_resellers_menu",
         "adm_credit_resellers_menu",
+        "adm_commission_resellers_menu",
     ]),
     ("marketing", "🎯 بازاریابی و رشد", [
         "adm_discounts_menu",
@@ -1060,7 +1087,7 @@ def _admin_item_label_and_cb(key: str):
 
 
 def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
-    if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu") and not is_main_bot:
+    if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu", "adm_commission_resellers_menu") and not is_main_bot:
         # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت
         # درخواست‌های نمایندگی سطح ۲ (که فقط از بات اصلی قابل درخواست است) را ندارند
         return False
@@ -1774,6 +1801,7 @@ BUTTON_LABELS = {
     "btn_admin_panel": "دکمه پنل مدیریت",
     "btn_reseller_panel": "دکمه پنل نمایندگی",
     "btn_reseller_request": "دکمه درخواست نمایندگی سطح ۲",
+    "btn_commission_reseller_request": "دکمه درخواست نمایندگی کمیسیونی",
 }
 
 
@@ -2659,6 +2687,54 @@ def reseller_request_review_kb(request_id) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ تایید و تعیین هزینه", callback_data=f"resreq_approve:{request_id}")],
         [InlineKeyboardButton(text="❌ رد درخواست", callback_data=f"resreq_reject:{request_id}")],
+    ])
+
+
+def commission_resellers_menu_kb(pending_count: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"📋 درخواست‌های در انتظار ({pending_count})", callback_data="adm_comres_pending",
+        )],
+        [InlineKeyboardButton(text="📊 لیست نماینده‌های فعال", callback_data="adm_comres_active")],
+        [InlineKeyboardButton(text="➕ ساخت مستقیم نماینده جدید", callback_data="adm_comres_direct_new")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:resellers")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def commission_resellers_pending_kb(requests) -> InlineKeyboardMarkup:
+    rows = []
+    for r in requests:
+        rows.append([InlineKeyboardButton(
+            text=f"#{r['id']} — کاربر {r['user_id']} — {r['proposed_percent']}٪",
+            callback_data=f"comres_view:{r['id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_commission_resellers_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def commission_reseller_active_kb(resellers) -> InlineKeyboardMarkup:
+    rows = []
+    for r in resellers:
+        label = f"👤 {r['telegram_id']} — {r['percent']}٪ — {r['customers']} مشتری"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"comres_view_active:{r['telegram_id']}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_commission_resellers_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def commission_reseller_active_view_kb(user_tg_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="✏️ تغییر درصد کمیسیون", callback_data=f"comres_edit:{user_tg_id}")],
+        [InlineKeyboardButton(text="⛔️ غیرفعال‌سازی نمایندگی", callback_data=f"comres_disable:{user_tg_id}")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_comres_active")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def commission_reseller_request_review_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ تایید", callback_data=f"comres_approve:{request_id}")],
+        [InlineKeyboardButton(text="❌ رد درخواست", callback_data=f"comres_reject:{request_id}")],
     ])
 
 

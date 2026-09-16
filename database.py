@@ -156,7 +156,10 @@ DEFAULT_SETTINGS = {
     # (نه فقط اولین خرید) مشتریانی که با لینک این نماینده وارد شده‌اند، این درصد
     # به کیف پول خودِ نماینده تعلق می‌گیرد.
     "reseller_inline_commission_enabled": "1",
-    "reseller_inline_commission_percent": "10",
+    "reseller_inline_commission_percent": "10",  # فقط fallback برای نماینده‌های قدیمی بدون درصد اختصاصی
+    # دکمه‌ی درخواست نمایندگی کمیسیونی (مستقل از نمایندگی سطح ۲ حجمی؛ بدون حجم،
+    # بدون محصول آماده - فقط یک درصد کمیسیون پیشنهادی که ادمین تایید/رد می‌کند)
+    "commission_reseller_request_enabled": "1",
     # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
     "referral_free_config_threshold": "10",  # تعداد دعوت لازم
@@ -319,6 +322,7 @@ MENU_BUTTON_META = {
     # بقیه‌ی دکمه‌ها متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی است.
     "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧑‍💼 پنل نمایندگی"},
     "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🏪 درخواست نمایندگی سطح ۲"},
+    "btn_commission_reseller_request": {"label": "دکمه درخواست نمایندگی کمیسیونی", "toggle_key": "commission_reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "💼 درخواست نمایندگی کمیسیونی"},
 }
 # دکمه‌های داخل «حساب کاربری» و صفحه‌ی جزئیات هر سرویس: هرکدام با یک تنظیم
 # جدا فعال/غیرفعال می‌شوند (پیش‌فرض همه فعال). کلید -> (برچسب برای ادمین، مقدار پیش‌فرض)
@@ -384,7 +388,7 @@ BUYFLOW_STYLE_ONLY_META = {
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 
 DEFAULT_MENU_ORDER = [
-    "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_buy", "btn_test",
+    "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_commission_reseller_request", "btn_buy", "btn_test",
     "btn_my_orders", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel",
 ]
 
@@ -583,6 +587,7 @@ class Database:
                     referral_free_config_given INTEGER DEFAULT 0,
                     owner_reseller_id INTEGER,
                     inline_reseller_enabled INTEGER DEFAULT 0,
+                    inline_reseller_commission_percent INTEGER,
                     reseller_supply_model TEXT DEFAULT 'volume_credit',
                     fixed_product_main_id INTEGER,
                     joined_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1076,6 +1081,24 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_reseller_product_credit_reseller ON reseller_product_credit(reseller_id);
 
+                -- نمایندگی کمیسیونی (لینک اختصاصی داخل بات اصلی) - مستقل کامل از
+                -- reseller_requests (بدون حجم، بدون محصول آماده؛ فقط درصد کمیسیون
+                -- روی همه‌ی خریدهای دائمی مشتریان زیرمجموعه، تا زمان غیرفعال‌سازی).
+                CREATE TABLE IF NOT EXISTS commission_reseller_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    proposed_percent INTEGER NOT NULL,
+                    request_text TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    approved_percent INTEGER,
+                    reject_reason TEXT,
+                    reviewed_by INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_commission_reseller_requests_user ON commission_reseller_requests(user_id);
+                CREATE INDEX IF NOT EXISTS idx_commission_reseller_requests_status ON commission_reseller_requests(status);
+
                 CREATE TABLE IF NOT EXISTS reseller_inline_commission_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     owner_reseller_id INTEGER NOT NULL,
@@ -1269,6 +1292,7 @@ class Database:
             ("users", "referred_by", "INTEGER"),
             ("users", "owner_reseller_id", "INTEGER"),
             ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
+            ("users", "inline_reseller_commission_percent", "INTEGER"),
             ("users", "reseller_supply_model", "TEXT DEFAULT 'volume_credit'"),
             ("users", "fixed_product_main_id", "INTEGER"),
             ("users", "referral_credit", "INTEGER DEFAULT 0"),
@@ -3393,11 +3417,31 @@ class Database:
     # نمایندگی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
     # -------------------------------------------------------------------
 
-    def enable_inline_reseller(self, owner_tg_id: int):
+    def enable_inline_reseller(self, owner_tg_id: int, percent: int = None):
         """این نماینده گزینه‌ی «لینک اختصاصی داخل بات اصلی» را دارد؛ یعنی لینک
-        ref اختصاصی‌اش (resref_<id>) و صفحه‌ی آمار برایش فعال می‌شود."""
+        ref اختصاصی‌اش (resref_<id>) و صفحه‌ی آمار برایش فعال می‌شود.
+        percent: درصد کمیسیونِ اختصاصیِ همین نماینده (مستقل از بقیه‌ی نماینده‌ها و
+        مستقل از تنظیم سراسری reseller_inline_commission_percent). اگر داده نشود،
+        مقدار فعلی (در صورت وجود) دست‌نخورده می‌ماند - برای سازگاری با فراخوانی‌های
+        قدیمی که هنوز percent نمی‌فرستند."""
         with self._get_conn() as conn:
-            conn.execute("UPDATE users SET inline_reseller_enabled=1 WHERE telegram_id=?", (owner_tg_id,))
+            if percent is not None:
+                conn.execute(
+                    "UPDATE users SET inline_reseller_enabled=1, inline_reseller_commission_percent=? "
+                    "WHERE telegram_id=?",
+                    (int(percent), owner_tg_id),
+                )
+            else:
+                conn.execute("UPDATE users SET inline_reseller_enabled=1 WHERE telegram_id=?", (owner_tg_id,))
+
+    def set_inline_reseller_commission_percent(self, owner_tg_id: int, percent: int):
+        """تغییر درصد کمیسیونِ یک نماینده‌ی کمیسیونیِ از قبل فعال (بدون تغییر
+        وضعیت فعال/غیرفعال بودنش)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET inline_reseller_commission_percent=? WHERE telegram_id=?",
+                (int(percent), owner_tg_id),
+            )
 
     def disable_inline_reseller(self, owner_tg_id: int):
         """رفع باگ: قبلاً هیچ تابع متقابلی برای enable_inline_reseller وجود نداشت -
@@ -3411,6 +3455,85 @@ class Database:
         بدون گم‌شدن سابقه‌ی مشتریانش برگردد."""
         with self._get_conn() as conn:
             conn.execute("UPDATE users SET inline_reseller_enabled=0 WHERE telegram_id=?", (owner_tg_id,))
+
+    # -------------------------------------------------------------------
+    # درخواست‌های نمایندگی کمیسیونی (مستقل کامل از reseller_requests حجمی):
+    # کاربر یک درصد پیشنهادی می‌فرستد، ادمین تایید (با همان یا درصد دیگر) یا رد
+    # (با ذکر علت) می‌کند. تایید = enable_inline_reseller با همان درصد.
+    # -------------------------------------------------------------------
+
+    def create_commission_reseller_request(self, user_id: int, proposed_percent: int, request_text: str = None):
+        """یک درخواست pending جدید می‌سازد. اگر کاربر همین الان یک درخواست pending
+        دیگر داشته باشد یا از قبل نماینده‌ی کمیسیونی فعال باشد، None برمی‌گرداند."""
+        if self.is_inline_reseller(user_id):
+            return None
+        if self.get_pending_commission_reseller_request_for_user(user_id):
+            return None
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO commission_reseller_requests (user_id, proposed_percent, request_text) "
+                "VALUES (?, ?, ?)",
+                (user_id, int(proposed_percent), request_text),
+            )
+            return cur.lastrowid
+
+    def get_pending_commission_reseller_request_for_user(self, user_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM commission_reseller_requests WHERE user_id=? AND status='pending' "
+                "ORDER BY id DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+
+    def get_commission_reseller_request(self, request_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM commission_reseller_requests WHERE id=?", (request_id,)
+            ).fetchone()
+
+    def list_commission_reseller_requests(self, status: str = "pending"):
+        with self._get_conn() as conn:
+            if status:
+                return conn.execute(
+                    "SELECT * FROM commission_reseller_requests WHERE status=? ORDER BY id DESC", (status,)
+                ).fetchall()
+            return conn.execute(
+                "SELECT * FROM commission_reseller_requests ORDER BY id DESC"
+            ).fetchall()
+
+    def approve_commission_reseller_request(self, request_id: int, percent: int, reviewed_by: int = None):
+        """اتمیک: فقط اگر درخواست هنوز pending باشد تایید می‌شود (WHERE status='pending')
+        تا دو ادمین هم‌زمان دوبار تاییدش نکنند. در صورت موفقیت، خودِ ردیف درخواست
+        (شامل user_id) برمی‌گردد تا caller نماینده را فعال و به او اطلاع بدهد؛
+        در غیر این صورت None."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE commission_reseller_requests SET status='approved', approved_percent=?, "
+                "reviewed_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'",
+                (int(percent), reviewed_by, request_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute(
+                "SELECT * FROM commission_reseller_requests WHERE id=?", (request_id,)
+            ).fetchone()
+        if row:
+            self.enable_inline_reseller(row["user_id"], int(percent))
+        return row
+
+    def reject_commission_reseller_request(self, request_id: int, reason: str, reviewed_by: int = None):
+        """اتمیک، مشابه approve_commission_reseller_request."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE commission_reseller_requests SET status='rejected', reject_reason=?, "
+                "reviewed_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'",
+                (reason, reviewed_by, request_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            return conn.execute(
+                "SELECT * FROM commission_reseller_requests WHERE id=?", (request_id,)
+            ).fetchone()
 
     def is_inline_reseller(self, user_tg_id: int) -> bool:
         with self._get_conn() as conn:
@@ -3468,7 +3591,19 @@ class Database:
         # سابقه/امکان فعال‌سازی مجدد بدون گم‌شدن مشتریان). این چک آن رخنه را می‌بندد.
         if not self.is_inline_reseller(owner_id):
             return
-        percent = int(self.get_setting("reseller_inline_commission_percent", "10") or 0)
+        # درصد کمیسیون حالا مخصوص هر نماینده است (نه یک تنظیم سراسری مشترک بین
+        # همه)؛ فقط برای نماینده‌های قدیمی که از مسیر قبلی (بدون درصد اختصاصی)
+        # فعال شده بودند، تنظیم سراسری reseller_inline_commission_percent به‌عنوان
+        # fallback خوانده می‌شود.
+        with self._get_conn() as conn:
+            prow = conn.execute(
+                "SELECT inline_reseller_commission_percent FROM users WHERE telegram_id=?", (owner_id,)
+            ).fetchone()
+        own_percent = prow["inline_reseller_commission_percent"] if prow else None
+        if own_percent is not None:
+            percent = int(own_percent)
+        else:
+            percent = int(self.get_setting("reseller_inline_commission_percent", "10") or 0)
         if percent <= 0:
             return
         commission = (paid_amount * percent) // 100
@@ -3492,22 +3627,41 @@ class Database:
                 "FROM reseller_inline_commission_log WHERE owner_reseller_id=?",
                 (owner_tg_id,),
             ).fetchone()
+            prow = conn.execute(
+                "SELECT inline_reseller_commission_percent FROM users WHERE telegram_id=?", (owner_tg_id,)
+            ).fetchone()
+            own_percent = prow["inline_reseller_commission_percent"] if prow else None
+            percent = int(own_percent) if own_percent is not None else int(
+                self.get_setting("reseller_inline_commission_percent", "10") or 0
+            )
             return {
                 "customers": customers, "paid_orders": row["cnt"], "total_commission": row["total"],
+                "percent": percent,
             }
 
     def list_inline_resellers(self):
         """برای نمایش در پنل ادمین (بند ۴ از موارد باقی‌مانده): لیست همه‌ی
         نماینده‌های «لینک اختصاصی داخل بات اصلی» به‌همراه آمار مشتری/کارمزدشان."""
+        default_percent = int(self.get_setting("reseller_inline_commission_percent", "10") or 0)
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT u.telegram_id, u.username, u.first_name, u.referral_credit, "
+                "u.inline_reseller_commission_percent, "
                 "(SELECT COUNT(*) FROM users c WHERE c.owner_reseller_id=u.telegram_id) AS customers, "
                 "(SELECT COUNT(*) FROM reseller_inline_commission_log l WHERE l.owner_reseller_id=u.telegram_id) AS paid_orders, "
                 "(SELECT COALESCE(SUM(commission_amount),0) FROM reseller_inline_commission_log l WHERE l.owner_reseller_id=u.telegram_id) AS total_commission "
                 "FROM users u WHERE u.inline_reseller_enabled=1 ORDER BY total_commission DESC"
             ).fetchall()
-            return rows
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["percent"] = (
+                    int(d["inline_reseller_commission_percent"])
+                    if d["inline_reseller_commission_percent"] is not None
+                    else default_percent
+                )
+                result.append(d)
+            return result
 
     def get_referral_stats(self, user_tg_id: int) -> dict:
         with self._get_conn() as conn:
