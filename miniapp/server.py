@@ -5364,6 +5364,19 @@ def api_admin_dashboard(
     return db.get_full_stats(start_date=start_date, end_date=end_date)
 
 
+@app.get("/api/admin/dashboard/advanced")
+def api_admin_dashboard_advanced(
+    start_date: str = Query(None), end_date: str = Query(None),
+    granularity: str = Query("day"), auth=Depends(require_senior_admin)
+):
+    """معادل مینی‌اپی /api/dashboard/advanced پنل وب - همان db.get_advanced_stats،
+    تا بات/مینی‌اپ/پنل وب همیشه دقیقاً یک عدد نشان بدهند."""
+    _, db, _ = auth
+    if granularity not in ("day", "week", "month"):
+        raise HTTPException(400, "granularity باید یکی از day/week/month باشد.")
+    return db.get_advanced_stats(start_date=start_date, end_date=end_date, granularity=granularity)
+
+
 @app.get("/api/admin/orders/export")
 def api_admin_orders_export(
     start_date: str = Query(None), end_date: str = Query(None), auth=Depends(require_senior_admin)
