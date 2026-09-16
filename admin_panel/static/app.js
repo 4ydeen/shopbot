@@ -47,6 +47,15 @@ const THEMES = [
     defaultMode: 'dark',
     swatch: ['#FFB020', '#22D3EE', '#14161C'],
   },
+  {
+    id: 'android',
+    name: 'Android متریال',
+    desc: 'متریال دیزاین ۳ گوگل — درست مثل اپ‌های واقعی اندروید: کشوی ناوبری، نوار بالای اپ، FAB، کارت‌های برجسته',
+    ready: true,
+    supportsMode: true,
+    defaultMode: 'light',
+    swatch: ['#6750A4', '#EADDFF', '#1D1B20'],
+  },
 ];
 const DEFAULT_THEME = 'bento';
 
@@ -992,6 +1001,7 @@ async function renderDashboard() {
   if (theme === 'brutalist') await renderDashboardBrutalist(s, sys);
   else if (theme === 'cyberpunk') await renderDashboardCyberpunk(s, sys);
   else if (theme === 'streetops') await renderDashboardStreetOps(s, sys);
+  else if (theme === 'android') await renderDashboardAndroid(s, sys);
   else await renderDashboardBento(s, sys);
   const root = content();
   if (root) root.insertAdjacentHTML('afterbegin', dashRangeBarHtml(s));
@@ -1512,6 +1522,102 @@ function renderDashboardBento(s, sys) {
       seg.style.strokeDashoffset = seg.dataset.final;
     });
     $$('.bw-res-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
+  }, 60));
+  mountServerMap();
+}
+
+/* --------------------------------------------------- dashboard: android -- */
+// متریال دیزاین ۳: کارت هیرو برجسته برای درآمد، گرید کارت‌های آماری با
+// آیکون تونال، و دو پنل لیست مانند (تفکیک درآمد / پرفروش‌ترین‌ها) با
+// نوار پیشرفت خطی به سبک متریال؛ در پایین وضعیت منابع سرور هم به همین شکل.
+function renderDashboardAndroid(s, sys) {
+  const trend = sparklinePath(s.daily_series.map(d => d.revenue), 100, 36);
+  const deltaUp = (s.revenue_change_pct ?? 0) >= 0;
+  const maxCatRev = Math.max(...s.category_breakdown.map(c => c.revenue), 1);
+  const maxProdOrders = Math.max(...s.top_products.map(p => p.orders), 1);
+
+  const statCards = [
+    { icon: 'users', label: 'کاربران کل', value: s.total_users, sub: `${fmt(s.new_users)}+ جدید`, tone: 1 },
+    { icon: 'check', label: 'سفارش تایید شده', value: s.approved, sub: `${s.conversion_rate}٪ نرخ تبدیل`, tone: 2 },
+    { icon: 'config', label: 'کانفیگ فعال', value: s.active_configs, sub: null, tone: 3 },
+    { icon: 'ticket', label: 'تیکت باز', value: s.open_tickets, sub: null, tone: 4 },
+  ];
+
+  const catRows = s.category_breakdown.slice(0, 5).map(c => `
+    <div class="and-list-row">
+      <span class="and-list-name">${esc(c.name)}</span>
+      <span class="and-bar-track"><span class="and-bar-fill" data-w="${Math.max(4, Math.round(c.revenue / maxCatRev * 100))}"></span></span>
+      <span class="and-list-val mono">${fmt(c.revenue)}</span>
+    </div>`).join('') || `<span class="card-sub">داده‌ای نیست</span>`;
+
+  const prodRows = s.top_products.slice(0, 5).map((p, i) => `
+    <div class="and-list-row and-list-row-rank">
+      <span class="and-rank">${i + 1}</span>
+      <span class="and-list-name">${esc(p.name)}</span>
+      <span class="and-bar-track and-bar-track-sm"><span class="and-bar-fill" data-w="${Math.max(4, Math.round(p.orders / maxProdOrders * 100))}"></span></span>
+      <span class="and-list-val mono">${fmt(p.orders)}</span>
+    </div>`).join('') || `<span class="card-sub">داده‌ای نیست</span>`;
+
+  const resPanel = sys ? `
+    <div class="and-panel card">
+      <div class="and-panel-head">منابع سرور</div>
+      ${[
+        { label: 'CPU', pct: sys.cpu.percent },
+        { label: 'RAM', pct: sys.ram.percent },
+        { label: 'دیسک', pct: sys.disk.percent },
+      ].map(r => `
+        <div class="and-list-row">
+          <span class="and-list-name">${r.label}</span>
+          <span class="and-bar-track"><span class="and-bar-fill" data-w="${r.pct}"></span></span>
+          <span class="and-list-val mono">${r.pct}٪</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  setContent(`
+    <div class="and-hero card">
+      <div class="and-hero-top">
+        <span class="and-hero-label">درآمد ۱۴ روز اخیر</span>
+        <span class="and-chip ${deltaUp ? 'up' : 'down'}">${deltaUp ? '▲' : '▼'} ${Math.abs(s.revenue_change_pct ?? 0)}٪</span>
+      </div>
+      <span class="and-hero-value mono" data-count="${s.revenue}">۰</span>
+      <svg class="and-hero-spark" viewBox="0 0 100 36" preserveAspectRatio="none">
+        <defs><linearGradient id="andTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--primary)" stop-opacity=".35"/><stop offset="100%" stop-color="var(--primary)" stop-opacity="0"/>
+        </linearGradient></defs>
+        <path d="${trend.area}" fill="url(#andTrendFill)"/>
+        <path d="${trend.line}" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <div class="and-grid">
+      ${statCards.map(c => `
+        <div class="card and-stat">
+          <span class="and-stat-icon and-stat-icon-${c.tone}">${svg(c.icon === 'users' ? 'users' : c.icon === 'check' ? 'check' : c.icon === 'config' ? 'catalog' : 'tickets')}</span>
+          <span class="and-stat-value mono" data-count="${c.value}">۰</span>
+          <span class="and-stat-label">${c.label}</span>
+          ${c.sub ? `<span class="and-stat-sub">${c.sub}</span>` : ''}
+        </div>`).join('')}
+    </div>
+
+    <div class="and-row">
+      <div class="and-panel card">
+        <div class="and-panel-head">تفکیک درآمد</div>
+        ${catRows}
+      </div>
+      <div class="and-panel card">
+        <div class="and-panel-head">پرفروش‌ترین محصولات</div>
+        ${prodRows}
+      </div>
+    </div>
+
+    ${resPanel}
+    ${serverMapCardHtml()}
+  `);
+
+  const root = content();
+  $$('.and-hero-value[data-count], .and-stat-value[data-count]', root).forEach(el => animateCount(el, Number(el.dataset.count)));
+  requestAnimationFrame(() => setTimeout(() => {
+    $$('.and-bar-fill[data-w]', root).forEach(b => { b.style.width = b.dataset.w + '%'; });
   }, 60));
   mountServerMap();
 }

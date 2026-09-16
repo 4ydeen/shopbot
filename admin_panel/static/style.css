@@ -2095,3 +2095,208 @@ html[data-theme="streetops"] .so-mission-val{ color:var(--primary); font-size:12
 @media (max-width:960px){
   html[data-theme="streetops"] .so-stat-grid, html[data-theme="streetops"] .so-cols{ grid-template-columns:1fr; }
 }
+
+/* ===================================================================
+   تم اندروید — Material Design 3 گوگل (Material You)
+   هدف: پنل وب دقیقاً حس یک اپ بومی اندروید رو بده — نه فقط رنگ، بلکه
+   کشوی ناوبری (Navigation Drawer) که با دکمه‌ی همبرگری باز می‌شه، نوار
+   بالای اپ تخت، دکمه‌های حبه‌ای (pill) پر/تونال/متنی، کارت‌های برجسته
+   با سایه‌ی الویشن به‌جای بوردر، تب‌های زیرخط‌دار، سوییچ و اسنک‌بار
+   دقیقاً به سبک متریال. پالت رنگی از پالت پایه‌ی Material 3 (بنفش
+   #6750A4) گرفته شده و روشن/تیره‌ی اختصاصی خودش رو داره.
+=================================================================== */
+html[data-theme="android"]{
+  --bg:#141218; --bg-2:#1D1B20; --surface:#211F26; --surface-2:#2B2930;
+  --surface-hi:rgba(208,188,255,.09); --border:rgba(147,143,153,.35); --border-soft:rgba(73,69,79,.45);
+  --text:#E6E0E9; --text-muted:#CAC4D0; --text-dim:#938F99;
+  --primary:#D0BCFF; --primary-ink:#381E72; --cyan:#9ECAFF; --amber:#FFCC80; --emerald:#8BD17C; --rose:#FFB4AB;
+  --accent-1:var(--primary); --accent-2:var(--cyan); --accent-3:var(--amber); --accent-4:var(--emerald);
+  --violet:var(--primary); --fuchsia:#EFB8C8;
+  --and-primary-container:#4F378B; --and-on-primary-container:#EADDFF;
+  --and-secondary-container:#4A4458; --and-on-secondary-container:#E8DEF8;
+  --and-tertiary-container:#633B48; --and-on-tertiary-container:#FFD8E4;
+  --and-error-container:#93000A; --and-on-error-container:#FFDAD6;
+  --font-body:"Vazirmatn",Roboto,-apple-system,Tahoma,sans-serif;
+  --radius:16px; --radius-sm:12px; --radius-xs:8px;
+  --shadow-card:0 1px 2px rgba(0,0,0,.5), 0 1px 3px 1px rgba(0,0,0,.3);
+  --shadow-pop:0 1px 3px rgba(0,0,0,.55), 0 4px 10px 3px rgba(0,0,0,.35);
+  --shadow-btn:0 1px 2px rgba(0,0,0,.4);
+  --focus-ring:0 0 0 3px rgba(208,188,255,.35);
+}
+html[data-theme="android"][data-mode="light"]{
+  --bg:#FEF7FF; --bg-2:#F3EDF7; --surface:#FFFFFF; --surface-2:#ECE6F0;
+  --surface-hi:rgba(103,80,164,.08); --border:rgba(121,116,126,.35); --border-soft:rgba(28,27,31,.08);
+  --text:#1D1B20; --text-muted:#49454F; --text-dim:#79747E;
+  --primary:#6750A4; --primary-ink:#FFFFFF; --cyan:#0061A4; --amber:#7C5800; --emerald:#146C2E; --rose:#BA1A1A;
+  --violet:var(--primary); --fuchsia:#7D5260;
+  --and-primary-container:#EADDFF; --and-on-primary-container:#21005D;
+  --and-secondary-container:#E8DEF8; --and-on-secondary-container:#1D192B;
+  --and-tertiary-container:#FFD8E4; --and-on-tertiary-container:#31111D;
+  --and-error-container:#FFDAD6; --and-on-error-container:#410002;
+  --shadow-card:0 1px 2px rgba(28,27,31,.16), 0 1px 3px 1px rgba(28,27,31,.08);
+  --shadow-pop:0 1px 3px rgba(28,27,31,.2), 0 4px 10px 3px rgba(28,27,31,.1);
+  --shadow-btn:0 1px 2px rgba(28,27,31,.18);
+}
+html[data-theme="android"] body{ background:var(--bg); }
+html[data-theme="android"] *{ letter-spacing:normal; }
+html[data-theme="android"] h1, html[data-theme="android"] h2, html[data-theme="android"] h3, html[data-theme="android"] h4{ font-weight:500; letter-spacing:-.005em; }
+html[data-theme="android"] ::selection{ background:rgba(103,80,164,.28); }
+html[data-theme="android"] :focus-visible{ outline:2px solid var(--primary); }
+html[data-theme="android"] ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:20px; }
+
+/* ---- دکمه‌ها: حبه‌ای (pill) به سبک Filled / Tonal / Text متریال ---- */
+html[data-theme="android"] .btn{
+  border-radius:100px; border:none; background:var(--surface-2); color:var(--text);
+  font-weight:500; padding:10px 20px; box-shadow:none; transition:background .15s var(--ease), box-shadow .15s var(--ease);
+}
+html[data-theme="android"] .btn:hover{ background:var(--surface-hi); border-color:transparent; }
+html[data-theme="android"] .btn-primary{
+  background:var(--primary); color:var(--primary-ink); box-shadow:var(--shadow-btn);
+}
+html[data-theme="android"] .btn-primary:hover{ box-shadow:var(--shadow-card); filter:none; opacity:.92; }
+html[data-theme="android"] .btn-ghost{ background:transparent; color:var(--primary); padding:10px 14px; }
+html[data-theme="android"] .btn-ghost:hover{ background:var(--surface-hi); }
+html[data-theme="android"] .btn-danger{ background:var(--and-error-container); color:var(--and-on-error-container); }
+html[data-theme="android"] .btn-danger:hover{ filter:brightness(1.05); }
+html[data-theme="android"] .btn-sm{ padding:7px 14px; font-size:12px; }
+html[data-theme="android"] #push-toggle-btn, html[data-theme="android"] #install-app-btn, html[data-theme="android"] #topbar-mode-toggle{
+  border-radius:50%; width:40px; height:40px; padding:0; background:transparent;
+}
+html[data-theme="android"] #push-toggle-btn:hover, html[data-theme="android"] #install-app-btn:hover, html[data-theme="android"] #topbar-mode-toggle:hover{ background:var(--surface-hi); }
+
+/* ---- ورود: دیالوگ متریال ---- */
+html[data-theme="android"] .login-screen{ background:var(--bg); }
+html[data-theme="android"] .login-card{
+  border-radius:28px; border:none; background:var(--surface); box-shadow:var(--shadow-pop);
+}
+html[data-theme="android"] .login-logo, html[data-theme="android"] .brand-mark{
+  border-radius:16px; background:var(--and-primary-container); color:var(--and-on-primary-container);
+}
+html[data-theme="android"] .login-brand h1{ font-weight:500; font-size:18px; }
+html[data-theme="android"] .field span{ font-size:12px; color:var(--text-muted); font-weight:500; }
+html[data-theme="android"] .field input, html[data-theme="android"] .input, html[data-theme="android"] select.input, html[data-theme="android"] textarea.input{
+  border-radius:var(--radius-xs); border:1px solid var(--border); background:transparent;
+}
+html[data-theme="android"] .field input:focus, html[data-theme="android"] .input:focus{
+  border:2px solid var(--primary); box-shadow:none; padding:10.5px 13.5px;
+}
+
+/* ---- کارت‌ها: برجستگی به‌جای بوردر ---- */
+html[data-theme="android"] .card, html[data-theme="android"] .modal{
+  border-radius:var(--radius); border:none; background:var(--surface); box-shadow:var(--shadow-card);
+}
+html[data-theme="android"] .modal{ border-radius:28px; box-shadow:var(--shadow-pop); }
+html[data-theme="android"] .card-head h3{ font-weight:500; }
+
+/* ---- بج‌ها / چیپ‌ها ---- */
+html[data-theme="android"] .badge{ border-radius:8px; font-weight:600; }
+html[data-theme="android"] .chip{ border-radius:8px; border:1px solid var(--border); background:transparent; }
+
+/* ---- جدول‌ها ---- */
+html[data-theme="android"] thead th{ font-weight:500; color:var(--text-muted); border-bottom:1px solid var(--border-soft); }
+html[data-theme="android"] tbody td{ border-bottom:1px solid var(--border-soft); }
+html[data-theme="android"] tbody tr:hover{ background:var(--surface-hi); }
+
+/* ---- تب‌ها: زیرخط‌دار به سبک Material Tabs ---- */
+html[data-theme="android"] .tabs{ border-bottom:1px solid var(--border-soft); gap:2px; margin-bottom:18px; }
+html[data-theme="android"] .tab-btn{
+  border-radius:0; border:none; background:transparent; padding:12px 16px; position:relative;
+  color:var(--text-muted); font-weight:500;
+}
+html[data-theme="android"] .tab-btn:hover{ background:var(--surface-hi); border-radius:8px 8px 0 0; }
+html[data-theme="android"] .tab-btn.active{ background:transparent; color:var(--primary); }
+html[data-theme="android"] .tab-btn.active::after{
+  content:''; position:absolute; right:8px; left:8px; bottom:-1px; height:3px; border-radius:3px 3px 0 0; background:var(--primary);
+}
+
+/* ---- سوییچ متریال ---- */
+html[data-theme="android"] .switch{
+  --w:52px; --h:32px; background:transparent; border:2px solid var(--border);
+}
+html[data-theme="android"] .switch i{ width:14px; height:14px; top:6px; right:6px; background:var(--text-dim); box-shadow:none; }
+html[data-theme="android"] .switch[data-on="1"]{ background:var(--primary); border-color:var(--primary); }
+html[data-theme="android"] .switch[data-on="1"] i{ width:22px; height:22px; top:3px; right:calc(var(--w) - 26px); background:var(--primary-ink); }
+
+/* ---- اسنک‌بار (toast) به سبک متریال: سطح معکوس، تیره در روشن و برعکس ---- */
+html[data-theme="android"] .toast{
+  background:var(--text); color:var(--bg); border:none; border-radius:8px; box-shadow:var(--shadow-pop); font-weight:500;
+}
+html[data-theme="android"] .toast.error{ border-inline-start:4px solid var(--rose); }
+
+/* ---- نوار بالای اپ (Top App Bar) ---- */
+html[data-theme="android"] .topbar{ background:var(--bg); border-bottom:1px solid var(--border-soft); box-shadow:none; }
+html[data-theme="android"] .topbar h2{ font-weight:500; font-size:17px; }
+html[data-theme="android"] .hamburger{
+  display:flex !important; border:none; background:transparent; border-radius:50%; width:42px; height:42px;
+}
+html[data-theme="android"] .hamburger:hover{ background:var(--surface-hi); }
+html[data-theme="android"] .hamburger span{ background:var(--text); }
+html[data-theme="android"] .topbar-clock{ border-radius:100px; background:var(--surface-2); border:none; }
+html[data-theme="android"] .live-dot{ background:var(--emerald); }
+
+/* ---- کشوی ناوبری (Navigation Drawer) — همیشه به‌صورت کشوی روی محتوا،
+        دقیقاً مثل اپ‌های واقعی اندروید، با دکمه‌ی همبرگری باز می‌شه ---- */
+html[data-theme="android"] .sidebar{
+  position:fixed; top:0; bottom:0; inset-inline-end:0; z-index:20; height:100vh;
+  width:300px; max-width:86vw; transform:translateX(100%); transition:transform .28s cubic-bezier(.2,0,0,1);
+  box-shadow:var(--shadow-pop); border-inline-start:none; border-radius:28px 0 0 28px; padding:24px 14px;
+}
+html[dir="rtl"][data-theme="android"] .sidebar{ transform:translateX(-100%); border-radius:0 28px 28px 0; }
+html[data-theme="android"] .sidebar.open{ transform:translateX(0); }
+html[dir="rtl"][data-theme="android"] .sidebar.open{ transform:translateX(0); }
+html[data-theme="android"] .main{ width:100%; }
+html[data-theme="android"] .sidebar-brand{ padding:8px 10px 20px; }
+html[data-theme="android"] .nav-item{
+  border-radius:100px; padding:12px 16px; margin-bottom:3px; font-weight:500;
+}
+html[data-theme="android"] .nav-icon{ background:transparent; border-radius:50%; }
+html[data-theme="android"] .nav-item.active{
+  color:var(--and-on-secondary-container); background:var(--and-secondary-container);
+}
+html[data-theme="android"] .nav-item.active .nav-icon{ color:var(--and-on-secondary-container); }
+html[data-theme="android"] .nav-item .dot-count{ background:var(--and-error-container); color:var(--and-on-error-container); }
+html[data-theme="android"] .nav-item.active .dot-count{ background:rgba(0,0,0,.1); }
+html[data-theme="android"] .nav-section{ border-top:1px solid var(--border-soft); }
+html[data-theme="android"] .me-avatar{ border-radius:50%; border:none; background:var(--and-primary-container); color:var(--and-on-primary-container); }
+
+/* ---- داشبورد: اندروید ---- */
+html[data-theme="android"] .and-hero{
+  border-radius:28px; padding:24px 22px 18px; position:relative; overflow:hidden;
+  background:var(--and-primary-container); color:var(--and-on-primary-container); box-shadow:var(--shadow-card);
+}
+html[data-theme="android"] .and-hero-top{ display:flex; align-items:center; justify-content:space-between; }
+html[data-theme="android"] .and-hero-label{ font-size:13px; font-weight:500; opacity:.85; }
+html[data-theme="android"] .and-chip{ font-size:11.5px; font-weight:700; padding:4px 11px; border-radius:100px; }
+html[data-theme="android"] .and-chip.up{ background:rgba(20,108,46,.16); color:var(--emerald); }
+html[data-theme="android"] .and-chip.down{ background:rgba(186,26,26,.14); color:var(--rose); }
+html[data-theme="android"] .and-hero-value{ display:block; font-size:32px; font-weight:600; letter-spacing:-.02em; margin:4px 0 6px; }
+html[data-theme="android"] .and-hero-spark{ width:100%; height:44px; display:block; }
+html[data-theme="android"] .and-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:16px 0; }
+html[data-theme="android"] .and-stat{ display:flex; flex-direction:column; gap:8px; padding:18px 16px; }
+html[data-theme="android"] .and-stat-icon{ width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; }
+html[data-theme="android"] .and-stat-icon .icon{ width:19px; height:19px; }
+html[data-theme="android"] .and-stat-icon-1{ background:var(--and-primary-container); color:var(--and-on-primary-container); }
+html[data-theme="android"] .and-stat-icon-2{ background:var(--and-secondary-container); color:var(--and-on-secondary-container); }
+html[data-theme="android"] .and-stat-icon-3{ background:var(--and-tertiary-container); color:var(--and-on-tertiary-container); }
+html[data-theme="android"] .and-stat-icon-4{ background:var(--and-error-container); color:var(--and-on-error-container); }
+html[data-theme="android"] .and-stat-value{ font-size:23px; font-weight:600; font-family:var(--font-mono); }
+html[data-theme="android"] .and-stat-label{ font-size:12.5px; color:var(--text-muted); font-weight:500; }
+html[data-theme="android"] .and-stat-sub{ font-size:11px; color:var(--text-dim); }
+html[data-theme="android"] .and-row{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+html[data-theme="android"] .and-panel-head{ font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:10px; }
+html[data-theme="android"] .and-list-row{ display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border-soft); }
+html[data-theme="android"] .and-list-row:last-child{ border-bottom:none; }
+html[data-theme="android"] .and-list-row-rank{ gap:8px; }
+html[data-theme="android"] .and-list-name{ flex:0 0 auto; max-width:108px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; }
+html[data-theme="android"] .and-bar-track{ flex:1; height:8px; border-radius:8px; background:var(--surface-2); overflow:hidden; }
+html[data-theme="android"] .and-bar-track-sm{ height:6px; }
+html[data-theme="android"] .and-bar-fill{ display:block; height:100%; width:0; border-radius:8px; background:var(--primary); transition:width 1s var(--ease); }
+html[data-theme="android"] .and-list-val{ flex:0 0 auto; font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono); }
+html[data-theme="android"] .and-rank{
+  flex:0 0 auto; width:22px; height:22px; border-radius:50%; font-size:11px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; background:var(--and-secondary-container); color:var(--and-on-secondary-container);
+}
+@media (max-width:960px){
+  html[data-theme="android"] .and-grid{ grid-template-columns:repeat(2,1fr); }
+  html[data-theme="android"] .and-row{ grid-template-columns:1fr; }
+}

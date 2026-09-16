@@ -19,23 +19,32 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=4">
+<link rel="stylesheet" href="/assets/style.css?v=5">
 <script>
 (function(){
-  // manifest باید همان query string صفحه (مثلا ?b=xyz برای نماینده) را داشته باشد
+  var t = { theme:'bento', mode:'light' };
+  try{ t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || t; }catch(e){}
+  var theme = t.theme || 'bento', mode = t.mode || 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-mode', mode);
+
+  // رنگ نوار وضعیت اندروید / آدرس‌بار مرورگر و اسپلش‌اسکرین PWA را با
+  // تم و حالت روشن/تیره‌ی فعلی هماهنگ می‌کند (مهم‌ترین مورد: تم اندروید
+  // که برخلاف بقیه‌ی تم‌ها به‌صورت پیش‌فرض روشنه)
+  var themeColors = { android: { light: '#FEF7FF', dark: '#141218' } };
+  var tc = (themeColors[theme] && themeColors[theme][mode]) || '#0B0C14';
+  var metaTag = document.querySelector('meta[name="theme-color"]');
+  if (metaTag) metaTag.setAttribute('content', tc);
+
+  // manifest باید همان query string صفحه (مثلا ?b=xyz برای نماینده) به‌علاوه‌ی
+  // تم/مود فعلی را داشته باشد، وگرنه بعد از نصب روی هوم‌اسکرین رنگ اسپلش‌اسکرین
+  // و نوار وضعیت با تم انتخابی کاربر ست نمی‌شود
   var link = document.getElementById('pwa-manifest-link');
-  if (link && location.search) link.href = '/manifest.json' + location.search;
-})();
-</script>
-<script>
-(function(){
-  try{
-    var t = JSON.parse(localStorage.getItem('sv-theme') || 'null') || { theme:'bento', mode:'light' };
-    document.documentElement.setAttribute('data-theme', t.theme || 'bento');
-    document.documentElement.setAttribute('data-mode', t.mode || 'light');
-  }catch(e){
-    document.documentElement.setAttribute('data-theme','bento');
-    document.documentElement.setAttribute('data-mode','light');
+  if (link) {
+    var params = new URLSearchParams(location.search);
+    params.set('theme', theme);
+    params.set('mode', mode);
+    link.href = '/manifest.json?' + params.toString();
   }
 })();
 </script>
@@ -145,6 +154,6 @@
 
 <div id="toast-root" class="toast-root"></div>
 
-<script src="/assets/app.js?v=3"></script>
+<script src="/assets/app.js?v=4"></script>
 </body>
 </html>
