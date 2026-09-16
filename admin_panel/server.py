@@ -1605,6 +1605,21 @@ def api_dashboard(start: Optional[str] = None, end: Optional[str] = None, admin=
     return db.get_full_stats(start, end)
 
 
+@app.get("/api/dashboard/advanced")
+def api_dashboard_advanced(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    granularity: str = "day",
+    admin=Depends(get_current_admin),
+):
+    """روند فروش با تفکیک بازه، عملکرد و نرخ موفقیت درگاه‌های پرداخت، عملکرد
+    کمپین‌ها/نمایندگان داخلی، قیف تبدیل و نقشه‌ی ساعتی فعالیت. مکمل /api/dashboard -
+    منبع همین db.get_advanced_stats است که بات و مینی‌اپ هم از آن استفاده می‌کنند."""
+    if granularity not in ("day", "week", "month"):
+        raise HTTPException(400, "granularity باید یکی از day/week/month باشد.")
+    return db.get_advanced_stats(start, end, granularity=granularity)
+
+
 # ------------------------------------------------------------- servers map --
 # نقشه‌ی جهان در داشبورد: بر اساس یک «لینک ساب مادر» که ادمین وارد می‌کند،
 # کانفیگ‌های داخلش پارس و آدرس هرکدام جئولوکیت می‌شود.
