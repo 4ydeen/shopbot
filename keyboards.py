@@ -1436,7 +1436,30 @@ def admin_stats_period_kb(active_days: int = 7) -> InlineKeyboardMarkup:
             )
             for d, label in periods[2:]
         ],
+        [InlineKeyboardButton(text="📈 آمار پیشرفته (روند، درگاه‌ها، نماینده‌ها، قیف تبدیل)", callback_data="adm_stats_adv:7")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:management")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_advanced_stats_kb(active_days: int = 7) -> InlineKeyboardMarkup:
+    periods = [(1, "امروز"), (7, "۷ روز اخیر"), (30, "۳۰ روز اخیر"), (90, "۹۰ روز اخیر")]
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=("✅ " if d == active_days else "") + label,
+                callback_data=f"adm_stats_adv:{d}",
+            )
+            for d, label in periods[:2]
+        ],
+        [
+            InlineKeyboardButton(
+                text=("✅ " if d == active_days else "") + label,
+                callback_data=f"adm_stats_adv:{d}",
+            )
+            for d, label in periods[2:]
+        ],
+        [InlineKeyboardButton(text="⬅️ بازگشت به آمار فروش", callback_data="adm_stats")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

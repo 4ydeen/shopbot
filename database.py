@@ -3375,6 +3375,247 @@ class Database:
         })
         return stats
 
+    def get_advanced_stats(self, start_date: str = None, end_date: str = None,
+                            granularity: str = "day", churn_days: int = 60) -> dict:
+        """آمار پیشرفته‌ی فروشگاه: مکمل get_full_stats با چهار بخشی که آن‌جا نبود -
+        روند فروش با تفکیک بازه (روزانه/هفتگی/ماهانه)، عملکرد و نرخ موفقیت هر
+        درگاه پرداخت، عملکرد منابع ورودی/کمپین و نمایندگان داخلی، و قیف تبدیل
+        کاربر به‌همراه مشتریان بازگشتی/ریزش‌کرده و نقشه‌ی ساعتی فعالیت.
+        همین یک تابع منبع واحد هر سه رابط (بات، مینی‌اپ، پنل وب) است - دقیقاً
+        مثل get_full_stats - تا هرگز عدد متفاوتی در جاهای مختلف نشان داده نشود."""
+        with self._get_conn() as conn:
+            if not end_date:
+                end_date = conn.execute("SELECT date('now') d").fetchone()["d"]
+            if not start_date:
+                start_date = conn.execute("SELECT date(?, '-13 days') d", (end_date,)).fetchone()["d"]
+
+            # ---------------------------------------------------------------
+            # ۱) روند فروش با تفکیک بازه (برای دوره‌های طولانی، نمودار روزانه
+            # خیلی شلوغ و غیرقابل‌خواندن می‌شود؛ هفتگی/ماهانه هم موجود است)
+            # ---------------------------------------------------------------
+            bucket_expr = {
+                "week": "strftime('%Y-W%W', o.created_at)",
+                "month": "strftime('%Y-%m', o.created_at)",
+            }.get(granularity, "date(o.created_at)")
+            trend_rows = conn.execute(
+                f"SELECT {bucket_expr} bucket, "
+                "COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue, "
+                "SUM(CASE WHEN o.status='approved' THEN 1 ELSE 0 END) orders "
+                "FROM orders o JOIN products p ON o.product_id=p.id "
+                "WHERE date(o.created_at) BETWEEN ? AND ? "
+                f"GROUP BY {bucket_expr} ORDER BY bucket",
+                (start_date, end_date),
+            ).fetchall()
+            revenue_trend = {
+                "granularity": granularity if granularity in ("week", "month") else "day",
+                "points": [{"bucket": r["bucket"], "revenue": r["revenue"], "orders": r["orders"]} for r in trend_rows],
+            }
+
+            # ---------------------------------------------------------------
+            # ۲) تفکیک درگاه پرداخت: هر درگاه جدول فاکتور خودش را دارد (بدون
+            # ستون مشترک روی orders)، پس با UNION ALL یکی می‌شوند. «موفق» یعنی
+            # status در ('completed','paid') - این دو مقدار بین درگاه‌های
+            # مختلف پروژه پوشش کامل «پرداخت تکمیل‌شده» را می‌دهند.
+            # ---------------------------------------------------------------
+            gateway_union = (
+                "SELECT 'کارت به کارت' gw, status, amount_toman amt, created_at ca "
+                "FROM card_to_card_invoices WHERE kind='order' "
+                "UNION ALL "
+                "SELECT 'آبان‌گیت‌وی', status, amount_toman, created_at FROM abangateway_invoices WHERE kind='order' "
+                "UNION ALL "
+                "SELECT 'بلوپال', status, amount_toman, created_at FROM blupal_invoices WHERE kind='order' "
+                "UNION ALL "
+                "SELECT 'استارز تلگرام', status, amount_toman, created_at FROM noapay_invoices WHERE kind='order' "
+                "UNION ALL "
+                "SELECT 'ارز دیجیتال', status, amount_toman, created_at FROM crypto_invoices WHERE kind='order' "
+                "UNION ALL "
+                "SELECT cg.name, cgi.status, cgi.amount_toman, cgi.created_at "
+                "FROM custom_gateway_invoices cgi JOIN custom_gateways cg ON cg.id=cgi.gateway_id "
+                "WHERE cgi.kind='order'"
+            )
+            gw_rows = conn.execute(
+                f"SELECT gw, COUNT(*) attempts, "
+                "SUM(CASE WHEN status IN ('completed','paid') THEN 1 ELSE 0 END) success, "
+                "COALESCE(SUM(CASE WHEN status IN ('completed','paid') THEN amt ELSE 0 END),0) revenue "
+                f"FROM ({gateway_union}) WHERE date(ca) BETWEEN ? AND ? "
+                "GROUP BY gw",
+                (start_date, end_date),
+            ).fetchall()
+            gateway_breakdown = []
+            for r in gw_rows:
+                attempts = r["attempts"] or 0
+                success = r["success"] or 0
+                gateway_breakdown.append({
+                    "gateway": r["gw"], "attempts": attempts, "success": success,
+                    "failed": attempts - success,
+                    "success_rate": round(success / attempts * 100, 1) if attempts else 0.0,
+                    "revenue": r["revenue"] or 0,
+                })
+            # سفارش‌هایی که کامل با کیف پول (بدون هیچ درگاهی) پرداخت شدند، در
+            # هیچ‌کدام از جدول‌های بالا ردی ندارند؛ جدا شمرده می‌شوند تا جمع
+            # درآمدِ این بخش با کارت «💰 درآمد» بالای گزارش match شود.
+            wallet_row = conn.execute(
+                "SELECT COUNT(*) c, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) rev "
+                "FROM orders o JOIN products p ON o.product_id=p.id "
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ? "
+                "AND o.wallet_used > 0 AND o.wallet_used >= COALESCE(o.final_price, p.price)",
+                (start_date, end_date),
+            ).fetchone()
+            if wallet_row["c"]:
+                gateway_breakdown.append({
+                    "gateway": "کیف پول", "attempts": wallet_row["c"], "success": wallet_row["c"],
+                    "failed": 0, "success_rate": 100.0, "revenue": wallet_row["rev"] or 0,
+                })
+            gateway_breakdown.sort(key=lambda x: x["revenue"], reverse=True)
+
+            # ---------------------------------------------------------------
+            # ۳) منبع ورودی کاربر (کمپین/لینک اختصاصی ثبت‌شده در acquisition_source)
+            # فقط برای کاربرانی که در همین بازه عضو شده‌اند - یعنی «این کمپین
+            # امسال/این‌هفته چند کاربر تازه با چه نرخ تبدیلی آورد».
+            # ---------------------------------------------------------------
+            camp_rows = conn.execute(
+                "SELECT COALESCE(NULLIF(u.acquisition_source,''),'نامشخص/مستقیم') src, "
+                "COUNT(DISTINCT u.telegram_id) new_users, "
+                "COUNT(DISTINCT CASE WHEN o.status='approved' THEN o.user_id END) buyers, "
+                "COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue "
+                "FROM users u "
+                "LEFT JOIN orders o ON o.user_id=u.telegram_id "
+                "LEFT JOIN products p ON o.product_id=p.id "
+                "WHERE date(u.joined_at) BETWEEN ? AND ? "
+                "GROUP BY src ORDER BY revenue DESC, new_users DESC",
+                (start_date, end_date),
+            ).fetchall()
+            campaign_performance = [
+                {
+                    "source": r["src"], "new_users": r["new_users"], "buyers": r["buyers"],
+                    "revenue": r["revenue"],
+                    "conversion_rate": round(r["buyers"] / r["new_users"] * 100, 1) if r["new_users"] else 0.0,
+                }
+                for r in camp_rows
+            ]
+
+            # ---------------------------------------------------------------
+            # ۴) عملکرد نمایندگان داخلی (لینک اختصاصی داخل همین بات - reseller
+            # سطح دیگری که دیتابیس جدا دارد، اینجا نیست، چون در این دیتابیس
+            # قابل‌کوئری نیست؛ آن یکی از پنل «نمایندگی‌ها» خودش گزارش می‌شود)
+            # ---------------------------------------------------------------
+            reseller_rows = conn.execute(
+                "SELECT r.telegram_id tg_id, r.username, r.first_name, "
+                "r.inline_reseller_commission_percent pct, "
+                "COUNT(DISTINCT c.telegram_id) customers, "
+                "COUNT(DISTINCT CASE WHEN o.status='approved' THEN o.id END) orders, "
+                "COALESCE(SUM(CASE WHEN o.status='approved' THEN COALESCE(o.final_price, p.price) ELSE 0 END),0) revenue "
+                "FROM users r "
+                "JOIN users c ON c.owner_reseller_id = r.telegram_id "
+                "LEFT JOIN orders o ON o.user_id = c.telegram_id AND date(o.created_at) BETWEEN ? AND ? "
+                "LEFT JOIN products p ON o.product_id = p.id "
+                "WHERE r.inline_reseller_enabled = 1 "
+                "GROUP BY r.telegram_id "
+                "HAVING orders > 0 "
+                "ORDER BY revenue DESC LIMIT 15",
+                (start_date, end_date),
+            ).fetchall()
+            commission_rows = conn.execute(
+                "SELECT owner_reseller_id, COALESCE(SUM(commission_amount),0) c "
+                "FROM reseller_inline_commission_log WHERE date(created_at) BETWEEN ? AND ? "
+                "GROUP BY owner_reseller_id",
+                (start_date, end_date),
+            ).fetchall()
+            commission_map = {r["owner_reseller_id"]: r["c"] for r in commission_rows}
+            reseller_performance = [
+                {
+                    "telegram_id": r["tg_id"],
+                    "name": r["username"] or r["first_name"] or str(r["tg_id"]),
+                    "commission_percent": r["pct"],
+                    "customers": r["customers"], "orders": r["orders"], "revenue": r["revenue"],
+                    "commission_paid": commission_map.get(r["tg_id"], 0),
+                }
+                for r in reseller_rows
+            ]
+
+            # ---------------------------------------------------------------
+            # ۵) قیف تبدیل: از بین کاربرانی که در همین بازه به بات ملحق شدند،
+            # چند درصد اصلاً سفارشی ثبت کردند و چند درصد به خرید تایید‌شده رسیدند.
+            # ---------------------------------------------------------------
+            cohort_row = conn.execute(
+                "SELECT COUNT(*) total, "
+                "COUNT(DISTINCT CASE WHEN o.id IS NOT NULL THEN u.telegram_id END) attempted, "
+                "COUNT(DISTINCT CASE WHEN o.status='approved' THEN u.telegram_id END) purchased "
+                "FROM users u LEFT JOIN orders o ON o.user_id = u.telegram_id "
+                "WHERE date(u.joined_at) BETWEEN ? AND ?",
+                (start_date, end_date),
+            ).fetchone()
+            total_new = cohort_row["total"] or 0
+            attempted = cohort_row["attempted"] or 0
+            purchased = cohort_row["purchased"] or 0
+            funnel = {
+                "new_users": total_new,
+                "attempted_purchase": attempted,
+                "completed_purchase": purchased,
+                "start_to_attempt_rate": round(attempted / total_new * 100, 1) if total_new else 0.0,
+                "attempt_to_purchase_rate": round(purchased / attempted * 100, 1) if attempted else 0.0,
+                "overall_conversion_rate": round(purchased / total_new * 100, 1) if total_new else 0.0,
+            }
+
+            # مشتریان بازگشتی در برابر مشتریانِ اولین‌خریدشان در همین بازه، به‌علاوه
+            # مشتریانی که قبلاً خرید کرده‌اند ولی این چند روز اخیر (churn_days) برنگشته‌اند.
+            returning_row = conn.execute(
+                "SELECT COUNT(DISTINCT o.user_id) c FROM orders o "
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ? "
+                "AND o.user_id IN ("
+                "  SELECT o2.user_id FROM orders o2 WHERE o2.status='approved' AND date(o2.created_at) < ?"
+                ")",
+                (start_date, end_date, start_date),
+            ).fetchone()
+            period_buyers_row = conn.execute(
+                "SELECT COUNT(DISTINCT o.user_id) c FROM orders o "
+                "WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ?",
+                (start_date, end_date),
+            ).fetchone()
+            churn_row = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) c FROM orders WHERE status='approved' "
+                "AND user_id NOT IN ("
+                "  SELECT user_id FROM orders WHERE status='approved' AND date(created_at) >= date('now', ?)"
+                ")",
+                (f"-{churn_days} days",),
+            ).fetchone()
+            returning = returning_row["c"] or 0
+            period_buyers = period_buyers_row["c"] or 0
+            retention = {
+                "returning_customers": returning,
+                "first_time_customers": max(period_buyers - returning, 0),
+                "churned_customers": churn_row["c"] or 0,
+                "churn_window_days": churn_days,
+            }
+
+            # ---------------------------------------------------------------
+            # ۶) نقشه‌ی ساعتی/روزهفته‌ی سفارش‌های تایید‌شده - برای دانستن شلوغ‌ترین
+            # ساعات (مثلاً برای برنامه‌ریزی پشتیبانی). created_at به وقت UTC ذخیره
+            # می‌شود، پس با +۳:۳۰ به وقت تهران تبدیل می‌شود.
+            # ---------------------------------------------------------------
+            heat_rows = conn.execute(
+                "SELECT CAST(strftime('%w', o.created_at, '+3 hours', '+30 minutes') AS INTEGER) dow, "
+                "CAST(strftime('%H', o.created_at, '+3 hours', '+30 minutes') AS INTEGER) hour, "
+                "COUNT(*) c "
+                "FROM orders o WHERE o.status='approved' AND date(o.created_at) BETWEEN ? AND ? "
+                "GROUP BY dow, hour",
+                (start_date, end_date),
+            ).fetchall()
+            heat_map = [[0] * 24 for _ in range(7)]
+            for r in heat_rows:
+                heat_map[r["dow"]][r["hour"]] = r["c"]
+
+            return {
+                "start_date": start_date, "end_date": end_date,
+                "revenue_trend": revenue_trend,
+                "gateway_breakdown": gateway_breakdown,
+                "campaign_performance": campaign_performance,
+                "reseller_performance": reseller_performance,
+                "funnel": funnel,
+                "retention": retention,
+                "hourly_heatmap": heat_map,  # هفت ردیف (شنبه=۰..جمعه=۶ به وقت sqlite) × ۲۴ ساعت، وقت تهران
+            }
+
     def get_orders_for_export(self, start_date: str = None, end_date: str = None):
         """لیست خام سفارش‌ها برای خروجی CSV، در بازه‌ی زمانی داده‌شده."""
         with self._get_conn() as conn:

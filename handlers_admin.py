@@ -8039,6 +8039,91 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.answer()
 
     # -------------------------------------------------------------------
+    # آمار پیشرفته: روند فروش، درگاه‌های پرداخت، کمپین‌ها/نماینده‌ها، قیف تبدیل
+    # -------------------------------------------------------------------
+
+    def _fmt_advanced_stats_report(stats: dict) -> str:
+        s, e = to_jalali_str(stats["start_date"]), to_jalali_str(stats["end_date"])
+        lines = [f"📈 آمار پیشرفته ({s} تا {e})\n"]
+
+        trend = stats["revenue_trend"]["points"]
+        lines.append("📊 روند درآمد روزانه:")
+        if trend:
+            for p in trend[-10:]:
+                bar = "▮" * min(20, max(1, p["revenue"] // max(1, max(t["revenue"] for t in trend) // 20 or 1)))
+                lines.append(f"  {p['bucket']}: {p['revenue']:,} تومان ({p['orders']} سفارش) {bar}")
+        else:
+            lines.append("  داده‌ای در این بازه نیست.")
+
+        lines.append("\n💳 تفکیک درگاه‌های پرداخت:")
+        if stats["gateway_breakdown"]:
+            for g in stats["gateway_breakdown"]:
+                lines.append(
+                    f"  • {g['gateway']}: {g['revenue']:,} تومان | {g['success']}/{g['attempts']} موفق "
+                    f"({g['success_rate']}٪) | {g['failed']} ناموفق"
+                )
+        else:
+            lines.append("  تراکنشی ثبت نشده.")
+
+        lines.append("\n🎯 منابع ورودی کاربر (کمپین‌ها):")
+        if stats["campaign_performance"]:
+            for c in stats["campaign_performance"][:8]:
+                lines.append(
+                    f"  • {c['source']}: {c['new_users']:,} کاربر جدید → {c['buyers']:,} خریدار "
+                    f"({c['conversion_rate']}٪) | {c['revenue']:,} تومان"
+                )
+        else:
+            lines.append("  داده‌ای نیست.")
+
+        if stats["reseller_performance"]:
+            lines.append("\n🤝 عملکرد نمایندگان داخلی (لینک اختصاصی):")
+            for r in stats["reseller_performance"][:8]:
+                pct = f"{r['commission_percent']}٪" if r["commission_percent"] is not None else "—"
+                lines.append(
+                    f"  • {r['name']}: {r['orders']:,} فروش از {r['customers']:,} مشتری، "
+                    f"{r['revenue']:,} تومان | کمیسیون {pct}: {r['commission_paid']:,} تومان"
+                )
+
+        f = stats["funnel"]
+        lines.append("\n🔻 قیف تبدیل کاربران تازه‌وارد:")
+        lines.append(f"  🆕 عضو شدند: {f['new_users']:,}")
+        lines.append(f"  🛒 سفارش ثبت کردند: {f['attempted_purchase']:,} ({f['start_to_attempt_rate']}٪)")
+        lines.append(f"  ✅ خرید موفق: {f['completed_purchase']:,} (از سفارش‌دهنده‌ها {f['attempt_to_purchase_rate']}٪)")
+        lines.append(f"  📈 نرخ تبدیل کلی: {f['overall_conversion_rate']}٪")
+
+        rt = stats["retention"]
+        lines.append("\n🔁 وفاداری مشتری:")
+        lines.append(f"  🔁 بازگشتی در این بازه: {rt['returning_customers']:,}")
+        lines.append(f"  🆕 اولین خرید در این بازه: {rt['first_time_customers']:,}")
+        lines.append(f"  ⚠️ ریزش‌کرده (بدون خرید در {rt['churn_window_days']} روز اخیر): {rt['churned_customers']:,}")
+
+        heat = stats["hourly_heatmap"]
+        day_names = ["شنبه", "یک‌شنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنج‌شنبه", "جمعه"]
+        # sqlite %w: یکشنبه=۰..شنبه=۶ → نگاشت به ترتیب هفته‌ی ایرانی
+        sqlite_to_fa = {0: "یک‌شنبه", 1: "دوشنبه", 2: "سه‌شنبه", 3: "چهارشنبه", 4: "پنج‌شنبه", 5: "جمعه", 6: "شنبه"}
+        totals_by_day = [(sqlite_to_fa[i], sum(heat[i])) for i in range(7)]
+        totals_by_hour = [sum(heat[d][h] for d in range(7)) for h in range(24)]
+        if any(t for _, t in totals_by_day):
+            best_day = max(totals_by_day, key=lambda x: x[1])
+            best_hour = max(range(24), key=lambda h: totals_by_hour[h])
+            lines.append("\n⏰ شلوغ‌ترین زمان‌ها (به وقت تهران):")
+            lines.append(f"  📅 پرفروش‌ترین روز هفته: {best_day[0]} ({best_day[1]:,} سفارش)")
+            lines.append(f"  🕐 پرفروش‌ترین ساعت: {best_hour:02d}:00 تا {best_hour+1:02d}:00 ({totals_by_hour[best_hour]:,} سفارش)")
+
+        return "\n".join(lines)
+
+    @router.callback_query(F.data.startswith("adm_stats_adv:"))
+    async def cb_admin_stats_advanced(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        days = int(call.data.split(":", 1)[1])
+        end_date = date.today().isoformat()
+        start_date = (date.today() - timedelta(days=days - 1)).isoformat()
+        stats = await asyncio.to_thread(db.get_advanced_stats, start_date, end_date)
+        await replace_admin_view(call, _fmt_advanced_stats_report(stats), reply_markup=kb.admin_advanced_stats_kb(days))
+        await call.answer()
+
+    # -------------------------------------------------------------------
     # بکاپ و بازیابی
     # -------------------------------------------------------------------
     # فقط مالک اصلی بات (owner_only) به این بخش دسترسی دارد، چون بازیابی
