@@ -2465,30 +2465,42 @@ function openMakeResellerModal(tgId, closeUserModal) {
         ${Object.entries(MAKE_RESELLER_BOT_LABEL).map(([v, l]) => `<option value="${v}"${v === 'none' ? ' selected' : ''}>${esc(l)}</option>`).join('')}
       </select>
 
-      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-web-panel"> پنل وب اختصاصی می‌خواهد</label>
-      <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-miniapp"> مینی‌اپ فروشگاه می‌خواهد</label>
-
-      <div><b>مدل تامین</b></div>
-      <select class="input" id="mr-supply-model">
-        <option value="volume_credit" selected>اعتبار حجمی</option>
-        <option value="fixed_product">محصول آماده</option>
-      </select>
-
-      <div id="mr-volume-wrap">
-        <div><b>حجم اعتبار اولیه (گیگ)</b></div>
-        <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
+      <div id="mr-percent-wrap" style="display:none">
+        <div><b>درصد کمیسیون</b></div>
+        <div class="hint-text">نمایندگی کمیسیونی بدون حجم و بدون محصول آماده است؛ فقط این درصد از هر خرید مشتریانی که با لینک اختصاصی‌اش وارد شوند، به کیف پول او واریز می‌شود.</div>
+        <input class="input" id="mr-percent" type="number" min="1" max="100" placeholder="مثلاً 10">
       </div>
 
-      <div id="mr-fixed-wrap" style="display:none">
-        <div><b>محصولات اولیه نماینده</b></div>
-        <div class="hint-text">چند محصول را هم‌زمان انتخاب کن و برای هرکدام تعداد جداگانه بده.</div>
-        <div id="mr-fixed-products" style="display:grid;gap:8px;max-height:260px;overflow:auto;padding:4px 0">
-          <div class="hint-text">در حال بارگذاری...</div>
+      <div id="mr-interface-wrap">
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-web-panel"> پنل وب اختصاصی می‌خواهد</label>
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-miniapp"> مینی‌اپ فروشگاه می‌خواهد</label>
+      </div>
+
+      <div id="mr-supply-wrap">
+        <div><b>مدل تامین</b></div>
+        <select class="input" id="mr-supply-model">
+          <option value="volume_credit" selected>اعتبار حجمی</option>
+          <option value="fixed_product">محصول آماده</option>
+        </select>
+
+        <div id="mr-volume-wrap">
+          <div><b>حجم اعتبار اولیه (گیگ)</b></div>
+          <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
+        </div>
+
+        <div id="mr-fixed-wrap" style="display:none">
+          <div><b>محصولات اولیه نماینده</b></div>
+          <div class="hint-text">چند محصول را هم‌زمان انتخاب کن و برای هرکدام تعداد جداگانه بده.</div>
+          <div id="mr-fixed-products" style="display:grid;gap:8px;max-height:260px;overflow:auto;padding:4px 0">
+            <div class="hint-text">در حال بارگذاری...</div>
+          </div>
         </div>
       </div>
 
-      <div><b>پنل اعتباری نمایندگی (اختیاری)</b></div>
-      <select class="input" id="mr-panel"><option value="">پیش‌فرض خودکار</option></select>
+      <div id="mr-panel-wrap">
+        <div><b>پنل اعتباری نمایندگی (اختیاری)</b></div>
+        <select class="input" id="mr-panel"><option value="">پیش‌فرض خودکار</option></select>
+      </div>
 
       <div><b>یادداشت داخلی (اختیاری)</b></div>
       <textarea class="input" id="mr-note" rows="2" placeholder="مثلاً دلیل نماینده‌کردن این کاربر..."></textarea>
@@ -2497,13 +2509,27 @@ function openMakeResellerModal(tgId, closeUserModal) {
     </div>
   `, (body, close) => {
     const supplySel = $('#mr-supply-model', body);
+    const botChoiceSel = $('#mr-bot-choice', body);
     const syncSupplyVisibility = () => {
       const isFixed = supplySel.value === 'fixed_product';
       $('#mr-volume-wrap', body).style.display = isFixed ? 'none' : '';
       $('#mr-fixed-wrap', body).style.display = isFixed ? '' : 'none';
     };
+    const syncBotChoiceVisibility = () => {
+      // نمایندگی کمیسیونی (لینک اختصاصی داخل بات اصلی) نه حجم دارد، نه محصول
+      // آماده، نه پنل وب/مینی‌اپ مستقل - فقط یک درصد کمیسیون دائمی؛ برای این
+      // حالت باید فقط فیلد درصد نشان داده شود (معادل «ساخت مستقیم نماینده‌ی
+      // کمیسیونی»)، نه فرم کامل نمایندگی سطح ۲.
+      const isInlineLink = botChoiceSel.value === 'inline_link';
+      $('#mr-percent-wrap', body).style.display = isInlineLink ? '' : 'none';
+      $('#mr-interface-wrap', body).style.display = isInlineLink ? 'none' : '';
+      $('#mr-supply-wrap', body).style.display = isInlineLink ? 'none' : '';
+      $('#mr-panel-wrap', body).style.display = isInlineLink ? 'none' : '';
+    };
     supplySel.addEventListener('change', syncSupplyVisibility);
+    botChoiceSel.addEventListener('change', syncBotChoiceVisibility);
     syncSupplyVisibility();
+    syncBotChoiceVisibility();
 
     apiGet('/reseller-panels-lite').then(panels => {
       const sel = $('#mr-panel', body);
@@ -2524,6 +2550,18 @@ function openMakeResellerModal(tgId, closeUserModal) {
     }).catch(() => {});
 
     $('#mr-submit', body).addEventListener('click', async () => {
+      if (botChoiceSel.value === 'inline_link') {
+        const percent = Number($('#mr-percent', body).value);
+        if (!percent || percent < 1 || percent > 100) { toast('درصد کمیسیون باید بین ۱ تا ۱۰۰ باشد.', true); return; }
+        try {
+          await apiPost('/resellers/inline-commissions', { owner_telegram_id: tgId, percent });
+          toast('کاربر با موفقیت نماینده‌ی کمیسیونی شد.');
+          close();
+          if (closeUserModal) closeUserModal();
+          showUserDetail(tgId);
+        } catch (e) { handleErr(e); }
+        return;
+      }
       const supply_model = supplySel.value;
       const payload = {
         bot_choice: $('#mr-bot-choice', body).value,
