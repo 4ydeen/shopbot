@@ -5830,6 +5830,15 @@ def serve_manifest(request: Request):
     همان query string صفحه‌ی جاری صدا می‌زند (مثلا /manifest.json?b=xyz)."""
     b_value = request.query_params.get("b", "").strip()
     start_url = f"/?b={b_value}&source=pwa" if b_value else "/?source=pwa"
+
+    # رنگ اسپلش‌اسکرین/نوار وضعیت باید با تم و حالت روشن/تیره‌ی فعلی کاربر
+    # هماهنگ باشد؛ index.html این دو را به‌صورت کوئری‌استرینگ می‌فرستد.
+    # فقط تم اندروید حالت روشن پیش‌فرض دارد، بقیه‌ی تم‌ها تیره‌اند.
+    theme = request.query_params.get("theme", "").strip()
+    mode = request.query_params.get("mode", "").strip()
+    android_colors = {"light": "#FEF7FF", "dark": "#141218"}
+    pwa_color = android_colors.get(mode, "#141218") if theme == "android" else "#0B0C14"
+
     manifest = {
         "name": "پنل مدیریت ShopVPN",
         "short_name": "ShopVPN",
@@ -5838,8 +5847,8 @@ def serve_manifest(request: Request):
         "scope": "/",
         "display": "standalone",
         "orientation": "portrait-primary",
-        "background_color": "#0B0C14",
-        "theme_color": "#0B0C14",
+        "background_color": pwa_color,
+        "theme_color": pwa_color,
         "dir": "rtl",
         "lang": "fa",
         "icons": [
