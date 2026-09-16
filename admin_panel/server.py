@@ -3462,6 +3462,124 @@ def api_list_inline_resellers(admin=Depends(require_permission("resellers"))):
     return {"items": rows}
 
 
+class CommissionResellerDirectBody(BaseModel):
+    owner_telegram_id: int
+    percent: int
+
+
+class CommissionResellerPercentBody(BaseModel):
+    percent: int
+
+
+class CommissionResellerRejectBody(BaseModel):
+    reason: str
+
+
+@app.post("/api/resellers/inline-commissions")
+def api_create_inline_reseller(body: CommissionResellerDirectBody, admin=Depends(require_permission("resellers"))):
+    """ساخت مستقیم یک نماینده‌ی کمیسیونی توسط ادمین (بدون نیاز به درخواست
+    قبلی از سمت کاربر) - نمایندگی کمیسیونی نه حجم دارد نه محصول آماده،
+    فقط یک درصد کمیسیون دائمی تا زمان غیرفعال‌سازی."""
+    if not (1 <= body.percent <= 100):
+        raise HTTPException(400, "درصد باید بین ۱ تا ۱۰۰ باشد.")
+    user_row = db.get_user(body.owner_telegram_id)
+    if not user_row:
+        raise HTTPException(404, "این کاربر هنوز با بات /start نزده است.")
+    if db.is_inline_reseller(body.owner_telegram_id):
+        raise HTTPException(400, "این کاربر همین الان هم نماینده‌ی کمیسیونی فعال است.")
+    db.enable_inline_reseller(body.owner_telegram_id, body.percent)
+    db.log_admin_action(
+        admin["id"], "commission_reseller_direct_create",
+        f"کاربر {body.owner_telegram_id} | {body.percent}٪ (پنل وب - {admin['username']})",
+    )
+    asyncio.create_task(tg_send(
+        _bot_token(), body.owner_telegram_id,
+        "🎉 شما توسط ادمین به‌عنوان نماینده‌ی کمیسیونی تعیین شدید!\n\n"
+        f"روی هر خرید مشتریانی که با لینک اختصاصی‌تان وارد شوند، {body.percent}٪ کارمزد به کیف پول شما اضافه "
+        "می‌شود - تا وقتی ادمین نمایندگی‌تان را غیرفعال کند.\n"
+        "برای دیدن لینک و آمار، دستور /reseller_link را در بات بفرستید.",
+    ))
+    return {"ok": True}
+
+
+@app.put("/api/resellers/inline-commissions/{telegram_id}")
+def api_edit_inline_reseller_percent(telegram_id: int, body: CommissionResellerPercentBody, admin=Depends(require_permission("resellers"))):
+    if not (1 <= body.percent <= 100):
+        raise HTTPException(400, "درصد باید بین ۱ تا ۱۰۰ باشد.")
+    if not db.is_inline_reseller(telegram_id):
+        raise HTTPException(404, "این کاربر نماینده‌ی کمیسیونی فعال نیست.")
+    db.set_inline_reseller_commission_percent(telegram_id, body.percent)
+    db.log_admin_action(
+        admin["id"], "commission_reseller_edit_percent",
+        f"کاربر {telegram_id} → {body.percent}٪ (پنل وب - {admin['username']})",
+    )
+    asyncio.create_task(tg_send(_bot_token(), telegram_id, f"📊 درصد کمیسیون نمایندگی شما به {body.percent}٪ تغییر کرد."))
+    return {"ok": True}
+
+
+@app.delete("/api/resellers/inline-commissions/{telegram_id}")
+def api_disable_inline_reseller(telegram_id: int, admin=Depends(require_permission("resellers"))):
+    if not db.is_inline_reseller(telegram_id):
+        raise HTTPException(404, "این کاربر نماینده‌ی کمیسیونی فعال نیست.")
+    db.disable_inline_reseller(telegram_id)
+    db.log_admin_action(
+        admin["id"], "commission_reseller_disable", f"کاربر {telegram_id} (پنل وب - {admin['username']})",
+    )
+    asyncio.create_task(tg_send(_bot_token(), telegram_id, "⛔️ نمایندگی کمیسیونی شما توسط ادمین غیرفعال شد."))
+    return {"ok": True}
+
+
+@app.get("/api/resellers/commission-requests")
+def api_list_commission_reseller_requests(status: str = "pending", admin=Depends(require_permission("resellers"))):
+    rows = rows_to_list(db.list_commission_reseller_requests(status or None))
+    for r in rows:
+        u = db.get_user(r["user_id"])
+        r["username"] = u["username"] if u else None
+        r["first_name"] = u["first_name"] if u else None
+    return {"items": rows}
+
+
+@app.post("/api/resellers/commission-requests/{request_id}/approve")
+def api_approve_commission_reseller_request(request_id: int, admin=Depends(require_permission("resellers"))):
+    req = db.get_commission_reseller_request(request_id)
+    if not req or req["status"] != "pending":
+        raise HTTPException(404, "این درخواست دیگر معتبر نیست.")
+    approved = db.approve_commission_reseller_request(request_id, req["proposed_percent"], admin["id"])
+    if not approved:
+        raise HTTPException(409, "این درخواست همین الان بررسی شد.")
+    db.log_admin_action(
+        admin["id"], "commission_reseller_approve",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | {req['proposed_percent']}٪ (پنل وب - {admin['username']})",
+    )
+    asyncio.create_task(tg_send(
+        _bot_token(), req["user_id"],
+        "✅ درخواست نمایندگی کمیسیونی شما تایید شد!\n\n"
+        f"روی هر خرید مشتریانی که با لینک اختصاصی‌تان وارد شوند، {req['proposed_percent']}٪ کارمزد به کیف پول شما "
+        "اضافه می‌شود - تا وقتی ادمین نمایندگی‌تان را غیرفعال کند.\n"
+        "برای دیدن لینک و آمار، دستور /reseller_link را در بات بفرستید.",
+    ))
+    return {"ok": True}
+
+
+@app.post("/api/resellers/commission-requests/{request_id}/reject")
+def api_reject_commission_reseller_request(request_id: int, body: CommissionResellerRejectBody, admin=Depends(require_permission("resellers"))):
+    req = db.get_commission_reseller_request(request_id)
+    if not req or req["status"] != "pending":
+        raise HTTPException(404, "این درخواست دیگر معتبر نیست.")
+    rejected = db.reject_commission_reseller_request(request_id, body.reason, admin["id"])
+    if not rejected:
+        raise HTTPException(409, "این درخواست همین الان بررسی شد.")
+    db.log_admin_action(
+        admin["id"], "commission_reseller_reject",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | دلیل: {body.reason} (پنل وب - {admin['username']})",
+    )
+    asyncio.create_task(tg_send(
+        _bot_token(), req["user_id"],
+        f"❌ متاسفانه درخواست نمایندگی کمیسیونی شما (#{request_id}) رد شد.\n\nدلیل: {body.reason}",
+    ))
+    return {"ok": True}
+
+
 _RESELLER_AXIS_SETTING_KEYS = (
     "reseller_axis_bot_dedicated_enabled", "reseller_axis_bot_inline_link_enabled",
     "reseller_axis_bot_none_enabled", "reseller_axis_webpanel_enabled", "reseller_axis_miniapp_enabled",
