@@ -43,7 +43,7 @@ import custom_gateway_payment
 import card_to_card_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, ProvisionError
-from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
+from direct_panel_provision import provision_direct, planned_usernames, ProvisionError as DirectProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
 
 
@@ -92,6 +92,19 @@ async def _send_admin_notification(bot, admin_id, send_coro_factory, context_lab
         context_label, ref_id, admin_id,
     )
     return None
+
+
+class _MessageCall:
+    """Adapter that lets callback-style handlers run from a text message."""
+
+    def __init__(self, from_user, message):
+        self.from_user = from_user
+        self.message = message
+        self.data = ""
+
+    async def answer(self, text=None, *args, **kwargs):
+        if text:
+            await self.message.answer(text)
 
 
 def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
@@ -984,7 +997,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.callback_query(F.data.startswith("buy_start:"))
     async def cb_buy_start(call: CallbackQuery, state: FSMContext, bot: Bot):
         _, product_id, quantity = call.data.split(":")
-        product_id, quantity = int(product_id), int(quantity)
+        await _buy_start(call, state, bot, int(product_id), int(quantity))
+
+    async def _buy_start(call, state: FSMContext, bot: Bot, product_id: int, quantity: int, config_name: str = None):
         product = (await asyncio.to_thread(db.get_product, product_id))
         stock = (await asyncio.to_thread(db.count_available_configs, product_id))
         if not product or stock <= 0:
@@ -994,6 +1009,24 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             quantity = 1
         if quantity > stock:
             await call.answer(f"موجودی کافی نیست. فقط {stock} عدد موجود است.", show_alert=True)
+            return
+
+        if config_name is None and product["is_auto_provision"] and product["provision_server_id"]:
+            await state.update_data(buy_name_product_id=product_id, buy_name_quantity=quantity)
+            await state.set_state(BuyFlow.waiting_config_name)
+            prefix = (await asyncio.to_thread(db.get_custom_config_prefix))
+            max_len = 20 if quantity == 1 else 16
+            text = "🛠 نام کانفیگ\n\n"
+            if prefix:
+                text += f"نام با پیش‌وند ثابت «{prefix}-» شروع می‌شود. فقط ادامه‌ی نام (بعد از خط تیره) را ارسال کنید"
+            else:
+                text += "یک نام دلخواه برای کانفیگ ارسال کنید"
+            text += "، یا از دکمه‌ی زیر نام خودکار بگیرید.\n"
+            if quantity > 1:
+                text += "نام هر کانفیگ با شماره‌ی ترتیبی (_1، _2، ...) ادامه پیدا می‌کند.\n"
+            text += f"فقط حروف انگلیسی، عدد و آندرلاین مجاز است (بین ۳ تا {max_len} کاراکتر)."
+            await _safe_edit(call.message, text, reply_markup=kb.custom_config_username_kb())
+            await call.answer()
             return
 
         data = await state.get_data()
@@ -1021,6 +1054,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             discount_code_id=discount_code_id,
             discount_amount=discount_amount,
             quantity=quantity,
+            config_name=config_name or None,
         ))
         order = (await asyncio.to_thread(db.get_order, order_id))
         await state.update_data(order_id=order_id)
@@ -1178,6 +1212,39 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await call.answer()
             except Exception:
                 pass
+
+    @router.callback_query(F.data == "custom_config_random_username", BuyFlow.waiting_config_name)
+    async def cb_buy_random_config_name(call: CallbackQuery, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        product_id = data.get("buy_name_product_id")
+        if not product_id:
+            await state.clear()
+            await call.answer("این مرحله منقضی شده؛ دوباره از منو اقدام کنید.", show_alert=True)
+            return
+        await _buy_start(call, state, bot, int(product_id), int(data.get("buy_name_quantity") or 1), config_name="")
+
+    @router.message(BuyFlow.waiting_config_name)
+    async def buy_receive_config_name(message: Message, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        product_id = data.get("buy_name_product_id")
+        if not product_id:
+            await state.clear()
+            await message.answer("این مرحله منقضی شده؛ دوباره از منو اقدام کنید.")
+            return
+        quantity = int(data.get("buy_name_quantity") or 1)
+        max_len = 20 if quantity == 1 else 16
+        suffix = (message.text or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,%d}" % max_len, suffix):
+            await message.answer(f"❌ نام نامعتبر است. فقط حروف انگلیسی، عدد و آندرلاین، بین ۳ تا {max_len} کاراکتر.")
+            return
+        prefix = (await asyncio.to_thread(db.get_custom_config_prefix))
+        base = f"{prefix}-{suffix}" if prefix else suffix
+        for candidate in planned_usernames(base, quantity):
+            if (await asyncio.to_thread(db.is_custom_username_taken, candidate)):
+                await message.answer("❌ این نام قبلاً استفاده شده. لطفاً نام دیگری ارسال کنید.")
+                return
+        progress = await message.answer("⏳ در حال ثبت سفارش...")
+        await _buy_start(_MessageCall(message.from_user, progress), state, bot, int(product_id), quantity, config_name=base)
 
     @router.callback_query(F.data == "pay_card2card", BuyFlow.waiting_receipt)
     async def cb_pay_card2card_order(call: CallbackQuery, state: FSMContext):

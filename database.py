@@ -1323,6 +1323,7 @@ class Database:
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
             ("tickets", "claimed_by", "INTEGER"),
             ("orders", "quantity", "INTEGER DEFAULT 1"),
+            ("orders", "config_name", "TEXT"),
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
             ("reseller_bots", "reseller_level", "INTEGER DEFAULT 2"),
@@ -2879,13 +2880,14 @@ class Database:
         discount_code_id: int = None,
         discount_amount: int = 0,
         quantity: int = 1,
+        config_name: str = None,
     ) -> int:
         final_price = max(base_price - wallet_used - discount_amount, 0)
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, "
-                "discount_code_id, discount_amount, final_price, quantity) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
-                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price, quantity),
+                "discount_code_id, discount_amount, final_price, quantity, config_name) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price, quantity, config_name),
             )
             return cur.lastrowid
 

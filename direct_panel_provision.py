@@ -27,6 +27,10 @@ def _random_username(prefix: str = "") -> str:
     return f"{prefix}-{suffix}" if prefix else suffix
 
 
+def planned_usernames(base: str, quantity: int) -> list:
+    return [base] if quantity == 1 else [f"{base}_{i}" for i in range(1, quantity + 1)]
+
+
 async def provision_direct(db, product, quantity: int = 1, user_id: int = None, order_id: int = None) -> list:
     """محصول باید provision_server_id معتبر داشته باشد. برای هر واحد یک کاربر واقعی
     روی همان پنل ساخته می‌شود. برمی‌گرداند: لیستی از
@@ -56,6 +60,10 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
 
     provider = get_provider(server)
     prefix = db.get_custom_config_prefix()
+    planned = []
+    order = db.get_order(order_id) if order_id is not None else None
+    if order and order["config_name"]:
+        planned = planned_usernames(order["config_name"], quantity)
     built = []
 
     async def _rollback_built():
@@ -73,11 +81,19 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
                 pass
 
     try:
-        for _ in range(quantity):
+        for index in range(quantity):
             username = None
             result = None
-            for _try in range(5):
-                candidate = _random_username(prefix)
+            wanted = planned[index] if planned else None
+            for attempt in range(5):
+                if wanted and attempt == 0:
+                    candidate = wanted
+                elif wanted:
+                    candidate = wanted + "_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=3))
+                else:
+                    candidate = _random_username(prefix)
+                if db.is_custom_username_taken(candidate):
+                    continue
                 try:
                     result = await provider.create_user(candidate, volume_gb, duration_days)
                     username = candidate
