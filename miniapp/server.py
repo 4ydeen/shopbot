@@ -980,6 +980,8 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
     if user_row and user_row["is_blocked"]:
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
 
+    tier_info = db.get_tier_price_info(tg_id, price, 1)
+    price = tier_info["total_after"]
     wallet_credit = db.get_wallet_credit(tg_id)
     wallet_used = min(wallet_credit, price)
     if wallet_used > 0:
@@ -987,6 +989,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
 
     order_id = db.create_custom_config_order(
         tg_id, body.volume_gb, username, server["id"], base_price=price, wallet_used=wallet_used,
+        tier_discount_amount=tier_info["amount"],
     )
     order = db.get_order(order_id)
 
