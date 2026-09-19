@@ -3223,6 +3223,7 @@ class Database:
         wallet_used: int = 0,
         custom_product_id: int = None,
         custom_duration_days: int = None,
+        tier_discount_amount: int = 0,
     ) -> int:
         """سفارش «ساخت کانفیگ شخصی» - از همان جدول orders استفاده می‌کند (product_id=0
         سنتینل بدون FK) تا مسیر پرداخت کارت/کیف‌پول/کریپتوی فعلی بدون تغییر کار کند.
@@ -3236,9 +3237,10 @@ class Database:
             cur = conn.execute(
                 "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
                 "quantity, is_custom_config, custom_volume_gb, custom_username, custom_panel_server_id, "
-                "custom_product_id, custom_duration_days) VALUES (?, 0, 'pending', ?, ?, ?, 1, 1, ?, ?, ?, ?, ?)",
+                "custom_product_id, custom_duration_days, tier_discount_amount) "
+                "VALUES (?, 0, 'pending', ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?)",
                 (user_tg_id, base_price, wallet_used, final_price, volume_gb, username, panel_server_id,
-                 custom_product_id, custom_duration_days),
+                 custom_product_id, custom_duration_days, tier_discount_amount),
             )
             return cur.lastrowid
 

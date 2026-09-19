@@ -1801,6 +1801,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             return
 
+        tier_info = await _tier_info(message.from_user.id, price, 1)
+        price = tier_info["total_after"]
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id))
         wallet_used = min(wallet_credit, price)
 
@@ -1811,6 +1813,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             message.from_user.id, volume_gb, username, server["id"],
             base_price=price, wallet_used=wallet_used,
             custom_product_id=product_id, custom_duration_days=duration_days,
+            tier_discount_amount=tier_info["amount"],
         ))
         order = (await asyncio.to_thread(db.get_order, order_id))
         await state.update_data(order_id=order_id, custom_volume_gb=volume_gb)
@@ -1873,6 +1876,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 f"📶 حجم: {volume_gb} گیگابایت\n"
                 f"⏳ مدت: {duration_days} روز\n\n"
             )
+            if tier_info["amount"] > 0:
+                text += (
+                    f"{tier_info['icon']} تخفیف سطح {escape_md(tier_info['title'])} "
+                    f"({tier_info['percent']}٪): {tier_info['amount']:,} تومان\n"
+                )
             if wallet_used:
                 text += f"👛 استفاده از کیف پول: {wallet_used:,} تومان\n"
             text += f"💰 مبلغ نهایی قابل پرداخت: {order['final_price']:,} تومان\n\n"
@@ -5661,7 +5669,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         allowed_methods = await asyncio.to_thread(db.get_product_payment_methods, product_id)
         wallet_allowed = allowed_methods is None or "wallet" in allowed_methods
-        total_price = product["price"] * quantity
+        tier_info = await _tier_info(user_id, product["price"], quantity)
+        total_price = tier_info["total_after"]
         wallet_credit = await asyncio.to_thread(db.get_wallet_credit, user_id)
 
         if not wallet_allowed or wallet_credit < total_price:
@@ -5669,12 +5678,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             # خرج شده)؛ به‌جای خرید خودکار، همان کارت خرید واقعی را نشان بده تا
             # کاربر خودش با روش دیگری تکمیل کند - هیچ کسری اینجا اتفاق نمی‌افتد.
             stock_display = stock if stock is not None else quantity
-            text = _product_confirm_text(product, quantity, stock_display, wallet_credit)
+            text = _product_confirm_text(product, quantity, stock_display, wallet_credit, tier_info=tier_info)
             await message.answer(
                 "👛 موجودی کیف پول برای تکمیل خودکار کافی نیست؛ کارت خرید رو برات باز می‌کنم:"
             )
             await message.answer(
-                text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, max(stock_display, quantity))
+                text,
+                reply_markup=kb.product_confirm_kb(
+                    db, product_id, quantity, max(stock_display, quantity), 10 if tier_info["title"] else 0
+                ),
             )
             return
 
@@ -5682,6 +5694,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             db.create_order, user_id, product_id,
             base_price=total_price, wallet_used=total_price,
             discount_code_id=None, discount_amount=0, quantity=quantity,
+            tier_discount_amount=tier_info["amount"],
         )
         await asyncio.to_thread(db.add_wallet_credit, user_id, -total_price)
         order = await asyncio.to_thread(db.get_order, order_id)
