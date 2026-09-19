@@ -79,6 +79,7 @@ from stock_alerts import check_and_notify_low_stock
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PROVIDERS,
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
+    SINGLE_INBOUND_PANEL_TYPES, TOKEN_ONLY_PANEL_TYPES,
 )
 from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
@@ -3999,6 +4000,7 @@ def api_admin_list_panel_servers(auth=Depends(require_full_access_admin)):
 async def api_admin_add_panel_server(body: PanelServerCreate, auth=Depends(require_full_access_admin)):
     _, db, _ = auth
     admin_id, _, _ = auth
+    body.api_username = body.api_username.strip() or TOKEN_ONLY_PANEL_TYPES.get(body.panel_type, "")
     if not body.name.strip() or not body.api_url.strip() or not body.api_username.strip() or not body.api_password.strip():
         raise HTTPException(status_code=400, detail="نام، آدرس، یوزرنیم و پسورد الزامی هستند.")
     if body.panel_type not in PROVIDERS:
@@ -4061,8 +4063,8 @@ async def api_admin_list_xui_inbounds(server_id: int, auth=Depends(require_senio
     server = db.get_panel_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="سرور یافت نشد.")
-    if server["panel_type"] != "3xui":
-        raise HTTPException(status_code=400, detail="این سرور از نوع 3X-UI نیست.")
+    if server["panel_type"] not in INBOUND_SELECT_PANEL_TYPES:
+        raise HTTPException(status_code=400, detail="این سرور انتخاب inbound ندارد.")
     try:
         provider = get_provider(server)
         inbounds = await provider.list_inbounds()
@@ -4081,6 +4083,8 @@ async def api_admin_set_xui_config(server_id: int, body: PanelServerXuiConfig, a
         raise HTTPException(status_code=400, detail="این سرور به این تنظیمات نیاز ندارد.")
     if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES and not body.inbound_ids:
         raise HTTPException(status_code=400, detail="انتخاب حداقل یک inbound برای این نوع پنل الزامی است.")
+    if server["panel_type"] in SINGLE_INBOUND_PANEL_TYPES and len(body.inbound_ids or []) > 1:
+        raise HTTPException(status_code=400, detail="برای این نوع پنل فقط یک inbound قابل انتخاب است.")
     url = body.sub_base_url.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="آدرس Subscription باید با http:// یا https:// شروع شود.")
