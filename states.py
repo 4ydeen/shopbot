@@ -422,6 +422,7 @@ class ResellerRequestFlow(StatesGroup):
     waiting_supply_qty = State()
     waiting_receipt = State()
     waiting_bot_token = State()
+    waiting_payment_phone = State()
     waiting_owner_id = State()
     waiting_owner_id_confirm = State()
 

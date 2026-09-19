@@ -5918,6 +5918,20 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {req['price_toman']:,}",
             ))
 
+            req = await asyncio.to_thread(db.get_reseller_request, request_id)
+            if req and req["status"] == "completed":
+                tier = await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]) if req["tier_code"] else None
+                label = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
+                try:
+                    await bot.send_message(req["user_id"], f"✅ پرداخت هزینه {label} تایید شد و نمایندگی شما فعال شد.")
+                except Exception:
+                    pass
+                try:
+                    await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ پرداخت تایید شد و نمایندگی فعال شد.")
+                except Exception:
+                    pass
+                await call.answer("پرداخت تایید و نمایندگی فعال شد.")
+                return
             bot_choice = req["bot_choice"] if "bot_choice" in req.keys() else "dedicated"
             if bot_choice == "dedicated":
                 user_state = FSMContext(

@@ -706,6 +706,18 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def reseller_payment_choice_kb(db, methods) -> InlineKeyboardMarkup:
+    """انتخاب روش پرداخت هزینه نمایندگی؛ methods کلیدهای catalog هستند."""
+    catalog = {x["key"]: x for x in db.get_payment_methods_catalog(only_enabled=True)}
+    rows = []
+    for key in methods:
+        item = catalog.get(key)
+        if not item:
+            continue
+        rows.append([InlineKeyboardButton(text=item["label"], callback_data=f"respay:{key}")])
+    rows.append([InlineKeyboardButton(text="❌ انصراف", callback_data="resreq_cancel_payment")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def card_settings_kb(db) -> InlineKeyboardMarkup:
     """منوی تنظیمات پرداخت کارت‌به‌کارت (دستی): نمایش شماره کارت فعلی، وضعیت
     فعال/غیرفعال و دکمه‌های تغییر."""

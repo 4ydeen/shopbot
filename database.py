@@ -1439,6 +1439,8 @@ class Database:
             ("reseller_requests", "bot_choice", "TEXT DEFAULT 'dedicated'"),
             ("reseller_requests", "wants_web_panel", "INTEGER DEFAULT 0"),
             ("reseller_requests", "wants_miniapp", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "payment_method", "TEXT"),
+            ("reseller_requests", "commission_percent", "INTEGER"),
             # رفع باگ: قبلاً وضعیت pending_review در طول کل مراحل «انتخاب پنل» و
             # «تعیین قیمت» ثابت می‌ماند، پس اگر دو ادمین senior هم‌زمان روی یک
             # درخواست کار می‌کردند، هر دو می‌توانستند پنل انتخاب کنند و قیمت
@@ -1610,7 +1612,7 @@ class Database:
             "description": "لینک اختصاصی می‌گیرید و از هر خرید مشتریانی که با لینک شما وارد شوند، درصدی کمیسیون به کیف پولتان اضافه می‌شود. بدون سرمایه اولیه.",
         },
         {
-            "code": "silver", "title": "نقره‌ای", "icon": "🥈", "model": "discount", "sort_order": 20, "is_enabled": 0,
+            "code": "silver", "title": "نقره‌ای", "icon": "🥈", "model": "discount", "sort_order": 20, "is_enabled": 1,
             "summary": "تخفیف دائمی و خرید عمده در بات اصلی",
             "description": "بدون لینک و بدون بات؛ از خود بات اصلی با قیمت تخفیفی می‌خرید و هرچه یک‌جا بیشتر بخرید، تخفیف بیشتر می‌شود.",
         },
@@ -1641,6 +1643,47 @@ class Database:
                 f"INSERT OR IGNORE INTO reseller_tiers ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                 [row[c] for c in cols],
             )
+        # مهاجرت یک‌باره: نسخه‌های قبلی نقره‌ای را به‌صورت پیش‌فرض خاموش داشتند؛
+        # در سیستم چهارسطحی جدید هر چهار سطح باید قابل درخواست باشند. بعد از یک‌بار
+        # اعمال، ادمین می‌تواند نقره‌ای را دوباره دستی غیرفعال کند.
+        marker = conn.execute("SELECT value FROM settings WHERE key='reseller_tiers_four_level_v2' LIMIT 1").fetchone()
+        if marker is None:
+            conn.execute("UPDATE reseller_tiers SET is_enabled=1 WHERE code='silver'")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reseller_tiers_four_level_v2','1')")
+        # انتقال درخواست‌های قدیمی دو جدول جداگانه به موتور واحد درخواست نمایندگی.
+        # این کار فقط برای pendingهای قدیمی انجام می‌شود و پس از آن رکورد قدیمی
+        # migrated می‌شود تا دوباره وارد سیستم نشود.
+        conn.execute("""
+            INSERT INTO reseller_requests
+                (user_id, volume_gb, request_text, status, supply_model, bot_choice,
+                 wants_web_panel, wants_miniapp, tier_code, commission_percent)
+            SELECT r.user_id, 0, COALESCE(r.request_text, 'درخواست قدیمی منتقل‌شده'), 'pending_review',
+                   CASE WHEN t.model='commission' THEN 'commission' ELSE 'discount' END, 'none', 0, 0,
+                   r.tier_code, CASE WHEN t.model='commission' THEN COALESCE(t.commission_min, 10) ELSE NULL END
+            FROM reseller_tier_requests r
+            JOIN reseller_tiers t ON t.code=r.tier_code
+            WHERE r.status='pending'
+              AND NOT EXISTS (SELECT 1 FROM reseller_requests x
+                              WHERE x.user_id=r.user_id AND x.tier_code=r.tier_code
+                                AND x.status IN ('pending_review','awaiting_payment','awaiting_payment_review','awaiting_bot_info'))
+        """)
+        conn.execute("""
+            UPDATE reseller_tier_requests SET status='migrated', updated_at=CURRENT_TIMESTAMP
+            WHERE status='pending'
+        """)
+        conn.execute("""
+            INSERT INTO reseller_requests
+                (user_id, volume_gb, request_text, status, supply_model, bot_choice,
+                 wants_web_panel, wants_miniapp, tier_code, commission_percent)
+            SELECT r.user_id, 0, COALESCE(r.request_text, 'درخواست قدیمی منتقل‌شده'), 'pending_review',
+                   'commission', 'none', 0, 0, 'bronze', r.proposed_percent
+            FROM commission_reseller_requests r
+            WHERE r.status='pending'
+              AND NOT EXISTS (SELECT 1 FROM reseller_requests x
+                              WHERE x.user_id=r.user_id AND x.tier_code='bronze'
+                                AND x.status IN ('pending_review','awaiting_payment','awaiting_payment_review','awaiting_bot_info'))
+        """)
+        conn.execute("UPDATE commission_reseller_requests SET status='migrated', updated_at=CURRENT_TIMESTAMP WHERE status='pending'")
 
     def list_reseller_tiers(self, enabled_only: bool = False):
         query = "SELECT * FROM reseller_tiers"
@@ -7568,11 +7611,29 @@ class Database:
         with self._get_conn() as conn:
             conn.execute(f"UPDATE reseller_requests SET {', '.join(cols)} WHERE id=?", values)
 
-    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int):
-        self.set_reseller_request_status(
-            request_id, "awaiting_payment",
-            price_toman=price_toman, panel_server_id=panel_server_id, reviewed_by=admin_id,
-        )
+    def get_reseller_payment_methods(self, tier_code: str = None):
+        """درگاه‌های مجاز هزینه نمایندگی. مقدار خالی یعنی همه درگاه‌های فعال."""
+        key = f"reseller_payment_methods_{tier_code}" if tier_code else "reseller_payment_methods"
+        raw = self.get_setting(key, "")
+        if not raw:
+            return None
+        try:
+            value = json.loads(raw)
+            return value if isinstance(value, list) and value else None
+        except Exception:
+            return None
+
+    def set_reseller_payment_methods(self, tier_code: str, methods):
+        methods = list(dict.fromkeys(str(x) for x in (methods or []) if x))
+        self.set_setting(f"reseller_payment_methods_{tier_code}", json.dumps(methods, ensure_ascii=False))
+
+    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int, commission_percent: int = None):
+        fields = {
+            "price_toman": price_toman, "panel_server_id": panel_server_id, "reviewed_by": admin_id,
+        }
+        if commission_percent is not None:
+            fields["commission_percent"] = int(commission_percent)
+        self.set_reseller_request_status(request_id, "awaiting_payment", **fields)
 
     def reject_reseller_request(self, request_id: int, status: str, admin_id: int, reason: str = None):
         self.set_reseller_request_status(request_id, status, reviewed_by=admin_id, reject_reason=reason)
@@ -7583,30 +7644,59 @@ class Database:
         )
 
     def approve_reseller_request_payment(self, request_id: int, admin_id: int) -> bool:
-        """قفل خوش‌بینانه‌ی اتمیک، درست مثل claim_reseller_request برای مرحله‌ی اول.
-
-        رفع باگ: قبلاً این تابع بدون قید status یک UPDATE ساده انجام می‌داد و همه‌ی
-        صدازننده‌ها (بات اصلی، پنل وب، مینی‌اپ) قبل از آن فقط در پایتون
-        req["status"] != "awaiting_payment_review" را چک می‌کردند - یک چک-و-عمل
-        دومرحله‌ای بدون قفل. اگر دو ادمین (یا یک ادمین با دبل‌تپ روی موبایل قبل از
-        ادیت‌شدن پیام) هم‌زمان روی همین درخواست «تایید پرداخت» می‌زدند، هر دو از
-        همان چک پایتونی رد می‌شدند و مراحل بعدی (تخصیص اعتبار/موجودی، ساخت بات
-        نماینده) دوبار اجرا می‌شد - مثلاً اعتبار حجمی نماینده دوبرابر شارژ می‌شد.
-        حالا خودِ UPDATE با WHERE status='awaiting_payment_review' اتمیک است و
-        True فقط وقتی برمی‌گردد که همین فراخوانی واقعاً برنده‌ی این انتقال بوده؛
-        صدازننده باید با False از ادامه‌ی پردازش (اعطای اعتبار/ساخت بات) صرف‌نظر کند."""
+        """تایید اتمیک پرداخت؛ برای برنزی/نقره‌ای همان‌جا فعال می‌کند و برای
+        طلایی/VIP وارد مرحله اطلاعات بات می‌شود."""
         with self._get_conn() as conn:
+            req = conn.execute("SELECT * FROM reseller_requests WHERE id=?", (request_id,)).fetchone()
+            if not req or req["status"] != "awaiting_payment_review":
+                return False
+            tier = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (req["tier_code"],)).fetchone() if req["tier_code"] else None
+            simple = bool(tier and tier["model"] in ("commission", "discount"))
+            next_status = "completed" if simple else "awaiting_bot_info"
             cur = conn.execute(
-                "UPDATE reseller_requests SET status='awaiting_bot_info', reviewed_by=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_payment_review'",
-                (admin_id, request_id),
+                "UPDATE reseller_requests SET status=?, reviewed_by=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='awaiting_payment_review'",
+                (next_status, admin_id, request_id),
             )
-            won = cur.rowcount > 0
-        if won:
-            req = self.get_reseller_request(request_id)
-            if req and req["tier_code"]:
-                self.switch_agent_tier(req["user_id"], req["tier_code"])
-        return won
+            if cur.rowcount == 0:
+                return False
+        if req["tier_code"]:
+            self.switch_agent_tier(req["user_id"], req["tier_code"])
+        if simple:
+            if tier["model"] == "commission":
+                percent = int(req["commission_percent"] or tier["commission_min"] or 10)
+                self.enable_inline_reseller(req["user_id"], percent)
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+            else:
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+        return True
+
+    def complete_reseller_request_gateway_payment(self, request_id: int) -> bool:
+        """تکمیل اتمیک پرداخت خودکار درگاه. برای مدل‌های بدون بات فوراً فعال
+        می‌شود؛ برای مدل‌های بات‌دار فقط به مرحله دریافت توکن می‌رود."""
+        with self._get_conn() as conn:
+            req = conn.execute("SELECT * FROM reseller_requests WHERE id=?", (request_id,)).fetchone()
+            if not req or req["status"] != "awaiting_payment":
+                return False
+            tier = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (req["tier_code"],)).fetchone() if req["tier_code"] else None
+            simple = bool(tier and tier["model"] in ("commission", "discount"))
+            next_status = "completed" if simple else "awaiting_bot_info"
+            cur = conn.execute(
+                "UPDATE reseller_requests SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_payment'",
+                (next_status, request_id),
+            )
+            if cur.rowcount == 0:
+                return False
+        if req["tier_code"]:
+            self.switch_agent_tier(req["user_id"], req["tier_code"])
+        if simple:
+            if tier["model"] == "commission":
+                percent = int(req["commission_percent"] or tier["commission_min"] or 10)
+                self.enable_inline_reseller(req["user_id"], percent)
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+            else:
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+        return True
 
     def set_reseller_request_bot(self, request_id: int, token: str, username: str):
         self.set_reseller_request_status(

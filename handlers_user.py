@@ -4502,11 +4502,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await message.answer("✅ درخواست شما ثبت شد. بعد از تایید ادمین، نتیجه به شما اطلاع داده می‌شود.")
 
     async def _start_tier_request(message: Message, state: FSMContext, tier):
-        if tier["model"] == "commission":
-            await commission_reseller_request_start(message, state)
-        elif tier["model"] == "discount":
-            await _start_discount_tier_request(message, tier)
-        elif tier["model"] in ("fixed_product", "volume_credit"):
+        if tier["model"] in ("commission", "discount", "fixed_product", "volume_credit"):
             await reseller_request_start(message, state, tier)
         else:
             await message.answer("ثبت درخواست برای این سطح هنوز فعال نشده است.")
@@ -4578,22 +4574,43 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     def _senior_admin_ids():
         return [a["telegram_id"] for a in db.list_admins_with_roles() if a["role"] in ("owner", "admin")]
 
+    async def _reseller_payment_methods(tier_code):
+        allowed = await asyncio.to_thread(db.get_reseller_payment_methods, tier_code)
+        catalog = [x for x in (await asyncio.to_thread(db.get_payment_methods_catalog, True)) if x["key"] != "wallet"]
+        enabled = {x["key"]: x for x in catalog}
+        methods = [m for m in (allowed or [x["key"] for x in catalog]) if m in enabled]
+        return [m for m in methods if not enabled[m].get("min_amount") or enabled[m]["min_amount"] <= 10**18]
+
+    async def _send_reseller_payment_menu(target, req):
+        methods = await _reseller_payment_methods(req["tier_code"] if req["tier_code"] else None)
+        if not methods:
+            await target.answer("⚠️ هیچ روش پرداخت فعالی برای هزینه نمایندگی تنظیم نشده است. با مدیریت تماس بگیرید.")
+            return
+        tier = await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]) if req["tier_code"] else None
+        label = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
+        await target.answer(
+            f"💳 <b>پرداخت هزینه {escape_html(label)}</b>\n\n"
+            f"💰 مبلغ: <b>{req['price_toman']:,} تومان</b>\n\n"
+            "روش پرداخت را انتخاب کنید:",
+            reply_markup=kb.reseller_payment_choice_kb(db, methods), parse_mode="HTML",
+        )
+
     async def reseller_request_start(message: Message, state: FSMContext, tier=None):
         if not is_main_bot:
             return
         if (await asyncio.to_thread(db.get_setting, "reseller_request_enabled", "1")) != "1":
             await message.answer("در حال حاضر امکان درخواست نمایندگی غیرفعال است.")
             return
-        if (await asyncio.to_thread(db.is_reseller, message.from_user.id)):
-            current_tier = await asyncio.to_thread(db.get_agent_tier, message.from_user.id)
+        current_tier = await asyncio.to_thread(db.get_agent_tier, message.from_user.id)
+        if current_tier:
             if tier is None or current_tier == tier["code"]:
-                await message.answer("شما همین الان هم نماینده هستید.")
+                await message.answer("شما همین الان هم در این سطح نمایندگی فعال هستید.")
                 return
         if (await asyncio.to_thread(db.get_open_reseller_request, message.from_user.id)):
             await message.answer("شما همین الان یک درخواست نمایندگی باز دارید؛ منتظر بررسی آن بمانید.")
             return
         await state.update_data(resreq_tier=tier["code"] if tier else None)
-        if tier is not None and tier["model"] == "fixed_product":
+        if tier is not None and tier["model"] in ("fixed_product", "commission", "discount"):
             await state.update_data(resreq_volume=0, resreq_text=_RESREQ_DEFAULT_TEXT)
             await _resreq_after_basics(message, state)
             return
@@ -4909,16 +4926,97 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not req or req["user_id"] != call.from_user.id or req["status"] != "awaiting_payment":
             await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
             return
-        card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
-        card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
-        text = (
-            f"مبلغ {req['price_toman']:,} تومان را به شماره کارت زیر واریز کرده و سپس عکس رسید را ارسال کنید:\n\n"
-            f"💳 شماره کارت: `{card_number}`\n"
-            f"👤 به نام: {escape_md(card_holder)}\n"
-        )
-        sent = await call.message.answer(text, parse_mode="Markdown")
-        await _schedule_card_msg_autodelete(sent.chat.id, sent.message_id)
         await call.answer()
+        await _send_reseller_payment_menu(call.message, req)
+
+    @router.callback_query(F.data == "resreq_cancel_payment")
+    async def reseller_request_cancel_payment(call: CallbackQuery):
+        await call.answer("درخواست همچنان منتظر پرداخت شماست.")
+
+    @router.callback_query(F.data.startswith("respay:"))
+    async def reseller_request_choose_payment(call: CallbackQuery, state: FSMContext):
+        method = call.data.split(":", 1)[1]
+        req = await asyncio.to_thread(db.get_open_reseller_request, call.from_user.id)
+        if not req or req["status"] != "awaiting_payment":
+            await call.answer("این درخواست دیگر در مرحله پرداخت نیست.", show_alert=True)
+            return
+        allowed = await asyncio.to_thread(db.get_reseller_payment_methods, req["tier_code"])
+        catalog = [x for x in (await asyncio.to_thread(db.get_payment_methods_catalog, True)) if x["key"] != "wallet"]
+        enabled = {x["key"]: x for x in catalog}
+        if allowed is not None and method not in allowed:
+            await call.answer("این روش برای این سطح مجاز نیست.", show_alert=True); return
+        item = enabled.get(method)
+        if not item:
+            await call.answer("این درگاه در دسترس نیست.", show_alert=True); return
+        if item.get("min_amount") and int(req["price_toman"] or 0) < int(item["min_amount"]):
+            await call.answer("مبلغ این درخواست از حداقل مبلغ درگاه کمتر است.", show_alert=True); return
+        await asyncio.to_thread(db.set_reseller_request_status, req["id"], "awaiting_payment", payment_method=method)
+        amount = int(req["price_toman"] or 0)
+        try:
+            tenant_id = await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", "")
+            label = f"هزینه نمایندگی #{req['id']}"
+            if method == "card":
+                card_number = await asyncio.to_thread(db.get_setting, "card_number")
+                card_holder = await asyncio.to_thread(db.get_setting, "card_holder")
+                text = f"💳 مبلغ {amount:,} تومان را واریز کنید و سپس عکس/فایل رسید را همین‌جا ارسال کنید:\n\n💳 شماره کارت: `{card_number}`\n👤 به نام: {escape_md(card_holder)}"
+                await call.message.answer(text, parse_mode="Markdown")
+            elif method == "card_auto":
+                inv = card_to_card_payment.create_invoice(db, "reseller_request", req["id"], call.from_user.id, amount)
+                await call.message.answer(
+                    f"💳 مبلغ دقیق برای واریز: `{inv['amount_toman']:,}` تومان\n"
+                    f"💳 کارت: `{inv['card_number']}`\n👤 به نام: {escape_md(inv['card_holder'] or '')}\n\n"
+                    "بعد از واریز، پرداخت به‌صورت خودکار بررسی می‌شود.", parse_mode="Markdown")
+            elif method == "abangateway":
+                inv = await abangateway_payment.create_invoice_for(db, tenant_id, call.from_user.id, "reseller_request", req["id"], amount, label)
+                await call.message.answer("💳 فاکتور آبان‌گیت‌وی ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["payment_url"])]]))
+            elif method == "blupal":
+                inv = await blupal_payment.create_invoice_for(db, tenant_id, call.from_user.id, "reseller_request", req["id"], amount, label)
+                await call.message.answer("💳 فاکتور بلوپال ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["payment_url"])]]))
+            elif method == "noapay":
+                inv = await noapay_payment.create_invoice_for(db, tenant_id, call.from_user.id, "reseller_request", req["id"], amount, label)
+                await call.message.answer("⭐ فاکتور NoapayBot ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["payment_url"])]]))
+            elif method == "crypto":
+                inv = await crypto_payment.create_invoice_for(db, tenant_id, call.from_user.id, "reseller_request", req["id"], amount, label)
+                await call.message.answer("🪙 فاکتور کریپتو ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["invoice_url"])]]))
+            elif method.startswith("custom:"):
+                key = method.split(":", 1)[1]
+                if custom_gateway_payment.gateway_requires_phone(db, key):
+                    await state.update_data(resreq_payment_id=req["id"], resreq_payment_method=method)
+                    await state.set_state(ResellerRequestFlow.waiting_payment_phone)
+                    await call.message.answer("📱 این درگاه برای ساخت فاکتور شماره موبایل می‌خواهد. شماره موبایل را ارسال کنید:")
+                    return
+                inv = await custom_gateway_payment.create_invoice_for(db, tenant_id, call.from_user.id, key, "reseller_request", req["id"], amount, label)
+                await call.message.answer("💠 فاکتور درگاه سفارشی ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["invoice_url"])]]))
+            else:
+                raise ValueError("روش پرداخت پشتیبانی نمی‌شود")
+            await call.answer("روش پرداخت انتخاب شد.")
+        except Exception as e:
+            logging.getLogger("handlers_user").exception("reseller payment invoice failed")
+            await call.answer(str(e)[:180], show_alert=True)
+
+    @router.message(ResellerRequestFlow.waiting_payment_phone)
+    async def reseller_request_payment_phone(message: Message, state: FSMContext):
+        phone = (message.text or "").strip()
+        if len(phone) < 7:
+            await message.answer("لطفاً شماره موبایل معتبر ارسال کنید.")
+            return
+        data = await state.get_data()
+        request_id = data.get("resreq_payment_id")
+        req = await asyncio.to_thread(db.get_reseller_request, request_id) if request_id else None
+        method = data.get("resreq_payment_method") or ""
+        if not req or req["user_id"] != message.from_user.id or req["status"] != "awaiting_payment" or not method.startswith("custom:"):
+            await state.clear(); await message.answer("این درخواست دیگر در مرحله پرداخت نیست."); return
+        key = method.split(":", 1)[1]
+        try:
+            tenant_id = await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", "")
+            tier = await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]) if req["tier_code"] else None
+            label = f"هزینه نمایندگی #{req['id']}"
+            inv = await custom_gateway_payment.create_invoice_for(db, tenant_id, message.from_user.id, key, "reseller_request", req["id"], int(req["price_toman"]), label, customer_phone=phone)
+            await state.clear()
+            await message.answer("💠 فاکتور درگاه سفارشی ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["invoice_url"])]]))
+        except Exception as e:
+            logging.getLogger("handlers_user").exception("reseller custom gateway phone invoice failed")
+            await message.answer(str(e)[:180])
 
     @router.callback_query(F.data.startswith("resreq_cancel:"))
     async def reseller_request_cancel(call: CallbackQuery):
@@ -4950,7 +5048,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         log = logging.getLogger("handlers_user")
 
         req = (await asyncio.to_thread(db.get_open_reseller_request, message.from_user.id))
-        if req and req["status"] == "awaiting_payment":
+        if req and req["status"] == "awaiting_payment" and (req["payment_method"] or "card") == "card":
             file_id, receipt_type = _receipt_payload(message)
             if not file_id:
                 return
@@ -5074,6 +5172,18 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
         )
         await _send_inline_main_menu(message, message.from_user.id)
+
+    @router.callback_query(F.data.startswith("resreq_continue:"))
+    async def reseller_request_continue(call: CallbackQuery, state: FSMContext):
+        request_id = int(call.data.split(":", 1)[1])
+        req = await asyncio.to_thread(db.get_reseller_request, request_id)
+        if not req or req["user_id"] != call.from_user.id or req["status"] != "awaiting_bot_info":
+            await call.answer("این مرحله دیگر معتبر نیست.", show_alert=True)
+            return
+        await state.set_state(ResellerRequestFlow.waiting_bot_token)
+        await state.update_data(resreq_request_id=request_id)
+        await call.answer()
+        await call.message.answer("🤖 توکن بات نمایندگی خودتان را از @BotFather ارسال کنید:")
 
     @router.message(ResellerRequestFlow.waiting_bot_token)
     async def reseller_request_bot_token(message: Message, state: FSMContext):
