@@ -16,7 +16,6 @@
 REPO_URL="https://github.com/mehdirafatpanah/Shopvpn.git"
 INSTALL_DIR="$HOME/v2ray_bot"
 SERVICE_NAME="v2raybot"
-BRAND_NAME="SHOP VPN"
 GITHUB_OWNER="mehdirafatpanah"
 GITHUB_REPO="Shopvpn"
 GITHUB_BRANCH="main"
@@ -109,6 +108,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
+UI_WIDTH=60
 
 # ---------------------------------------------------------------------------
 # Language / زبان
@@ -137,26 +137,39 @@ declare -A MSG_FA
 # Status / وضعیت
 MSG_EN[not_installed]="Not installed"
 MSG_FA[not_installed]="نصب نشده"
-MSG_EN[system_running]="Engine Ready ✅ (Bot is running)"
-MSG_FA[system_running]="آماده به کار ✅ (بات در حال اجراست)"
-MSG_EN[system_stopped]="Stopped ⛔️"
-MSG_FA[system_stopped]="متوقف ⛔️"
-MSG_EN[service_running]="Running ✅"
-MSG_FA[service_running]="در حال اجراست ✅"
-MSG_EN[service_stopped]="Stopped ⛔️"
-MSG_FA[service_stopped]="متوقف ⛔️"
+MSG_EN[service_running]="Running"
+MSG_FA[service_running]="در حال اجرا"
+MSG_EN[service_stopped]="Stopped"
+MSG_FA[service_stopped]="متوقف"
+MSG_EN[lbl_bot]="Bot"
+MSG_FA[lbl_bot]="بات"
+MSG_EN[lbl_miniapp]="Mini App"
+MSG_FA[lbl_miniapp]="مینی‌اپ"
+MSG_EN[lbl_panel]="Admin Panel"
+MSG_FA[lbl_panel]="پنل مدیریت"
+MSG_EN[subtitle]="BOT MANAGEMENT ENGINE"
+MSG_FA[subtitle]="موتور مدیریت بات"
+
+MSG_EN[sec_setup]="BOT SETUP"
+MSG_FA[sec_setup]="نصب و به‌روزرسانی"
+MSG_EN[sec_service]="SERVICE CONTROL"
+MSG_FA[sec_service]="کنترل سرویس"
+MSG_EN[sec_store]="STORE & CONFIG"
+MSG_FA[sec_store]="فروشگاه و تنظیمات"
+MSG_EN[sec_miniapp]="MINI APP"
+MSG_FA[sec_miniapp]="مینی‌اپ"
+MSG_EN[sec_panel]="ADMIN PANEL"
+MSG_FA[sec_panel]="پنل مدیریت وب"
+MSG_EN[sec_domains]="DOMAINS & PROXY"
+MSG_FA[sec_domains]="دامنه و پروکسی"
+MSG_EN[sec_advanced]="ADVANCED"
+MSG_FA[sec_advanced]="پیشرفته"
 MSG_EN[pause_prompt]="Press Enter to return to the menu..."
 MSG_FA[pause_prompt]="برای بازگشت به منو، Enter را بزن..."
 
-# ensure_figlet
-MSG_EN[preparing_font]="🔤 Preparing display font (first time only, a few seconds)..."
-MSG_FA[preparing_font]="🔤 در حال آماده‌سازی فونت نمایش (فقط بار اول، چند ثانیه طول می‌کشد)..."
-MSG_EN[figlet_failed]="⚠️ figlet installation failed, showing a simple banner instead."
-MSG_FA[figlet_failed]="⚠️ نصب figlet انجام نشد، بنر ساده نمایش داده می‌شود."
-
 # install_bot
-MSG_EN[installing_prereqs]="📦 Checking and installing prerequisites (git, python3, pip, venv, figlet)..."
-MSG_FA[installing_prereqs]="📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv, figlet)..."
+MSG_EN[installing_prereqs]="📦 Checking and installing prerequisites (git, python3, pip, venv)..."
+MSG_FA[installing_prereqs]="📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv)..."
 MSG_EN[already_installed_pulling]="⚠️ Project is already installed. Fetching the latest version..."
 MSG_FA[already_installed_pulling]="⚠️ پروژه از قبل نصب شده است. در حال دریافت آخرین نسخه..."
 MSG_EN[cloning_project]="📥 Cloning the project from GitHub..."
@@ -460,24 +473,24 @@ MSG_EN[menu_11]="Remove Mini App"
 MSG_FA[menu_11]="حذف مینی‌اپ"
 MSG_EN[menu_12]="Update Mini App"
 MSG_FA[menu_12]="آپدیت مینی‌اپ"
-MSG_EN[menu_13]="Setup standalone admin panel (auto: domain + SSL + service)"
-MSG_FA[menu_13]="نصب/تنظیم پنل مدیریت وب مستقل (خودکار: دامنه + SSL + سرویس)"
+MSG_EN[menu_13]="Setup admin panel (domain + SSL + service)"
+MSG_FA[menu_13]="نصب/تنظیم پنل مدیریت وب (دامنه + SSL + سرویس)"
 MSG_EN[menu_14]="Remove admin panel"
 MSG_FA[menu_14]="حذف پنل مدیریت وب"
 MSG_EN[menu_15]="Update admin panel"
 MSG_FA[menu_15]="آپدیت پنل مدیریت وب"
-MSG_EN[menu_16]="Auto-generate VAPID key (admin panel push notifications)"
-MSG_FA[menu_16]="ساخت خودکار کلید VAPID (اعلان Push پنل مدیریت)"
+MSG_EN[menu_16]="Generate VAPID keys (admin panel push)"
+MSG_FA[menu_16]="ساخت کلید VAPID (اعلان Push پنل)"
 MSG_EN[menu_17]="Add domain proxy for VPN panel (share port 443)"
 MSG_FA[menu_17]="افزودن دامنه پروکسی برای پنل VPN (اشتراک پورت 443)"
-MSG_EN[menu_18]="List panel/config domain proxies (info on existing ones)"
-MSG_FA[menu_18]="نمایش لیست پروکسی‌های دامنه پنل/کانفیگ (اطلاعات کانفیگ‌های موجود)"
+MSG_EN[menu_18]="List panel/config domain proxies"
+MSG_FA[menu_18]="نمایش لیست پروکسی‌های دامنه پنل/کانفیگ"
 MSG_EN[menu_19]="Remove VPN panel domain proxy"
 MSG_FA[menu_19]="حذف دامنه پروکسی پنل VPN"
 MSG_EN[menu_20]="Mini App / Admin Panel domains (view + delete)"
 MSG_FA[menu_20]="دامنه‌های مینی‌اپ / پنل مدیریت (نمایش + حذف)"
-MSG_EN[menu_21]="Restore backup from another server (new server migration wizard)"
-MSG_FA[menu_21]="بازیابی بکاپ از سرور دیگر (ویزارد انتقال به سرور جدید)"
+MSG_EN[menu_21]="Restore backup (new server migration wizard)"
+MSG_FA[menu_21]="بازیابی بکاپ (ویزارد انتقال به سرور جدید)"
 MSG_EN[menu_22]="Bot update mode (Polling / Webhook)"
 MSG_FA[menu_22]="حالت دریافت آپدیت بات (Polling / Webhook)"
 MSG_EN[menu_23]="Change admin panel username/password"
@@ -486,8 +499,8 @@ MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_EN[menu_0]="Exit"
 MSG_FA[menu_0]="خروج"
-MSG_EN[enter_choice_prompt]="Enter choice [0-22, L]: "
-MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-22, L]: "
+MSG_EN[enter_choice_prompt]="Enter choice [0-23, L]: "
+MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-23, L]: "
 MSG_EN[invalid_choice]="Invalid option."
 MSG_FA[invalid_choice]="گزینه نامعتبر است."
 MSG_EN[goodbye]="Goodbye 👋"
@@ -513,63 +526,90 @@ t() {
 # ---------------------------------------------------------------------------
 # Title bar / banner / نوار عنوان / بنر
 # ---------------------------------------------------------------------------
-ensure_figlet() {
-    if ! command -v figlet &> /dev/null; then
-        echo -e "${CYAN}$(t preparing_font)${RESET}"
-        sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
-        timeout 60 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq figlet
-        if ! command -v figlet &> /dev/null; then
-            echo -e "${YELLOW}$(t figlet_failed)${RESET}"
-            sleep 1
-        fi
-    fi
+draw_rule() {
+    local pad
+    printf -v pad '%*s' "$UI_WIDTH" ''
+    echo -e "  ${DIM}${pad// /─}${RESET}"
+}
+
+print_logo() {
+    local -a rows=(
+        '███████╗██╗  ██╗ ██████╗ ██████╗ ██╗   ██╗██████╗ ███╗   ██╗'
+        '██╔════╝██║  ██║██╔═══██╗██╔══██╗██║   ██║██╔══██╗████╗  ██║'
+        '███████╗███████║██║   ██║██████╔╝██║   ██║██████╔╝██╔██╗ ██║'
+        '╚════██║██╔══██║██║   ██║██╔═══╝ ╚██╗ ██╔╝██╔═══╝ ██║╚██╗██║'
+        '███████║██║  ██║╚██████╔╝██║      ╚████╔╝ ██║     ██║ ╚████║'
+        '╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝       ╚═══╝  ╚═╝     ╚═╝  ╚═══╝'
+    )
+    local -a shades=(51 45 39 33 63 99)
+    local i
+    for i in "${!rows[@]}"; do
+        printf '  \033[1;38;5;%sm%s\033[0m\n' "${shades[$i]}" "${rows[$i]}"
+    done
 }
 
 print_banner() {
+    local sub pad
     clear
-    echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════╗${RESET}"
-    if command -v figlet &> /dev/null; then
-        echo -e "${CYAN}${BOLD}$(figlet -f standard "$BRAND_NAME" 2>/dev/null)${RESET}"
-    else
-        echo -e "${CYAN}${BOLD}                     $BRAND_NAME${RESET}"
-    fi
-    echo -e "${YELLOW}                 B O T   M A N A G E M E N T   E N G I N E   $(get_version)${RESET}"
-    echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════╝${RESET}"
     echo ""
+    print_logo
+    draw_rule
+    sub="$(t subtitle)  ·  $(get_version)"
+    printf -v pad '%*s' $(( (UI_WIDTH - ${#sub}) / 2 + 2 )) ''
+    echo -e "${pad}${YELLOW}${BOLD}${sub}${RESET}"
+    draw_rule
+}
+
+status_row() {
+    local label dot color text pad
+    label="$(t "$1")"
+    case "$2" in
+        running) dot="●"; color="${GREEN}${BOLD}"; text="$(t service_running)" ;;
+        stopped) dot="●"; color="${RED}${BOLD}"; text="$(t service_stopped)" ;;
+        *)       dot="○"; color="${YELLOW}"; text="$(t not_installed)" ;;
+    esac
+    printf -v pad '%*s' $(( ${#label} < 14 ? 14 - ${#label} : 0 )) ''
+    printf '  %b%s%s%b %b%s %s%b\n' "$DIM" "$label" "$pad" "$RESET" "$color" "$dot" "$text" "$RESET"
+}
+
+service_state() {
+    if systemctl is-active --quiet "$1" 2>/dev/null; then
+        echo running
+    else
+        echo stopped
+    fi
+}
+
+unit_state() {
+    if systemctl list-units --type=service --all 2>/dev/null | grep -q "$1.service"; then
+        service_state "$1"
+    else
+        echo missing
+    fi
 }
 
 print_status_line() {
-    if [ ! -d "$INSTALL_DIR" ]; then
-        echo -e "System Status: ${YELLOW}$(t not_installed)${RESET}"
-    elif systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        echo -e "System Status: ${GREEN}${BOLD}$(t system_running)${RESET}"
-    else
-        echo -e "System Status: ${RED}${BOLD}$(t system_stopped)${RESET}"
-    fi
+    local bot_state="missing"
+    [ -d "$INSTALL_DIR" ] && bot_state="$(service_state "$SERVICE_NAME")"
+    echo ""
+    status_row lbl_bot "$bot_state"
+    status_row lbl_miniapp "$(unit_state "${SERVICE_NAME}-miniapp")"
+    status_row lbl_panel "$(unit_state "${SERVICE_NAME}-adminpanel")"
+    echo ""
+}
 
-    MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
-    if systemctl list-units --type=service --all 2>/dev/null | grep -q "${MINIAPP_SERVICE}.service"; then
-        if systemctl is-active --quiet "$MINIAPP_SERVICE" 2>/dev/null; then
-            echo -e "Mini App Status: ${GREEN}${BOLD}$(t service_running)${RESET}"
-        else
-            echo -e "Mini App Status: ${RED}${BOLD}$(t service_stopped)${RESET}"
-        fi
-    else
-        echo -e "Mini App Status: ${YELLOW}$(t not_installed)${RESET}"
-    fi
+menu_section() {
+    local title fill pad
+    title="$(t "$1")"
+    fill=$(( UI_WIDTH - ${#title} - 3 ))
+    [ "$fill" -lt 0 ] && fill=0
+    printf -v pad '%*s' "$fill" ''
+    echo -e "  ${YELLOW}${BOLD}▌ ${title}${RESET} ${DIM}${pad// /─}${RESET}"
+}
 
-    PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
-    if systemctl list-units --type=service --all 2>/dev/null | grep -q "${PANEL_SERVICE}.service"; then
-        if systemctl is-active --quiet "$PANEL_SERVICE" 2>/dev/null; then
-            echo -e "Admin Panel Status: ${GREEN}${BOLD}$(t service_running)${RESET}"
-        else
-            echo -e "Admin Panel Status: ${RED}${BOLD}$(t service_stopped)${RESET}"
-        fi
-    else
-        echo -e "Admin Panel Status: ${YELLOW}$(t not_installed)${RESET}"
-    fi
-
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
+menu_item() {
+    local num="$1" key="$2" color="${3:-$RESET}"
+    printf '   %b[%2s]%b  %b%s%b\n' "${CYAN}${BOLD}" "$num" "$RESET" "$color" "$(t "$key")" "$RESET"
 }
 
 pause() {
@@ -583,7 +623,7 @@ pause() {
 install_bot() {
     echo -e "${CYAN}$(t installing_prereqs)${RESET}"
     sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
-    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv figlet > /dev/null
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv > /dev/null
 
     if [ -f "$INSTALL_DIR/main.py" ]; then
         echo -e "${YELLOW}$(t already_installed_pulling)${RESET}"
@@ -1744,47 +1784,45 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 # Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
-ensure_figlet
-
 while true; do
     print_banner
     print_status_line
+    menu_section sec_setup
+    menu_item 1 menu_1
+    menu_item 2 menu_2
+    menu_item 3 menu_3 "$RED"
+    menu_section sec_service
+    menu_item 4 menu_4
+    menu_item 5 menu_5
+    menu_item 6 menu_6
+    menu_item 7 menu_7
+    menu_section sec_store
+    menu_item 8 menu_8
+    menu_item 9 menu_9
+    menu_section sec_miniapp
+    menu_item 10 menu_10
+    menu_item 11 menu_11 "$RED"
+    menu_item 12 menu_12
+    menu_section sec_panel
+    menu_item 13 menu_13
+    menu_item 14 menu_14 "$RED"
+    menu_item 15 menu_15
+    menu_item 16 menu_16
+    menu_section sec_domains
+    menu_item 17 menu_17
+    menu_item 18 menu_18
+    menu_item 19 menu_19 "$RED"
+    menu_item 20 menu_20
+    menu_section sec_advanced
+    menu_item 21 menu_21
+    menu_item 22 menu_22
+    menu_item 23 menu_23
+    draw_rule
+    menu_item L menu_lang "$MAGENTA"
+    menu_item 0 menu_0 "$DIM"
+    draw_rule
     echo ""
-    echo -e "${BLUE}[1]${RESET} » ${GREEN}$(t menu_1)${RESET}"
-    echo -e "${BLUE}[2]${RESET} » ${GREEN}$(t menu_2)${RESET}"
-    echo -e "${BLUE}[3]${RESET} » ${GREEN}$(t menu_3)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${BLUE}[4]${RESET} » ${GREEN}$(t menu_4)${RESET}"
-    echo -e "${BLUE}[5]${RESET} » ${GREEN}$(t menu_5)${RESET}"
-    echo -e "${BLUE}[6]${RESET} » ${GREEN}$(t menu_6)${RESET}"
-    echo -e "${BLUE}[7]${RESET} » ${GREEN}$(t menu_7)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[8]${RESET} » ${GREEN}$(t menu_8)${RESET}"
-    echo -e "${YELLOW}[9]${RESET} » ${GREEN}$(t menu_9)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[10]${RESET} » ${GREEN}$(t menu_10)${RESET}"
-    echo -e "${YELLOW}[11]${RESET} » ${GREEN}$(t menu_11)${RESET}"
-    echo -e "${YELLOW}[12]${RESET} » ${GREEN}$(t menu_12)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[13]${RESET} » ${GREEN}$(t menu_13)${RESET}"
-    echo -e "${YELLOW}[14]${RESET} » ${GREEN}$(t menu_14)${RESET}"
-    echo -e "${YELLOW}[15]${RESET} » ${GREEN}$(t menu_15)${RESET}"
-    echo -e "${YELLOW}[16]${RESET} » ${GREEN}$(t menu_16)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[17]${RESET} » ${GREEN}$(t menu_17)${RESET}"
-    echo -e "${YELLOW}[18]${RESET} » ${GREEN}$(t menu_18)${RESET}"
-    echo -e "${YELLOW}[19]${RESET} » ${GREEN}$(t menu_19)${RESET}"
-    echo -e "${YELLOW}[20]${RESET} » ${GREEN}$(t menu_20)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${YELLOW}[21]${RESET} » ${GREEN}$(t menu_21)${RESET}"
-    echo -e "${YELLOW}[22]${RESET} » ${GREEN}$(t menu_22)${RESET}"
-    echo -e "${YELLOW}[23]${RESET} » ${GREEN}$(t menu_23)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${MAGENTA}[L]${RESET} » ${GREEN}$(t menu_lang)${RESET}"
-    echo -e "${RED}[0]${RESET} » ${GREEN}$(t menu_0)${RESET}"
-    echo -e "${CYAN}──────────────────────────────────────────────────────────────${RESET}"
-    echo ""
-    read -rp "$(echo -e ${MAGENTA}${BOLD}"$(t enter_choice_prompt)"${RESET})" choice
+    read -rp "$(echo -e ${MAGENTA}${BOLD}"  $(t enter_choice_prompt)"${RESET})" choice
 
     case $choice in
         1) install_bot; pause ;;
