@@ -42,6 +42,7 @@ import ai_support
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
+    SINGLE_INBOUND_PANEL_TYPES, TOKEN_ONLY_PANEL_TYPES, SECRET_PROMPTS, TEMPLATE_PROMPTS, TEMPLATE_VALUE_LABELS,
 )
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
@@ -228,7 +229,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if server["xui_sub_base_url"]:
                 return "✅ آدرس Subscription تنظیم شده"
             return "⚠️ آدرس Subscription هنوز تنظیم نشده"
-        return f"قالب از کاربر «{server['template_username']}»" if server["template_username"] else "⚠️ قالب هنوز تنظیم نشده"
+        if server["template_username"]:
+            label = TEMPLATE_VALUE_LABELS.get(server["panel_type"])
+            if label:
+                return f"{label}: «{server['template_username']}»"
+            return f"قالب از کاربر «{server['template_username']}»"
+        return "⚠️ قالب هنوز تنظیم نشده"
 
     def senior_admin_only(user_id: int) -> bool:
         """فقط مالک یا مدیر کامل؛ ادمین میانی و پشتیبان اجازه‌ی این بخش‌های حساس
@@ -4312,6 +4318,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 "(نسخه‌های جدید 3X-UI لاگین با یوزر/پس را برای بات‌ها قبول نمی‌کنند و فقط با API Token کار می‌کنند.)"
             )
             return
+        token_username = TOKEN_ONLY_PANEL_TYPES.get(data.get("panel_type"))
+        if token_username:
+            await state.update_data(username=token_username)
+            await state.set_state(AdminAddPanelServer.waiting_password)
+            await message.answer(SECRET_PROMPTS[data["panel_type"]])
+            return
         await state.set_state(AdminAddPanelServer.waiting_username)
         if data.get("panel_type") == "hiddify":
             await message.answer(
@@ -4384,7 +4396,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         # پنل‌های خانواده‌ی PasarGuard/Marzban/Marzneshin: قالب از کاربر نمونه
         await state.set_state(AdminAddPanelServer.waiting_template_user)
         await message.answer(
-            "یک نام کاربری که از قبل روی این پنل وجود دارد بفرست.\n"
+            TEMPLATE_PROMPTS.get(data["panel_type"])
+            or "یک نام کاربری که از قبل روی این پنل وجود دارد بفرست.\n"
             "تنظیمات پروتکل/گروه (یا سرویس) همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی "
             "کانفیگ‌های شخصی جدید استفاده می‌شود."
         )
@@ -4411,6 +4424,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         selected = data.get("selected_inbound_ids") or []
         if not selected:
             await call.answer("حداقل یک inbound را تیک بزن.", show_alert=True)
+            return
+        if data.get("panel_type") in SINGLE_INBOUND_PANEL_TYPES and len(selected) > 1:
+            await call.answer("برای این نوع پنل فقط یک inbound قابل انتخاب است.", show_alert=True)
             return
         await state.update_data(inbound_ids=selected)
         await state.set_state(AdminAddPanelServer.waiting_sub_base_url)
@@ -4508,12 +4524,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         server_id = callback_id(call.data, "adm_panel_server_template")
-        if not (await asyncio.to_thread(db.get_panel_server, server_id)):
+        server = (await asyncio.to_thread(db.get_panel_server, server_id))
+        if not server:
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
         await state.update_data(panel_server_id=server_id)
         await state.set_state(AdminSetPanelTemplate.waiting_username)
-        await safe_edit(call, "نام کاربری نمونه‌ی جدید (که روی پنل موجود است) را بفرست:", reply_markup=kb.admin_back_kb(f"adm_panel_server_view:{server_id}"))
+        await safe_edit(
+            call,
+            TEMPLATE_PROMPTS.get(server["panel_type"]) or "نام کاربری نمونه‌ی جدید (که روی پنل موجود است) را بفرست:",
+            reply_markup=kb.admin_back_kb(f"adm_panel_server_view:{server_id}"),
+        )
         await call.answer()
 
     @router.message(AdminSetPanelTemplate.waiting_username)

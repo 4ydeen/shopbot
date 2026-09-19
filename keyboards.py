@@ -17,7 +17,7 @@ from aiogram.types import (
 )
 
 from config import MINIAPP_URL
-from panel_providers import PANEL_TYPE_LABELS
+from panel_providers import PANEL_TYPE_LABELS, INBOUND_SELECT_PANEL_TYPES
 from database import MENU_BUTTON_META, ACCOUNT_TOGGLE_KEYS
 
 
@@ -2669,6 +2669,12 @@ def panel_type_select_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Marzban", callback_data="adm_panel_type:marzban")],
         [InlineKeyboardButton(text="Marzneshin", callback_data="adm_panel_type:marzneshin")],
         [InlineKeyboardButton(text="Hiddify", callback_data="adm_panel_type:hiddify")],
+        [InlineKeyboardButton(text="Alireza X-UI", callback_data="adm_panel_type:alireza")],
+        [InlineKeyboardButton(text="Rebecca", callback_data="adm_panel_type:rebecca")],
+        [InlineKeyboardButton(text="S-UI", callback_data="adm_panel_type:sui")],
+        [InlineKeyboardButton(text="WGDashboard", callback_data="adm_panel_type:wgdashboard")],
+        [InlineKeyboardButton(text="MikroTik", callback_data="adm_panel_type:mikrotik")],
+        [InlineKeyboardButton(text="IBSng", callback_data="adm_panel_type:ibsng")],
         [InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_flow")],
     ])
 
@@ -2711,7 +2717,7 @@ def panel_server_view_kb(server) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔌 تست اتصال", callback_data=f"adm_panel_server_test:{server['id']}")],
         [InlineKeyboardButton(text="🧩 تغییر کاربر نمونه (قالب)", callback_data=f"adm_panel_server_template:{server['id']}")],
     ]
-    if server["panel_type"] == "3xui":
+    if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES:
         rows.append([InlineKeyboardButton(
             text="🔗 تغییر لینک Subscription", callback_data=f"adm_panel_server_suburl:{server['id']}",
         )])
