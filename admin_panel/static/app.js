@@ -360,6 +360,7 @@ const NAV = [
 
   // شبکه و همکاران
   { key: 'resellers', label: 'نمایندگی‌ها', icon: 'resellers', role: 'resellers', section: 'شبکه و همکاران' },
+  { key: 'reseller_tiers', label: 'سطوح نمایندگی', icon: 'resellers', role: 'resellers', section: 'شبکه و همکاران' },
   { key: 'panels', label: 'پنل‌های VPN', icon: 'panels', role: 'panels', section: 'شبکه و همکاران' },
 
   // تنظیمات و سیستم — نگهداری، دسترسی و پیکربندی
@@ -834,6 +835,7 @@ async function renderPage(tab) {
       case 'support': return await renderSupport();
       case 'broadcast': return await renderBroadcast();
       case 'resellers': return await renderResellers();
+      case 'reseller_tiers': return await renderResellerTiers();
       case 'panels': return await renderPanels();
       case 'system': return await renderSystem();
       case 'settings': return await renderSettings();
@@ -3042,6 +3044,45 @@ async function openProductPaymentMethodsModal(product) {
   });
 }
 
+// روش‌های پرداخت مجاز برای «شارژ کیف پول» - دقیقاً معادل
+// openProductPaymentMethodsModal اما مستقل از محصول (سراسری، فقط برای
+// فرایند شارژ کیف پول)؛ چون هر دو روی database.py (wallet_topup_allows_payment_method)
+// اعمال می‌شوند، بات و مینی‌اپ هر دو با همین تنظیم رفتار می‌کنند.
+async function openWalletPaymentMethodsModal() {
+  let methods, current;
+  try {
+    [methods, current] = await Promise.all([
+      apiGet('/payment-methods'),
+      apiGet('/wallet/payment-methods'),
+    ]);
+  } catch (e) { return handleErr(e); }
+  const allowed = current.allowed; // null/[] یعنی «همه مجازند»
+  const isAllowed = (key) => !allowed || !allowed.length || allowed.includes(key);
+  openModal('👛 روش‌های پرداخت مجاز: شارژ کیف پول', `
+    <p class="card-sub">اگر هیچ‌کدام تیک نخورَد یا همه تیک بخورند، یعنی شارژ کیف پول با همه‌ی
+      روش‌های پرداخت فعال ممکن است (بدون محدودیت). این تنظیم مستقل از محدودیت روش پرداخت هر محصول است.</p>
+    <div class="form-grid">
+      ${methods.map(m => `
+        <label class="field field-row">
+          <span>${esc(m.label)}${!m.enabled ? ' (غیرفعال)' : ''}${m.min_amount ? ` — حداقل ${fmt(m.min_amount)} تومان` : ''}</span>
+          <input type="checkbox" data-wpm="${esc(m.key)}" ${isAllowed(m.key) ? 'checked' : ''}>
+        </label>`).join('') || '<div class="card-sub">هیچ روش پرداختی تعریف نشده.</div>'}
+    </div>
+    <button class="btn btn-primary" id="wpm-save" style="margin-top:12px">ذخیره</button>
+  `, (b, close) => {
+    $('#wpm-save', b).addEventListener('click', async () => {
+      const boxes = $$('[data-wpm]', b);
+      const checked = boxes.filter(i => i.checked).map(i => i.dataset.wpm);
+      if (checked.length === 0) { toast('حداقل یک روش پرداخت باید فعال بماند.', true); return; }
+      const methodsPayload = (checked.length === boxes.length) ? null : checked;
+      try {
+        await apiPost('/wallet/payment-methods', { methods: methodsPayload });
+        toast('ذخیره شد.'); close();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
 function productProvisionFieldsHtml(panelServers, prefill) {
   if (!panelServers || !panelServers.length) return '';
   const isDirect = !!(prefill && prefill.provision_server_id);
@@ -3578,6 +3619,130 @@ async function showConfigBank(productId) {
       try { await apiDelete(`/configs/${b.dataset.delCfg}`); close(); showConfigBank(productId); } catch (e) { handleErr(e); }
     }));
   }, { wide: true });
+}
+
+/* ===================================================== reseller tiers === */
+const TIER_NUM_FIELDS = [
+  ['commission_min', 'حداقل درصد کمیسیون (خالی=بدون محدودیت)'],
+  ['commission_max', 'حداکثر درصد کمیسیون (خالی=بدون محدودیت)'],
+  ['permanent_discount_percent', 'تخفیف دائمی٪ (سطح تخفیفی)'],
+  ['min_qty', 'حداقل تعداد خرید (خرید عمده محصول)'],
+  ['min_volume_gb', 'حداقل حجم خرید به گیگ (اعتبار حجمی)'],
+];
+const TIER_FLAG_FIELDS = [
+  ['has_miniapp', 'مینی‌اپ اختصاصی'], ['has_web_panel', 'پنل وب'],
+  ['has_dedicated_bot', 'بات مستقل'], ['auto_approve', 'تایید خودکار درخواست (سطح تخفیفی)'],
+];
+function tierSummaryLine(t) {
+  const parts = [];
+  if (t.commission_min !== null || t.commission_max !== null) parts.push(`کمیسیون ${fmt(t.commission_min ?? 0)} تا ${fmt(t.commission_max ?? 100)}٪`);
+  if (t.permanent_discount_percent !== null) parts.push(`تخفیف دائمی ${fmt(t.permanent_discount_percent)}٪`);
+  if (t.min_qty !== null) parts.push(`حداقل ${fmt(t.min_qty)} عدد`);
+  if (t.min_volume_gb !== null) parts.push(`حداقل ${fmt(t.min_volume_gb)} گیگ`);
+  [['has_miniapp', 'مینی‌اپ'], ['has_web_panel', 'پنل وب'], ['has_dedicated_bot', 'بات مستقل']].forEach(([k, l]) => { if (t[k]) parts.push(l); });
+  return parts.join(' · ') || '—';
+}
+function openTierEditor(t, reload) {
+  const nums = TIER_NUM_FIELDS.map(([k, label]) => `<label class="field"><span>${label}</span><input class="input" id="tier-${k}" type="number" min="0" value="${t[k] ?? ''}"></label>`).join('');
+  const flags = TIER_FLAG_FIELDS.map(([k, label]) => `<label class="field"><span><input type="checkbox" id="tier-${k}" ${t[k] ? 'checked' : ''}> ${label}</span></label>`).join('');
+  openModal(`ویرایش سطح ${esc(t.title)}`, `
+    <div class="form-grid">
+      <div class="form-row">
+        <input class="input" id="tier-title" placeholder="عنوان" value="${esc(t.title)}">
+        <input class="input" id="tier-icon" placeholder="ایموجی" value="${esc(t.icon)}">
+      </div>
+      <input class="input" id="tier-summary" placeholder="توضیح کوتاه (داخل لیست سطح‌ها)" value="${esc(t.summary)}">
+      <input class="input" id="tier-description" placeholder="توضیح کامل (کارت جزئیات)" value="${esc(t.description)}">
+      <label class="field"><span>ترتیب نمایش</span><input class="input" id="tier-sort_order" type="number" value="${t.sort_order}"></label>
+      ${nums}${flags}
+      <button class="btn btn-primary" id="tier-save">ذخیره</button>
+    </div>`, (b, close) => {
+    $('#tier-save', b).addEventListener('click', async () => {
+      const payload = {
+        title: $('#tier-title', b).value.trim(), icon: $('#tier-icon', b).value.trim(),
+        summary: $('#tier-summary', b).value.trim(), description: $('#tier-description', b).value.trim(),
+        sort_order: Number($('#tier-sort_order', b).value) || 0,
+      };
+      TIER_NUM_FIELDS.forEach(([k]) => { const v = $('#tier-' + k, b).value; payload[k] = v === '' ? null : Number(v); });
+      TIER_FLAG_FIELDS.forEach(([k]) => { payload[k] = $('#tier-' + k, b).checked; });
+      try { await apiPut(`/reseller-tiers/${t.code}`, payload); toast('ذخیره شد.'); close(); reload(); } catch (e) { handleErr(e); }
+    });
+  });
+}
+async function renderResellerTiers() {
+  const [tiers, requests] = await Promise.all([apiGet('/reseller-tiers'), apiGet('/reseller-tier-requests?status=pending')]);
+  const members = {};
+  await Promise.all(tiers.filter(t => t.model === 'discount').map(async t => { members[t.code] = await apiGet(`/reseller-tiers/${t.code}/members`); }));
+  const requestsHtml = requests.length ? `
+    <div class="card"><h3 style="margin:12px">درخواست‌های در انتظار</h3><div class="table-wrap"><table>
+      <thead><tr><th>سطح</th><th>کاربر</th><th>آیدی</th><th>عملیات</th></tr></thead>
+      <tbody>${requests.map(r => `<tr>
+        <td>${esc(r.tier_title)}</td><td>${esc(r.first_name || '')} ${r.username ? '@' + esc(r.username) : ''}</td>
+        <td class="mono">${r.user_id}</td>
+        <td><button class="btn btn-primary btn-sm" data-approve="${r.id}">تایید</button>
+        <button class="btn btn-danger btn-sm" data-reject="${r.id}">رد</button></td>
+      </tr>`).join('')}</tbody></table></div></div>` : '';
+  const tierCards = tiers.map(t => `
+    <div class="card" style="margin-top:12px">
+      <div class="toolbar">
+        <strong>${esc(t.icon)} ${esc(t.title)}</strong>
+        <span class="badge">${esc(t.model_label)}</span>
+        ${t.is_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}
+        <span style="margin-inline-start:auto"></span>
+        <button class="btn btn-sm" data-tier-toggle="${t.code}">${t.is_enabled ? 'غیرفعال‌سازی' : 'فعال‌سازی'}</button>
+        <button class="btn btn-primary btn-sm" data-tier-edit="${t.code}">ویرایش</button>
+      </div>
+      <p style="margin:0 12px 12px;font-size:13px">${esc(t.summary)}<br><span style="color:var(--muted,#888)">${tierSummaryLine(t)}</span></p>
+      ${t.model === 'discount' ? `
+        <div style="margin:0 12px 12px">
+          <div class="toolbar"><strong style="font-size:13px">پلکان تخفیف خرید یک‌جا</strong>
+            <button class="btn btn-sm" data-qty-add="${t.code}">+ پله</button></div>
+          <div class="table-wrap"><table><thead><tr><th>از تعداد</th><th>درصد تخفیف</th><th></th></tr></thead>
+          <tbody>${t.qty_discounts.map(q => `<tr><td class="mono">${fmt(q.min_qty)}</td><td class="mono">${fmt(q.discount_percent)}٪</td>
+            <td><button class="btn btn-danger btn-sm" data-qty-del="${q.id}">حذف</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">پله‌ای ثبت نشده</td></tr>'}</tbody></table></div>
+          <div class="toolbar" style="margin-top:8px"><strong style="font-size:13px">اعضا (${fmt(t.members_count)})</strong></div>
+          <div class="table-wrap"><table><thead><tr><th>نام</th><th>آیدی</th><th></th></tr></thead>
+          <tbody>${(members[t.code] || []).map(m => `<tr><td>${esc(m.first_name || '')} ${m.username ? '@' + esc(m.username) : ''}</td>
+            <td class="mono">${m.telegram_id}</td>
+            <td><button class="btn btn-danger btn-sm" data-member-del="${t.code}:${m.telegram_id}">حذف عضویت</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">عضوی ندارد</td></tr>'}</tbody></table></div>
+        </div>` : ''}
+    </div>`).join('');
+  setContent(requestsHtml + tierCards);
+  const reload = () => renderResellerTiers();
+  $$('[data-tier-edit]', content()).forEach(b => b.addEventListener('click', () => openTierEditor(tiers.find(t => t.code === b.dataset.tierEdit), reload)));
+  $$('[data-tier-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/reseller-tiers/${b.dataset.tierToggle}/toggle`); reload(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiPost(`/reseller-tier-requests/${b.dataset.approve}/approve`); toast('تایید شد.'); reload(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('درخواست رد شود؟')) return;
+    try { await apiPost(`/reseller-tier-requests/${b.dataset.reject}/reject`); toast('رد شد.'); reload(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-qty-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    try { await apiDelete(`/reseller-tiers/qty-discounts/${b.dataset.qtyDel}`); reload(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-member-del]', content()).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('عضویت این کاربر حذف شود؟')) return;
+    const [code, uid] = b.dataset.memberDel.split(':');
+    try { await apiDelete(`/reseller-tiers/${code}/members/${uid}`); toast('حذف شد.'); reload(); } catch (e) { handleErr(e); }
+  }));
+  $$('[data-qty-add]', content()).forEach(b => b.addEventListener('click', () => openModal('پله‌ی جدید تخفیف', `
+    <div class="form-grid">
+      <input class="input" id="qty-min" type="number" min="2" placeholder="حداقل تعداد خرید یک‌جا (مثلا ۱۰)">
+      <input class="input" id="qty-pct" type="number" min="1" max="100" placeholder="درصد تخفیف">
+      <button class="btn btn-primary" id="qty-save">ثبت</button>
+    </div>`, (m, close) => {
+    $('#qty-save', m).addEventListener('click', async () => {
+      try {
+        await apiPost(`/reseller-tiers/${b.dataset.qtyAdd}/qty-discounts`, {
+          min_qty: Number($('#qty-min', m).value), discount_percent: Number($('#qty-pct', m).value),
+        });
+        toast('ثبت شد.'); close(); reload();
+      } catch (e) { handleErr(e); }
+    });
+  })));
 }
 
 /* ========================================================== discounts === */
@@ -7082,6 +7247,12 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
   const builtin = (methods || []).filter(m => !m.is_custom && m.key !== 'wallet');
   return `
     <div class="card">
+      <div class="card-sub" style="margin-bottom:10px"><b>👛 روش‌های پرداخت مجاز برای شارژ کیف پول</b> — مستقل از
+        محدودیت روش پرداخت هر محصول: با این تنظیم می‌توانی مشخص کنی کاربر هنگام شارژ کیف پول کدام روش‌ها را ببیند.</div>
+      <button class="btn btn-sm" id="wallet-pm-edit">✏️ مدیریت روش‌های پرداخت شارژ کیف پول</button>
+    </div>
+
+    <div class="card">
       <div class="card-sub" style="margin-bottom:10px"><b>💵 حداقل مبلغ مجاز هر روش پرداخت</b> — اگر مبلغ سفارش
         از این عدد کمتر باشد، آن روش برای کاربر نمایش داده نمی‌شود (۰ یعنی بدون محدودیت).
         در بات و مینی‌اپ هر دو یکسان اعمال می‌شود.</div>
@@ -7185,6 +7356,7 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
 
 function bindPaymentExtrasEvents(root, { gateways, c2cCards, c2cWebhook }) {
   $('#sms-forwarder-guide', root)?.addEventListener('click', () => openModal('📖 راهنمای کامل فوروارد پیامک', _smsForwarderGuideHtml(), null, { wide: true }));
+  $('#wallet-pm-edit', root)?.addEventListener('click', () => openWalletPaymentMethodsModal());
   $$('[data-save-min]', root).forEach(b => b.addEventListener('click', async () => {
     const key = b.dataset.saveMin;
     const value = Math.max(0, Number($(`[data-min-amount="${key}"]`, root).value) || 0);
