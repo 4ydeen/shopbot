@@ -4507,7 +4507,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         else:
             await message.answer("ثبت درخواست برای این سطح هنوز فعال نشده است.")
 
-    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_tiers", "🤝 درخواست نمایندگی")))
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_tiers", "🤝 نمایندگی")))
     async def reseller_tiers_menu(message: Message):
         if not is_main_bot:
             return
