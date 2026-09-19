@@ -246,8 +246,8 @@ def require_full_access_admin(auth=Depends(get_verified_user)):
     tg_id, db, tenant = auth
     if not db.is_senior_admin(tg_id):
         raise HTTPException(status_code=403, detail="این بخش فقط برای مالک و مدیر کامل در دسترس است.")
-    if tenant.tenant_id:
-        raise HTTPException(status_code=403, detail="⛔️ اتصال پنل VPN و ساخت کانفیگ دستی فقط از طریق بات اصلی مدیریت می‌شود.")
+    if not db.is_full_access_bot(not bool(tenant.tenant_id)):
+        raise HTTPException(status_code=403, detail="⛔️ اتصال پنل VPN و ساخت کانفیگ دستی فقط برای بات اصلی یا نمایندگی کامل در دسترس است.")
     return auth
 
 
@@ -843,7 +843,7 @@ def api_custom_config_info(auth=Depends(get_verified_user)):
     reseller_server = reseller_db.get_reseller_panel(tg_id) if is_reseller else None
     return {
         "enabled": settings["enabled"] and bool(server) and bool(tiers)
-        and bool(not tenant.tenant_id),
+        and bool(db.is_full_access_bot(not bool(tenant.tenant_id))),
         "min_gb": settings["min_gb"], "max_gb": settings["max_gb"],
         "duration_days": settings["duration_days"],
         "tiers": [
@@ -965,7 +965,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
 
     # --- مسیر خرید عادی (پرداخت از کیف‌پول/کارت/کریپتو) ---
     settings = db.get_custom_config_settings()
-    if not settings["enabled"] or tenant.tenant_id:
+    if not settings["enabled"] or not db.is_full_access_bot(not bool(tenant.tenant_id)):
         raise HTTPException(status_code=400, detail="این بخش در حال حاضر غیرفعال است.")
     if body.volume_gb < settings["min_gb"] or body.volume_gb > settings["max_gb"]:
         raise HTTPException(status_code=400, detail=f"حجم باید بین {settings['min_gb']} تا {settings['max_gb']} گیگابایت باشد.")
@@ -1109,7 +1109,7 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
     if user and user["test_used"] >= MAX_TEST_PER_USER:
         raise HTTPException(status_code=400, detail="شما قبلاً کانفیگ تست خود را دریافت کرده‌اید.")
 
-    is_full_access = not tenant.tenant_id
+    is_full_access = db.is_full_access_bot(not bool(tenant.tenant_id))
     plans = db.get_test_config_plans(active_only=True)
     if plans:
         plan = None
@@ -4190,8 +4190,8 @@ def api_admin_panel_servers_lite(auth=Depends(require_senior_admin)):
     """لیست سبک پنل‌ها (فقط id/name) برای انتخاب پنل موقع ساخت محصول اتصال مستقیم.
     مثل بات و پنل وب مستقل، این گزینه فقط برای بات اصلی است."""
     _, db, tenant = auth
-    if tenant.tenant_id:
-        raise HTTPException(status_code=403, detail="این بخش فقط برای بات اصلی در دسترس است.")
+    if not db.is_full_access_bot(not bool(tenant.tenant_id)):
+        raise HTTPException(status_code=403, detail="این بخش فقط برای بات اصلی یا نمایندگی کامل در دسترس است.")
     return [{"id": s["id"], "name": s["name"]} for s in db.get_panel_servers(active_only=True)]
 
 
@@ -4240,7 +4240,7 @@ def api_admin_create_product(body: ProductCreate, auth=Depends(require_senior_ad
     if body.price < 0:
         raise HTTPException(status_code=400, detail="قیمت نامعتبر است.")
 
-    is_full_access = not tenant.tenant_id
+    is_full_access = db.is_full_access_bot(not bool(tenant.tenant_id))
     provision_server_id = body.provision_server_id if is_full_access else None
     is_auto_provision = bool(body.is_auto_provision or provision_server_id)
 
@@ -4283,8 +4283,8 @@ def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(re
     if body.provision_server_id is not None:
         if not old_product["is_auto_provision"]:
             raise HTTPException(status_code=400, detail="این محصول به‌صورت خودکار ساخته نمی‌شود.")
-        if tenant.tenant_id:
-            raise HTTPException(status_code=403, detail="تغییر پنل/اینباند فقط از نمایندگی ممکن است.")
+        if not db.is_full_access_bot(not bool(tenant.tenant_id)):
+            raise HTTPException(status_code=403, detail="تغییر پنل/اینباند فقط برای بات اصلی یا نمایندگی کامل مجاز است.")
         if not db.get_panel_server(body.provision_server_id):
             raise HTTPException(status_code=404, detail="سرور پنل یافت نشد.")
         provision_server_id = body.provision_server_id
