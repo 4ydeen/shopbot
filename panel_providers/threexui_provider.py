@@ -325,8 +325,14 @@ class ThreeXUIProvider(BasePanelProvider):
             raise PanelError(f"خطا در اتصال به پنل (inbound {inbound_id}): {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
-                           reset_usage: bool = False) -> PanelUserResult:
+                           reset_usage: bool = False, preserve_remaining: bool = False) -> PanelUserResult:
         sub_base_url = self.server["xui_sub_base_url"]
+        used_bytes = 0
+        if reset_usage and preserve_remaining and add_volume_gb:
+            try:
+                used_bytes = (await self.get_user_usage(username)).get("used_bytes", 0) or 0
+            except PanelError:
+                used_bytes = 0
         async with self._session() as session:
             matches = await self._find_client_all_inbounds(session, username)
 
@@ -340,10 +346,16 @@ class ThreeXUIProvider(BasePanelProvider):
                     current_expiry = 0
                 base_ms = current_expiry if current_expiry > now_ms else now_ms
                 new_expiry = base_ms + add_days * 86400000 if add_days else current_expiry
-                # تمدید «کامل» باید سقف حجم را با بستهٔ تازه جایگزین کند (نه رویش اضافه کند)،
-                # وگرنه حجم باقیمانده‌ی قبلی هم به اشتباه به سقف جدید اضافه می‌شود؛ فقط تمدید
-                # «افزایشی» (reset_usage=False) باید روی سقف قبلی جمع بزند.
-                if add_volume_gb:
+                # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
+                # سقف حجم را با بستهٔ تازه جایگزین می‌کند، وگرنه حجم باقیمانده‌ی قبلی هم به
+                # اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد (تمدید کامل
+                # دستی)، حجم باقیمانده‌ی مصرف‌نشده (بر اساس مصرف واقعی خوانده‌شده از traffic
+                # endpoint) حفظ و بستهٔ جدید رویش اضافه می‌شود. تمدید «افزایشی»
+                # (reset_usage=False) همیشه روی سقف قبلی جمع می‌زند.
+                if reset_usage and preserve_remaining:
+                    remaining = max(int(client.get("totalGB") or 0) - int(used_bytes or 0), 0)
+                    new_total = remaining + int(add_volume_gb * (1024 ** 3))
+                elif add_volume_gb:
                     new_total = int(add_volume_gb * (1024 ** 3)) if reset_usage else int(client.get("totalGB") or 0) + int(add_volume_gb * (1024 ** 3))
                 else:
                     new_total = client.get("totalGB")

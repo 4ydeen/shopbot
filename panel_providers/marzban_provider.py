@@ -267,7 +267,7 @@ class MarzbanProvider(BasePanelProvider):
                 raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
-                           reset_usage: bool = False) -> PanelUserResult:
+                           reset_usage: bool = False, preserve_remaining: bool = False) -> PanelUserResult:
         async with aiohttp.ClientSession() as session:
             token = await self._get_token(session)
             headers = {"Authorization": f"Bearer {token}", "accept": "application/json", "Content-Type": "application/json"}
@@ -289,10 +289,17 @@ class MarzbanProvider(BasePanelProvider):
             current_expire = _expire_to_epoch(current.get("expire"))
             base_expire = current_expire if (current_expire and current_expire > now_ts) else now_ts
             new_expire = base_expire + add_days * 86400 if add_days else current_expire
-            # تمدید «کامل» باید سقف حجم را با بستهٔ تازه جایگزین کند (نه رویش اضافه کند)،
-            # وگرنه حجم باقیمانده‌ی قبلی هم به اشتباه به سقف جدید اضافه می‌شود؛ فقط تمدید
-            # «افزایشی» (reset_usage=False) باید روی سقف قبلی جمع بزند.
-            if add_volume_gb:
+            # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
+            # سقف حجم را با بستهٔ تازه جایگزین می‌کند (نه رویش اضافه)، وگرنه حجم باقیمانده‌ی
+            # قبلی هم به اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد
+            # (تمدید کامل دستی)، حجم باقیمانده‌ی مصرف‌نشده حفظ و بستهٔ جدید رویش اضافه
+            # می‌شود - چون زمان (expire) همیشه به همین شکل جمعی/حفظ‌شونده محاسبه می‌شود و
+            # این ناهم‌خوانی بین حجم و زمان همان مشکل گزارش‌شده بود. تمدید «افزایشی»
+            # (reset_usage=False) همیشه روی سقف قبلی جمع می‌زند.
+            if reset_usage and preserve_remaining:
+                remaining = max(int(current.get("data_limit") or 0) - int(current.get("used_traffic") or 0), 0)
+                new_limit = remaining + int(add_volume_gb * (1024 ** 3))
+            elif add_volume_gb:
                 new_limit = int(add_volume_gb * (1024 ** 3)) if reset_usage else int(current.get("data_limit") or 0) + int(add_volume_gb * (1024 ** 3))
             else:
                 new_limit = current.get("data_limit")

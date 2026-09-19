@@ -58,11 +58,15 @@ class BasePanelProvider(ABC):
 
     @abstractmethod
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
-                           reset_usage: bool = False) -> PanelUserResult:
+                           reset_usage: bool = False, preserve_remaining: bool = False) -> PanelUserResult:
         """حجم/انقضای یک کاربر موجود روی پنل را برای «تمدید سرویس» افزایش می‌دهد.
         add_volume_gb/add_days روی مقدار فعلی جمع می‌شوند (نه جایگزین آن).
         اگر انقضای فعلی گذشته باشد، مبنای محاسبه‌ی انقضای جدید «اکنون» است، نه
-        تاریخ گذشته. reset_usage=True یعنی مصرف قبلی صفر شود (تمدید کامل)."""
+        تاریخ گذشته. reset_usage=True یعنی مصرف قبلی صفر شود (تمدید کامل).
+        وقتی reset_usage=True است، preserve_remaining تعیین می‌کند سقف حجم جدید
+        چطور محاسبه شود: False (پیش‌فرض) = جایگزینی با بستهٔ تازه (حجم باقیمانده
+        از دست می‌رود)؛ True = حجم باقیمانده‌ی مصرف‌نشده حفظ و بستهٔ جدید رویش
+        اضافه می‌شود."""
         raise NotImplementedError
 
     @abstractmethod

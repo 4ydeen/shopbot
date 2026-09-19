@@ -150,15 +150,26 @@ class HiddifyProvider(BasePanelProvider):
             return False
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
-                           reset_usage: bool = False) -> PanelUserResult:
+                           reset_usage: bool = False, preserve_remaining: bool = False) -> PanelUserResult:
         async with aiohttp.ClientSession() as session:
             user = await self._find_by_name(session, username)
-            # تمدید «کامل» (reset_usage=True) یعنی حجم مصرفی صفر می‌شود و سقف حجم هم باید
-            # جایگزین بستهٔ قبلی شود (نه رویش اضافه شود)؛ وگرنه مثلاً کاربری که از ۵۰ گیگ
-            # ۳۰ گیگ مصرف کرده، با تمدید کامل ۵۰ گیگ، سقفش ۱۰۰ گیگ می‌شد در حالی که باید ۵۰
-            # گیگ تازه شود. فقط تمدید «افزایشی» (reset_usage=False) باید روی سقف قبلی اضافه
-            # شود تا حجم باقیمانده حفظ شود.
-            if add_volume_gb:
+            # تمدید «کامل» (reset_usage=True) یعنی مصرف صفر می‌شود. سقف حجم جدید به دو
+            # شکل ممکن است محاسبه شود:
+            #   - preserve_remaining=False (پیش‌فرض، مثلاً تمدید خودکار): سقف با بستهٔ
+            #     تازه جایگزین می‌شود (نه رویش اضافه) - یعنی هر سیکل یک بستهٔ کاملاً تازه.
+            #   - preserve_remaining=True (تمدید کامل دستی): حجم باقیمانده‌ی مصرف‌نشده‌ی
+            #     قبلی حفظ و بستهٔ جدید رویش اضافه می‌شود؛ وگرنه مثلاً کاربری که از ۵۰ گیگ
+            #     فقط ۱۰ گیگ مصرف کرده (۴۰ گیگ باقیمانده)، با تمدید کامل به ۵۰ گیگ جدید،
+            #     سقفش دوباره فقط ۵۰ می‌شد و همان ۴۰ گیگ باقیمانده از دست می‌رفت - در حالی
+            #     که زمان (package_days) همیشه جمعی محاسبه می‌شود و این ناهم‌خوانی همان
+            #     مشکل گزارش‌شده بود.
+            # تمدید «افزایشی» (reset_usage=False) همیشه روی سقف قبلی اضافه می‌شود.
+            if reset_usage and preserve_remaining:
+                remaining = max(
+                    float(user.get("usage_limit_GB") or 0) - float(user.get("current_usage_GB") or 0), 0,
+                )
+                new_limit = remaining + float(add_volume_gb or 0)
+            elif add_volume_gb:
                 new_limit = add_volume_gb if reset_usage else float(user.get("usage_limit_GB") or 0) + add_volume_gb
             else:
                 new_limit = user.get("usage_limit_GB")
