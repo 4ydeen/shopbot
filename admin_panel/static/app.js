@@ -5788,11 +5788,32 @@ function renderResellerCohortBlock(data) {
 /* ============================================================== panels === */
 const PANEL_TYPE_OPTIONS_HTML = [
   ['pasarguard', 'PasarGuard'], ['3xui', '3X-UI'], ['marzban', 'Marzban'],
-  ['marzneshin', 'Marzneshin'], ['hiddify', 'Hiddify'],
+  ['marzneshin', 'Marzneshin'], ['hiddify', 'Hiddify'], ['alireza', 'Alireza X-UI'],
+  ['rebecca', 'Rebecca'], ['sui', 'S-UI'], ['wgdashboard', 'WGDashboard'], ['mikrotik', 'MikroTik'], ['ibsng', 'IBSng'],
 ].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
-const PANEL_INBOUND_SELECT_TYPES = ['3xui'];
-const PANEL_SUB_BASE_URL_TYPES = ['3xui', 'hiddify'];
-const PANEL_TEMPLATE_BASED_TYPES = ['pasarguard', 'marzban', 'marzneshin'];
+const PANEL_INBOUND_SELECT_TYPES = ['3xui', 'alireza'];
+const PANEL_SUB_BASE_URL_TYPES = ['3xui', 'hiddify', 'alireza'];
+const PANEL_TEMPLATE_BASED_TYPES = ['pasarguard', 'marzban', 'marzneshin', 'rebecca', 'sui', 'wgdashboard', 'mikrotik', 'ibsng'];
+const PANEL_TOKEN_ONLY_TYPES = ['3xui', 'rebecca', 'sui', 'wgdashboard'];
+const PANEL_SECRET_PLACEHOLDERS = {
+  rebecca: 'توکن ادمین (Bearer token)',
+  sui: 'API Token (Admin ← API Token در پنل)',
+  wgdashboard: 'API Key (Settings ← API Keys در پنل)',
+};
+const PANEL_TEMPLATE_PLACEHOLDERS = {
+  sui: 'نام یک کاربر (client) موجود روی پنل',
+  rebecca: 'نام یک کاربر موجود روی پنل',
+  wgdashboard: 'نام configuration (مثلا wg0)',
+  mikrotik: 'نام profile در User Manager',
+  ibsng: 'نام گروه (Group) در IBSng',
+};
+const PANEL_TEMPLATE_HINTS = {
+  sui: 'inbound های کاربر نمونه برای کاربرهای جدید استفاده می‌شود. فقط API Token لازم است.',
+  rebecca: 'سرویس (service) کاربر نمونه برای کاربرهای جدید استفاده می‌شود. فقط توکن لازم است.',
+  wgdashboard: 'فقط API Key لازم است. کاربرها به‌صورت peer داخل configuration ساخته می‌شوند و حجم/انقضا با Schedule Job اعمال می‌شود.',
+  mikrotik: 'حجم و مدت را profile تعیین می‌کند و مقدار حجم/مدت محصول اعمال نمی‌شود. یوزر/پس ادمین روتر (REST API) لازم است.',
+  ibsng: 'حجم و مدت را گروه تعیین می‌کند و مقدار حجم/مدت محصول اعمال نمی‌شود. یوزر/پس ادمین IBSng لازم است.',
+};
 
 function panelAddFormHtml() {
   return `
@@ -5822,12 +5843,20 @@ function wirePanelAddForm(body, close) {
       passInp.placeholder = 'Hiddify API Key (UUID ادمین)';
       hint.style.display = 'block';
       hint.textContent = 'Hiddify یوزر/پس ندارد؛ فقط API Key لازم است. بعد از ثبت لینک Subscription را هم می‌پرسیم.';
-    } else {
+    } else if (t === 'alireza') {
       userInp.style.display = ''; userInp.placeholder = 'یوزرنیم';
       passInp.placeholder = 'پسورد';
       hint.style.display = 'block';
+      hint.textContent = 'فقط یک inbound قابل انتخاب است. بعد از ثبت باید inbound و لینک Subscription را هم تنظیم کنی.';
+    } else {
+      const tokenOnly = PANEL_TOKEN_ONLY_TYPES.includes(t);
+      userInp.style.display = tokenOnly ? 'none' : ''; userInp.placeholder = 'یوزرنیم';
+      if (tokenOnly) userInp.value = '';
+      passInp.placeholder = PANEL_SECRET_PLACEHOLDERS[t] || 'پسورد';
+      hint.style.display = 'block';
       templateInp.style.display = '';
-      hint.textContent = 'یک نام کاربری که از قبل روی این پنل ساخته شده را وارد کن؛ تنظیمات (گروه/پروکسی) او به‌عنوان قالب برای کاربرهای جدید استفاده می‌شود.';
+      templateInp.placeholder = PANEL_TEMPLATE_PLACEHOLDERS[t] || 'نام کاربری نمونه (برای دریافت قالب)';
+      hint.textContent = PANEL_TEMPLATE_HINTS[t] || 'یک نام کاربری که از قبل روی این پنل ساخته شده را وارد کن؛ تنظیمات (گروه/پروکسی) او به‌عنوان قالب برای کاربرهای جدید استفاده می‌شود.';
     }
   }
   typeSel.addEventListener('change', syncTypeUI);
@@ -5837,9 +5866,9 @@ function wirePanelAddForm(body, close) {
     const name = $('#p-name', body).value.trim(), api_url = $('#p-url', body).value.trim();
     const panel_type = typeSel.value;
     if (!name || !api_url) return toast('نام و آدرس الزامی است.', true);
-    if (!passInp.value.trim()) return toast(panel_type === '3xui' ? 'API Token الزامی است.' : 'رمز/کلید الزامی است.', true);
+    if (!passInp.value.trim()) return toast(PANEL_TOKEN_ONLY_TYPES.includes(panel_type) ? 'API Token الزامی است.' : 'رمز/کلید الزامی است.', true);
     if (PANEL_TEMPLATE_BASED_TYPES.includes(panel_type) && !templateInp.value.trim()) {
-      return toast('نام کاربری نمونه الزامی است.', true);
+      return toast(PANEL_TEMPLATE_PLACEHOLDERS[panel_type] ? 'مقدار قالب الزامی است.' : 'نام کاربری نمونه الزامی است.', true);
     }
     let serverId;
     try {
