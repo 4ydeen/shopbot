@@ -608,6 +608,11 @@ async def get_current_admin(request: Request):
         if rb:
             owner_tg_id = int(rb["owner_telegram_id"])
             supply = await asyncio.to_thread(main_db.get_reseller_supply, owner_tg_id)
+            tier_code = await asyncio.to_thread(main_db.get_agent_tier, owner_tg_id)
+            tier = await asyncio.to_thread(main_db.get_reseller_tier, tier_code) if tier_code else None
+            local_configs = await asyncio.to_thread(tenant.db.get_custom_configs_for_user, owner_tg_id)
+            sales = {"configs": len(local_configs), "volume_gb": sum(int(x["volume_gb"] or 0) for x in local_configs)}
+            revenue_summary = await asyncio.to_thread(tenant.db.get_bot_revenue_summary)
             reseller_profile = {
                 "enabled": True,
                 "has_live_bot": bool(rb["has_live_bot"]) if "has_live_bot" in rb.keys() else True,
@@ -617,6 +622,14 @@ async def get_current_admin(request: Request):
                 "owner_telegram_id": owner_tg_id,
                 "supply_model": supply["model"],
                 "fixed_product_id": supply["product_id"],
+                "tier_code": tier_code or "gold",
+                "tier_title": tier["title"] if tier else ("طلایی" if supply["model"] == "fixed_product" else "VIP"),
+                "tier_icon": tier["icon"] if tier else ("🥇" if supply["model"] == "fixed_product" else "💎"),
+                "tier_model": tier["model"] if tier else supply["model"],
+                "revenue_toman": int(revenue_summary.get("revenue_toman", 0) or 0),
+                "paid_orders": int(revenue_summary.get("paid_orders", 0) or 0),
+                "configs_created": int(sales.get("configs", 0) or 0),
+                "volume_sold_gb": int(sales.get("volume_gb", 0) or 0),
             }
     return {
         "id": admin["id"],
@@ -1160,22 +1173,6 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "discount_percent", "label": "درصد تخفیف", "type": "number"},
                 ],
             },
-        })
-        tabs.append({
-            "id": "reseller_tier_requests", "title": "درخواست‌های سطح", "icon": "groups", "screen": "list",
-            "section": "شبکه و همکاران",
-            "source": "/api/reseller-tier-requests?status=pending", "item_id_field": "id",
-            "fields": [
-                {"key": "tier_title", "label": "سطح", "type": "title"},
-                {"key": "first_name", "label": "نام", "type": "text"},
-                {"key": "username", "label": "یوزرنیم", "type": "text"},
-            ],
-            "actions": [
-                {"id": "approve", "label": "تایید", "method": "POST",
-                 "endpoint": "/api/reseller-tier-requests/{id}/approve", "style": "default", "confirm": True},
-                {"id": "reject", "label": "رد", "method": "POST",
-                 "endpoint": "/api/reseller-tier-requests/{id}/reject", "style": "danger", "confirm": True},
-            ],
         })
     if allowed("panels"):
         tabs.append({
@@ -4099,12 +4096,9 @@ def api_adjust_reseller_product_inventory(tg_id: int, product_id: int, body: Res
 def api_delete_reseller(tg_id: int, admin=Depends(require_permission("resellers"))):
     if not db.get_user(tg_id):
         raise HTTPException(404, "کاربر یافت نشد.")
-    bots = [dict(x) for x in db.list_reseller_bots() if x["owner_telegram_id"] == tg_id]
-    for b in bots:
-        db.delete_reseller_bot(b["id"])
-    db.purge_reseller_leftovers(tg_id)
-    db.disable_inline_reseller(tg_id)
-    db.set_user_reseller_tier(tg_id, None)
+    # حذف کامل باید دقیقاً از همان موتور مرکزی حذف نمایندگی استفاده کند تا
+    # فایل DB اختصاصی، اعتبار، پنل، بات و لینک/کمیسیون همگی پاک شوند.
+    db.wipe_agent_state(tg_id)
     db.log_admin_action(admin["id"], "reseller_level2_delete", f"حذف نماینده {tg_id} (پنل وب - {admin['username']})", "reseller", tg_id)
     return {"ok": True}
 
@@ -4131,6 +4125,36 @@ def api_purge_reseller_leftovers(tg_id: int, admin=Depends(require_permission("r
     return {"ok": True}
 
 
+# ------------------------------------------------------ reseller payment config --
+
+@app.get("/api/reseller-tiers/{code}/payment-methods")
+def api_reseller_payment_methods(code: str, admin=Depends(require_permission("resellers"))):
+    tier = db.get_reseller_tier(code)
+    if not tier:
+        raise HTTPException(404, "سطح نمایندگی پیدا نشد.")
+    allowed = db.get_reseller_payment_methods(code)
+    catalog = [x for x in db.get_payment_methods_catalog() if x["key"] != "wallet"]
+    keys = {x["key"] for x in catalog}
+    selected = [k for k in (allowed if allowed is not None else keys) if k in keys]
+    return {"methods": catalog, "selected": selected, "all_enabled_by_default": allowed is None}
+
+class ResellerPaymentMethodsBody(BaseModel):
+    methods: List[str]
+
+@app.put("/api/reseller-tiers/{code}/payment-methods")
+def api_set_reseller_payment_methods(code: str, body: ResellerPaymentMethodsBody, admin=Depends(require_permission("resellers"))):
+    tier = db.get_reseller_tier(code)
+    if not tier:
+        raise HTTPException(404, "سطح نمایندگی پیدا نشد.")
+    catalog = [x for x in db.get_payment_methods_catalog() if x["key"] != "wallet"]
+    valid = {x["key"] for x in catalog}
+    methods = [m for m in body.methods if m in valid]
+    if not methods:
+        raise HTTPException(400, "حداقل یک روش پرداخت انتخاب کنید.")
+    db.set_reseller_payment_methods(code, methods)
+    db.log_admin_action(admin["id"], "reseller_payment_methods_update", f"سطح {code}: {', '.join(methods)}")
+    return {"ok": True, "selected": methods}
+
 # ------------------------------------------------------------ reseller requests --
 
 
@@ -4142,6 +4166,9 @@ def api_reseller_requests(status: Optional[str] = None, admin=Depends(require_pe
         r = dict(r)
         user = row_to_dict(db.get_user(r["user_id"]))
         r["username"] = user["username"] if user else None
+        r["first_name"] = user["first_name"] if user else None
+        tier = db.get_reseller_tier(r.get("tier_code")) if r.get("tier_code") else None
+        r["tier_title"] = f"{tier['icon']} {tier['title']}" if tier else r.get("tier_code")
         out.append(r)
     return out
 
@@ -4174,6 +4201,7 @@ async def api_reseller_request_receipt_base64(request_id: int, admin=Depends(req
 class ResellerRequestQuoteBody(BaseModel):
     price_toman: int
     panel_server_id: Optional[int] = None
+    commission_percent: Optional[int] = None
 
 
 @app.post("/api/reseller-requests/{request_id}/quote")
@@ -4183,18 +4211,28 @@ async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuote
         raise HTTPException(400, "این درخواست دیگر معتبر نیست.")
     if body.price_toman <= 0:
         raise HTTPException(400, "هزینه باید عددی مثبت باشد.")
-    (await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"]))
+    tier = (await asyncio.to_thread(db.get_reseller_tier, req["tier_code"])) if req["tier_code"] else None
+    if tier and tier["model"] == "commission":
+        low = int(tier["commission_min"] or 1)
+        high = int(tier["commission_max"] or 100)
+        if body.commission_percent is None:
+            raise HTTPException(400, "برای نمایندگی برنزی درصد کمیسیون را مشخص کنید.")
+        if not (low <= body.commission_percent <= high):
+            raise HTTPException(400, f"درصد کمیسیون باید بین {low} تا {high} باشد.")
+    (await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"], body.commission_percent))
     (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_quote",
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (پنل وب - {admin['username']})",
     ))
+    tier_title = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
+    commission_note = f"\n📈 کمیسیون: {body.commission_percent}٪" if body.commission_percent is not None else ""
     await tg_send(
         _bot_token(), req["user_id"],
         f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
-        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان\n"
-        f"📦 حجم: {req['volume_gb']:,} گیگ\n\n"
-        f"در صورت موافقت روی «پرداخت می‌کنم» بزنید:",
-        reply_markup={"inline_keyboard": [[{"text": "✅ پرداخت می‌کنم", "callback_data": f"resreq_pay:{request_id}"}]]},
+        f"🏅 سطح: {tier_title}\n"
+        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان{commission_note}\n\n"
+        "روش پرداخت را انتخاب کنید:",
+        reply_markup={"inline_keyboard": [[{"text": "💳 انتخاب روش پرداخت", "callback_data": f"resreq_pay:{request_id}"}]]},
     )
     return {"ok": True}
 
@@ -4214,6 +4252,12 @@ async def api_approve_reseller_request_payment(request_id: int, request: Request
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {(req['price_toman'] or 0):,} (پنل وب - {admin['username']})",
     ))
 
+    req = (await asyncio.to_thread(db.get_reseller_request, request_id))
+    if req and req["status"] == "completed":
+        tier = await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]) if req["tier_code"] else None
+        label = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
+        await tg_send(_bot_token(), req["user_id"], f"✅ پرداخت هزینه {label} تایید شد و نمایندگی شما فعال شد.")
+        return {"ok": True}
     bot_choice = req["bot_choice"] if "bot_choice" in req.keys() else "dedicated"
     if bot_choice == "dedicated":
         _set_main_bot_fsm_state(req["user_id"], "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
