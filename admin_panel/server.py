@@ -3863,6 +3863,7 @@ def api_tier_members(code: str, admin=Depends(require_permission("resellers"))):
 
 class TierMemberBody(BaseModel):
     telegram_id: int
+    discount_percent: Optional[int] = None
 
 
 @app.post("/api/reseller-tiers/{code}/members")
@@ -3878,7 +3879,15 @@ async def api_add_tier_member(code: str, body: TierMemberBody, admin=Depends(req
         raise HTTPException(status_code=400, detail="این کاربر همین الان عضو این سطح است.")
     if current:
         raise HTTPException(status_code=400, detail="این کاربر همین الان نماینده‌ی سطح دیگری است.")
-    await asyncio.to_thread(db.set_user_reseller_tier, tg_id, code)
+    discount_percent = body.discount_percent
+    if code == "silver":
+        if discount_percent is None:
+            raise HTTPException(status_code=400, detail="برای نمایندگی نقره‌ای درصد تخفیف را مشخص کنید.")
+        if not 1 <= int(discount_percent) <= 100:
+            raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+    elif discount_percent is not None:
+        raise HTTPException(status_code=400, detail="درصد تخفیف فقط برای سطح نقره‌ای قابل تنظیم است.")
+    await asyncio.to_thread(db.set_user_reseller_tier, tg_id, code, discount_percent)
     await asyncio.to_thread(db.log_admin_action, admin["id"], "reseller_tier_member_add", f"{code}: {tg_id}", "user", tg_id)
     await notify_user(
         tg_id,
@@ -4203,6 +4212,7 @@ class ResellerRequestQuoteBody(BaseModel):
     price_toman: int
     panel_server_id: Optional[int] = None
     commission_percent: Optional[int] = None
+    discount_percent: Optional[int] = None
 
 
 @app.post("/api/reseller-requests/{request_id}/quote")
@@ -4220,18 +4230,27 @@ async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuote
             raise HTTPException(400, "برای نمایندگی برنزی درصد کمیسیون را مشخص کنید.")
         if not (low <= body.commission_percent <= high):
             raise HTTPException(400, f"درصد کمیسیون باید بین {low} تا {high} باشد.")
-    (await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"], body.commission_percent))
+    if tier and tier["model"] == "discount":
+        if body.discount_percent is None:
+            raise HTTPException(400, "برای نمایندگی نقره‌ای درصد تخفیف را مشخص کنید.")
+        if not (1 <= body.discount_percent <= 100):
+            raise HTTPException(400, "درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+    try:
+        await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"], body.commission_percent, body.discount_percent)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     (await asyncio.to_thread(db.log_admin_action, 
         admin["id"], "reseller_request_quote",
         f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {body.price_toman:,} (پنل وب - {admin['username']})",
     ))
     tier_title = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
     commission_note = f"\n📈 کمیسیون: {body.commission_percent}٪" if body.commission_percent is not None else ""
+    discount_note = f"\n🏷 تخفیف نماینده: {body.discount_percent}٪" if body.discount_percent is not None else ""
     await tg_send(
         _bot_token(), req["user_id"],
         f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
         f"🏅 سطح: {tier_title}\n"
-        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان{commission_note}\n\n"
+        f"💰 هزینه‌ی نمایندگی: {body.price_toman:,} تومان{commission_note}{discount_note}\n\n"
         "روش پرداخت را انتخاب کنید:",
         reply_markup={"inline_keyboard": [[{"text": "💳 انتخاب روش پرداخت", "callback_data": f"resreq_pay:{request_id}"}]]},
     )
@@ -4425,6 +4444,7 @@ def _decode_reseller_supply_items(request_text):
 class MakeResellerBody(BaseModel):
     tier_code: str
     percent: Optional[int] = None
+    discount_percent: Optional[int] = None
     volume_gb: int = 0
     bot_choice: str = "none"
     wants_web_panel: bool = False
@@ -4484,15 +4504,23 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         )
         return {"ok": True}
     if tier["model"] == "discount":
-        (await asyncio.to_thread(db.set_user_reseller_tier, tg_id, tier["code"]))
+        discount_percent = body.discount_percent
+        if tier["code"] == "silver":
+            if discount_percent is None:
+                raise HTTPException(400, "برای نمایندگی نقره‌ای درصد تخفیف را مشخص کنید.")
+            if not 1 <= int(discount_percent) <= 100:
+                raise HTTPException(400, "درصد تخفیف نقره‌ای باید بین ۱ تا ۱۰۰ باشد.")
+        elif discount_percent is not None:
+            raise HTTPException(400, "درصد تخفیف فقط برای سطح نقره‌ای قابل تنظیم است.")
+        (await asyncio.to_thread(db.set_user_reseller_tier, tg_id, tier["code"], discount_percent))
         (await asyncio.to_thread(db.log_admin_action,
             admin["id"], "reseller_make_direct",
-            f"کاربر {tg_id} مستقیم در سطح {tier['code']} نماینده شد (پنل وب - {admin['username']})",
+            f"کاربر {tg_id} مستقیم در سطح {tier['code']} نماینده شد | تخفیف: {discount_percent}% (پنل وب - {admin['username']})",
             "user", tg_id,
         ))
         await notify_user(
             tg_id,
-            f"✅ شما توسط مدیریت در سطح {tier_label} قرار گرفتید. تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود.",
+            f"✅ شما توسط مدیریت در سطح {tier_label} قرار گرفتید.\n🏷 تخفیف اختصاصی نمایندگی: {discount_percent}٪\nتخفیف خرید عمده نیز در صورت رسیدن به پلکان مربوطه اعمال می‌شود.",
         )
         return {"ok": True}
     if tier["model"] not in ("volume_credit", "fixed_product"):
