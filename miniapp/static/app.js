@@ -2114,9 +2114,13 @@ function openProductPurchase(productId) {
   renderPurchasePanel(productId, p, 1, null);
 }
 
-function renderPurchasePanel(productId, p, quantity, discountCode) {
+async function renderPurchasePanel(productId, p, quantity, discountCode) {
   quantity = Math.max(1, Math.min(quantity, p.stock));
-  const total = p.price * quantity;
+  let tier = { percent: 0, amount: 0, total: p.price * quantity, total_after: p.price * quantity, title: "", icon: "" };
+  try {
+    tier = await api(`/api/tier-quote?product_id=${productId}&quantity=${quantity}`);
+  } catch (e) {}
+  const step = tier.title ? 10 : 0;
   content.innerHTML = `
     <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
     <div class="eyebrow">خرید محصول</div>
@@ -2131,24 +2135,33 @@ function renderPurchasePanel(productId, p, quantity, discountCode) {
         <span class="qty-value">${quantity}</span>
         <button class="btn small outline" id="qty-inc-btn" ${quantity >= p.stock ? "disabled" : ""}>➕</button>
       </div>
+      ${step ? `
+      <div class="qty-stepper">
+        <button class="btn small outline" id="qty-dec-bulk-btn" ${quantity <= 1 ? "disabled" : ""}>➖${step}</button>
+        <button class="btn small outline" id="qty-inc-bulk-btn" ${quantity >= p.stock ? "disabled" : ""}>➕${step}</button>
+      </div>` : ""}
       <input class="input" id="purchase-discount-code" type="text" placeholder="کد تخفیف (اختیاری)"
         value="${discountCode ? escHtml(discountCode) : ""}" style="direction:ltr;text-align:left;margin-top:10px" />
-      <div class="stat-row" style="margin-top:10px"><span>جمع کل</span><b>${fmt(total)} تومان</b></div>
+      ${tier.amount > 0 ? `
+      <div class="stat-row" style="margin-top:10px"><span>جمع کل</span><b>${fmt(tier.total)} تومان</b></div>
+      <div class="stat-row"><span>${tier.icon} تخفیف سطح ${escHtml(tier.title)} (${tier.percent}٪)</span><b>-${fmt(tier.amount)} تومان</b></div>
+      <div class="stat-row"><span>مبلغ پس از تخفیف سطح</span><b>${fmt(tier.total_after)} تومان</b></div>`
+      : `<div class="stat-row" style="margin-top:10px"><span>جمع کل</span><b>${fmt(tier.total)} تومان</b></div>`}
       <button class="btn" id="confirm-purchase-btn" style="margin-top:10px">✅ تایید و ادامه</button>
     </div>
   `;
+  const currentCode = () => document.getElementById("purchase-discount-code").value.trim();
+  const bindQty = (id, delta) => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = () => renderPurchasePanel(productId, p, quantity + delta, currentCode());
+  };
   document.getElementById("back-to-store-btn").onclick = renderStore;
-  document.getElementById("qty-dec-btn").onclick = () => {
-    const code = document.getElementById("purchase-discount-code").value.trim();
-    renderPurchasePanel(productId, p, quantity - 1, code);
-  };
-  document.getElementById("qty-inc-btn").onclick = () => {
-    const code = document.getElementById("purchase-discount-code").value.trim();
-    renderPurchasePanel(productId, p, quantity + 1, code);
-  };
+  bindQty("qty-dec-btn", -1);
+  bindQty("qty-inc-btn", 1);
+  bindQty("qty-dec-bulk-btn", -step);
+  bindQty("qty-inc-bulk-btn", step);
   document.getElementById("confirm-purchase-btn").onclick = () => {
-    const code = document.getElementById("purchase-discount-code").value.trim();
-    buyProduct(productId, quantity, code || null);
+    buyProduct(productId, quantity, currentCode() || null);
   };
 }
 
