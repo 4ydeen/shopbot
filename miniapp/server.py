@@ -417,6 +417,36 @@ def api_me(auth=Depends(get_verified_user)):
     wallet = db.get_wallet_credit(tg_id)
     referral = db.get_referral_stats(tg_id)
     orders = db.get_user_orders(tg_id)
+    reseller_owner = False
+    reseller = None
+    if tenant.tenant_id:
+        try:
+            rb = main_db.get_reseller_bot_by_slug(tenant.tenant_id)
+            if not rb and str(tenant.tenant_id).isdigit():
+                rb = main_db.get_reseller_bot(int(tenant.tenant_id))
+            if rb:
+                owner_id = int(rb["owner_telegram_id"])
+                reseller_owner = tg_id == owner_id
+                if reseller_owner:
+                    tier_code = main_db.get_agent_tier(owner_id) or "gold"
+                    tier = main_db.get_reseller_tier(tier_code)
+                    supply = main_db.get_reseller_supply(owner_id)
+                    local_configs = db.get_custom_configs_for_user(owner_id)
+                    sales = {"configs": len(local_configs), "volume_gb": sum(int(x["volume_gb"] or 0) for x in local_configs)}
+                    rev = db.get_bot_revenue_summary()
+                    reseller = {
+                        "tier_code": tier_code,
+                        "title": tier["title"] if tier else ("VIP" if tier_code == "vip" else "طلایی"),
+                        "icon": tier["icon"] if tier else ("💎" if tier_code == "vip" else "🥇"),
+                        "model": tier["model"] if tier else supply["model"],
+                        "credit_gb": int(main_db.get_reseller_credit(owner_id) or 0),
+                        "revenue_toman": int(rev.get("revenue_toman", 0) or 0),
+                        "paid_orders": int(rev.get("paid_orders", 0) or 0),
+                        "configs_created": int(sales.get("configs", 0) or 0),
+                        "volume_sold_gb": int(sales.get("volume_gb", 0) or 0),
+                    }
+        except Exception:
+            logging.getLogger("miniapp.reseller").exception("خواندن پروفایل نمایندگی ناموفق بود.")
     return {
         "telegram_id": tg_id,
         "first_name": user["first_name"],
@@ -427,8 +457,46 @@ def api_me(auth=Depends(get_verified_user)):
         "orders_count": len(orders),
         "is_admin": db.is_admin(tg_id),
         "admin_role": db.get_admin_role(tg_id),
+        "is_reseller_owner": reseller_owner,
+        "reseller": reseller,
     }
 
+
+@app.get("/api/reseller/overview")
+def api_reseller_overview(auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    if not tenant.tenant_id:
+        raise HTTPException(404, "این بخش فقط برای پنل نمایندگی است.")
+    try:
+        rb = main_db.get_reseller_bot_by_slug(tenant.tenant_id)
+        if not rb and str(tenant.tenant_id).isdigit():
+            rb = main_db.get_reseller_bot(int(tenant.tenant_id))
+        if not rb or int(rb["owner_telegram_id"]) != tg_id:
+            raise HTTPException(403, "این داشبورد فقط برای مالک نمایندگی است.")
+        tier_code = main_db.get_agent_tier(tg_id) or "gold"
+        tier = main_db.get_reseller_tier(tier_code)
+        supply = main_db.get_reseller_supply(tg_id)
+        inventory = main_db.get_reseller_product_inventory(tg_id)
+        credit_log = main_db.get_reseller_credit_log(tg_id, 8)
+        local_configs = db.get_custom_configs_for_user(tg_id)
+        sales = {"configs": len(local_configs), "volume_gb": sum(int(x["volume_gb"] or 0) for x in local_configs)}
+        revenue = db.get_bot_revenue_summary()
+        return {
+            "tier": {"code": tier_code, "title": tier["title"] if tier else ("VIP" if tier_code == "vip" else "طلایی"),
+                     "icon": tier["icon"] if tier else ("💎" if tier_code == "vip" else "🥇"),
+                     "model": tier["model"] if tier else supply["model"]},
+            "supply": {"model": supply["model"], "credit_gb": int(main_db.get_reseller_credit(tg_id) or 0),
+                       "fixed_product_id": supply["product_id"]},
+            "inventory": [{"product_id": int(x["product_id"]), "qty": int(x["qty_remaining"] or 0), "name": x["name"]} for x in inventory if int(x["qty_remaining"] or 0) > 0],
+            "sales": {"revenue_toman": int(revenue.get("revenue_toman", 0) or 0), "paid_orders": int(revenue.get("paid_orders", 0) or 0),
+                      "configs_created": int(sales.get("configs", 0) or 0), "volume_sold_gb": int(sales.get("volume_gb", 0) or 0)},
+            "credit_log": [dict(x) for x in credit_log],
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger("miniapp.reseller").exception("داشبورد نمایندگی ناموفق بود.")
+        raise HTTPException(500, "اطلاعات داشبورد نمایندگی موقتاً در دسترس نیست.")
 
 @app.get("/api/orders")
 def api_orders(auth=Depends(get_verified_user)):
@@ -1883,6 +1951,10 @@ async def api_abangateway_webhook(request: Request, tenant: Tenant = Depends(get
         # already_delivered / not_paid_yet / expired / cancelled / error:...
         return {"status": result}
 
+    if invoice["kind"] == "reseller_request":
+        await _complete_reseller_gateway_payment(db, tenant, invoice)
+        return {"status": "ok"}
+
     if invoice["kind"] == "wallet_topup":
         db.approve_topup(invoice["ref_id"])
         try:
@@ -2152,6 +2224,10 @@ async def api_blupal_webhook(request: Request, tenant: Tenant = Depends(get_tena
     if result != "verified_now":
         # already_delivered / not_paid_yet / expired / cancelled / error:...
         return {"status": result}
+
+    if invoice["kind"] == "reseller_request":
+        await _complete_reseller_gateway_payment(db, tenant, invoice)
+        return {"status": "ok"}
 
     if invoice["kind"] == "wallet_topup":
         db.approve_topup(invoice["ref_id"])
@@ -2729,6 +2805,39 @@ async def _complete_custom_gateway_payment(db: Database, tenant: "Tenant", invoi
     await _complete_generic_gateway_payment(db, tenant, invoice)
 
 
+async def _complete_reseller_gateway_payment(db: Database, tenant: "Tenant", invoice) -> bool:
+    """اثر پرداخت موفق هزینه نمایندگی را اعمال می‌کند. برای برنزی/نقره‌ای
+    فعال‌سازی کامل است؛ برای طلایی/VIP مرحله بعد دریافت Token بات است."""
+    request_id = int(invoice["ref_id"])
+    if not await asyncio.to_thread(db.complete_reseller_request_gateway_payment, request_id):
+        return False
+    req = await asyncio.to_thread(db.get_reseller_request, request_id)
+    if not req:
+        return False
+    tier = await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]) if req["tier_code"] else None
+    label = f"{tier['icon']} {tier['title']}" if tier else "نمایندگی"
+    if req["status"] == "completed":
+        extra = ""
+        if tier and tier["model"] == "commission":
+            extra = f"\n📈 درصد کمیسیون: {req['commission_percent'] or tier['commission_min'] or 10}٪"
+        text = f"✅ پرداخت هزینه {label} تایید شد و نمایندگی شما فعال شد.{extra}"
+    else:
+        text = (f"✅ پرداخت هزینه {label} تایید شد!\n\n"
+                "حالا توکن بات نمایندگی خودتان را از @BotFather ارسال کنید تا فعال‌سازی ادامه پیدا کند:")
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {"chat_id": req["user_id"], "text": text}
+            if req["status"] == "awaiting_bot_info":
+                payload["reply_markup"] = {"inline_keyboard": [[{"text": "🚀 ادامه فعال‌سازی نمایندگی", "callback_data": f"resreq_continue:{request_id}"}]]}
+            await session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                json=payload,
+            )
+    except Exception:
+        pass
+    return True
+
+
 async def _complete_generic_gateway_payment(db: Database, tenant: "Tenant", invoice) -> None:
     """اثر مشترکِ «پرداخت تایید شد» (تکمیل سفارش یا شارژ کیف‌پول) که همه‌ی
     درگاه‌های خودکار (درگاه سفارشی، کارت‌به‌کارت خودکار و ...) بعد از این‌که
@@ -2744,6 +2853,10 @@ async def _complete_generic_gateway_payment(db: Database, tenant: "Tenant", invo
                 )
         except Exception:
             pass
+
+    if invoice["kind"] == "reseller_request":
+        await _complete_reseller_gateway_payment(db, tenant, invoice)
+        return {"status": "ok"}
 
     if invoice["kind"] == "wallet_topup":
         db.approve_topup(invoice["ref_id"])
@@ -3217,6 +3330,10 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
 
     # status == completed
     db.update_crypto_invoice_status(txn_id, "completed", currency=currency)
+
+    if invoice["kind"] == "reseller_request":
+        await _complete_reseller_gateway_payment(db, tenant, invoice)
+        return {"status": "ok"}
 
     if invoice["kind"] == "wallet_topup":
         db.approve_topup(invoice["ref_id"])
