@@ -40,7 +40,7 @@ async def execute_renewal(db, order) -> str:
             )
         except PanelError as e:
             raise RenewalError(str(e)) from e
-        db.apply_custom_config_renewal(cc["id"], add_volume, add_days)
+        db.apply_custom_config_renewal(cc["id"], add_volume, add_days, full_reset=(mode == "full"))
         return "✅ سرویس شما با موفقیت تمدید شد."
 
     if kind == "config":

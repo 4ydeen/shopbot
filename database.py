@@ -160,6 +160,7 @@ DEFAULT_SETTINGS = {
     # دکمه‌ی درخواست نمایندگی کمیسیونی (مستقل از نمایندگی سطح ۲ حجمی؛ بدون حجم،
     # بدون محصول آماده - فقط یک درصد کمیسیون پیشنهادی که ادمین تایید/رد می‌کند)
     "commission_reseller_request_enabled": "1",
+    "reseller_tiers_menu_enabled": "0",
     # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
     "referral_free_config_threshold": "10",  # تعداد دعوت لازم
@@ -323,6 +324,7 @@ MENU_BUTTON_META = {
     "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧑‍💼 پنل نمایندگی"},
     "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🏪 درخواست نمایندگی سطح ۲"},
     "btn_commission_reseller_request": {"label": "دکمه درخواست نمایندگی کمیسیونی", "toggle_key": "commission_reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "💼 درخواست نمایندگی کمیسیونی"},
+    "btn_reseller_tiers": {"label": "دکمه انتخاب سطح نمایندگی (جایگزین دو دکمه‌ی درخواست)", "toggle_key": "reseller_tiers_menu_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🤝 نمایندگی"},
 }
 # دکمه‌های داخل «حساب کاربری» و صفحه‌ی جزئیات هر سرویس: هرکدام با یک تنظیم
 # جدا فعال/غیرفعال می‌شوند (پیش‌فرض همه فعال). کلید -> (برچسب برای ادمین، مقدار پیش‌فرض)
@@ -388,9 +390,12 @@ BUYFLOW_STYLE_ONLY_META = {
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 
 DEFAULT_MENU_ORDER = [
-    "miniapp", "btn_reseller_panel", "btn_reseller_request", "btn_commission_reseller_request", "btn_buy", "btn_test",
+    "miniapp", "btn_reseller_panel", "btn_reseller_tiers", "btn_reseller_request", "btn_commission_reseller_request", "btn_buy", "btn_test",
     "btn_my_orders", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel",
 ]
+
+
+AUTO_PROVISION_UNLIMITED_STOCK = 10 ** 9
 
 
 class Database:
@@ -1099,6 +1104,46 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_commission_reseller_requests_user ON commission_reseller_requests(user_id);
                 CREATE INDEX IF NOT EXISTS idx_commission_reseller_requests_status ON commission_reseller_requests(status);
 
+                CREATE TABLE IF NOT EXISTS reseller_tiers (
+                    code TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    icon TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    commission_min INTEGER,
+                    commission_max INTEGER,
+                    permanent_discount_percent INTEGER,
+                    min_qty INTEGER,
+                    min_volume_gb INTEGER,
+                    has_miniapp INTEGER NOT NULL DEFAULT 0,
+                    has_web_panel INTEGER NOT NULL DEFAULT 0,
+                    has_dedicated_bot INTEGER NOT NULL DEFAULT 0,
+                    auto_approve INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS reseller_tier_qty_discounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tier_code TEXT NOT NULL,
+                    min_qty INTEGER NOT NULL,
+                    discount_percent INTEGER NOT NULL,
+                    UNIQUE (tier_code, min_qty)
+                );
+
+                CREATE TABLE IF NOT EXISTS reseller_tier_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    tier_code TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    reviewed_by INTEGER,
+                    reject_reason TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_reseller_tier_requests_user ON reseller_tier_requests(user_id, status);
+
                 CREATE TABLE IF NOT EXISTS reseller_inline_commission_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     owner_reseller_id INTEGER NOT NULL,
@@ -1197,6 +1242,7 @@ class Database:
 
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
+            self._seed_default_reseller_tiers(conn)
 
             # رفع باگ: این فایل دیتابیس ممکن است از یک بات نمایندگیِ حذف‌شده‌ی قبلی
             # باقی مانده باشد (مثلاً ادمین موقع حذف نماینده گزینه‌ی «پاک نشود» را
@@ -1244,7 +1290,8 @@ class Database:
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
         "custom_config_history", "reseller_credit_log", "reseller_requests",
-        "reseller_product_credit", "reseller_inline_commission_log",
+        "reseller_product_credit", "reseller_inline_commission_log", "reseller_tiers",
+        "reseller_tier_qty_discounts", "reseller_tier_requests",
         "payment_webhook_logs", "web_push_subscriptions", "temp_messages",
         "settings",
     )
@@ -1279,6 +1326,7 @@ class Database:
 
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
+            self._seed_default_reseller_tiers(conn)
 
         self._settings_cache = None
         self._admin_cache = None
@@ -1374,6 +1422,9 @@ class Database:
             # هیچ ستونی اضافه نمی‌کند)؛ برای جلوگیری از خطای «no column named ...»
             # موقع ثبت درخواست نمایندگی، این ستون‌ها را هم مهاجرت می‌کنیم.
             ("reseller_requests", "volume_gb", "INTEGER DEFAULT 0"),
+            ("reseller_requests", "tier_code", "TEXT"),
+            ("users", "reseller_tier", "TEXT"),
+            ("orders", "tier_discount_amount", "INTEGER DEFAULT 0"),
             ("reseller_requests", "request_text", "TEXT"),
             ("reseller_requests", "status", "TEXT DEFAULT 'pending_review'"),
             ("reseller_requests", "price_toman", "INTEGER"),
@@ -1557,6 +1608,203 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?)",
                 (product_id, t["from_gb"], t["to_gb"], t["price_per_gb"], t["sort_order"]),
             )
+
+    RESELLER_TIER_DEFAULTS = (
+        {
+            "code": "bronze", "title": "برنزی", "icon": "🥉", "model": "commission", "sort_order": 10,
+            "summary": "کمیسیون از خرید مشتری‌ها",
+            "description": "لینک اختصاصی می‌گیرید و از هر خرید مشتریانی که با لینک شما وارد شوند، درصدی کمیسیون به کیف پولتان اضافه می‌شود. بدون سرمایه اولیه.",
+        },
+        {
+            "code": "silver", "title": "نقره‌ای", "icon": "🥈", "model": "discount", "sort_order": 20, "is_enabled": 0,
+            "summary": "تخفیف دائمی و خرید عمده در بات اصلی",
+            "description": "بدون لینک و بدون بات؛ از خود بات اصلی با قیمت تخفیفی می‌خرید و هرچه یک‌جا بیشتر بخرید، تخفیف بیشتر می‌شود.",
+        },
+        {
+            "code": "gold", "title": "طلایی", "icon": "🥇", "model": "fixed_product", "sort_order": 30,
+            "has_miniapp": 1, "has_web_panel": 1, "has_dedicated_bot": 1,
+            "summary": "فروشگاه شخصی با خرید عمده‌ی محصولات ما",
+            "description": "پنل وب، مینی‌اپ و بات مستقل اختصاصی دارید. محصولات فروشگاه را عمده و پیش‌پرداخت می‌خرید و همان‌ها را می‌فروشید.",
+        },
+        {
+            "code": "vip", "title": "VIP", "icon": "👑", "model": "volume_credit", "sort_order": 40,
+            "has_miniapp": 1, "has_web_panel": 1, "has_dedicated_bot": 1,
+            "summary": "فروشگاه شخصی با اعتبار حجمی آزاد",
+            "description": "پنل وب، مینی‌اپ و بات مستقل اختصاصی دارید. یک استخر حجم می‌خرید و هر محصولی را با هر قیمتی خودتان می‌سازید.",
+        },
+    )
+
+    RESELLER_TIER_TEXT_FIELDS = ("title", "icon", "summary", "description")
+    RESELLER_TIER_FLAG_FIELDS = ("is_enabled", "has_miniapp", "has_web_panel", "has_dedicated_bot", "auto_approve")
+    RESELLER_TIER_INT_FIELDS = ("sort_order", "commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb")
+    RESELLER_TIER_NULLABLE_FIELDS = ("commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb")
+    RESELLER_TIER_PERCENT_FIELDS = ("commission_min", "commission_max", "permanent_discount_percent")
+
+    def _seed_default_reseller_tiers(self, conn):
+        for row in self.RESELLER_TIER_DEFAULTS:
+            cols = list(row)
+            conn.execute(
+                f"INSERT OR IGNORE INTO reseller_tiers ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                [row[c] for c in cols],
+            )
+
+    def list_reseller_tiers(self, enabled_only: bool = False):
+        query = "SELECT * FROM reseller_tiers"
+        if enabled_only:
+            query += " WHERE is_enabled=1"
+        with self._get_conn() as conn:
+            return conn.execute(query + " ORDER BY sort_order, code").fetchall()
+
+    def get_reseller_tier(self, code: str):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (code,)).fetchone()
+
+    def update_reseller_tier(self, code: str, **fields) -> bool:
+        allowed = (
+            set(self.RESELLER_TIER_TEXT_FIELDS) | set(self.RESELLER_TIER_FLAG_FIELDS) | set(self.RESELLER_TIER_INT_FIELDS)
+        )
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"فیلد نامعتبر برای سطح نمایندگی: {', '.join(sorted(unknown))}")
+        clean = {}
+        for key, value in fields.items():
+            if value is None and key in self.RESELLER_TIER_NULLABLE_FIELDS:
+                clean[key] = None
+            elif key in self.RESELLER_TIER_TEXT_FIELDS:
+                clean[key] = str(value).strip()
+            elif key in self.RESELLER_TIER_FLAG_FIELDS:
+                clean[key] = 1 if int(value) else 0
+            else:
+                clean[key] = int(value)
+        for key in self.RESELLER_TIER_PERCENT_FIELDS:
+            if clean.get(key) is not None and not 0 <= clean[key] <= 100:
+                raise ValueError(f"{key} باید بین ۰ تا ۱۰۰ باشد")
+        if not clean:
+            return False
+        with self._get_conn() as conn:
+            current = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (code,)).fetchone()
+            if not current:
+                return False
+            low = clean["commission_min"] if "commission_min" in clean else current["commission_min"]
+            high = clean["commission_max"] if "commission_max" in clean else current["commission_max"]
+            if low is not None and high is not None and low > high:
+                raise ValueError("حداقل کمیسیون نمی‌تواند از حداکثر بیشتر باشد")
+            conn.execute(
+                f"UPDATE reseller_tiers SET {', '.join(f'{k}=?' for k in clean)} WHERE code=?",
+                [*clean.values(), code],
+            )
+            return True
+
+    def get_user_reseller_tier(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+            return row["reseller_tier"] if row and row["reseller_tier"] else None
+
+    def set_user_reseller_tier(self, user_tg_id: int, code) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute("UPDATE users SET reseller_tier=? WHERE telegram_id=?", (code or None, user_tg_id))
+            return cur.rowcount > 0
+
+    def list_tier_members(self, code: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT telegram_id, username, first_name FROM users WHERE reseller_tier=? ORDER BY id DESC", (code,)
+            ).fetchall()
+
+    def list_tier_qty_discounts(self, code: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_tier_qty_discounts WHERE tier_code=? ORDER BY min_qty", (code,)
+            ).fetchall()
+
+    def set_tier_qty_discount(self, code: str, min_qty: int, discount_percent: int) -> int:
+        min_qty, discount_percent = int(min_qty), int(discount_percent)
+        if min_qty < 2:
+            raise ValueError("حداقل تعداد برای پلکان باید ۲ یا بیشتر باشد")
+        if not 1 <= discount_percent <= 100:
+            raise ValueError("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد")
+        with self._get_conn() as conn:
+            if not conn.execute("SELECT 1 FROM reseller_tiers WHERE code=?", (code,)).fetchone():
+                raise ValueError("سطح نامعتبر است")
+            conn.execute(
+                "INSERT INTO reseller_tier_qty_discounts (tier_code, min_qty, discount_percent) VALUES (?, ?, ?) "
+                "ON CONFLICT(tier_code, min_qty) DO UPDATE SET discount_percent=excluded.discount_percent",
+                (code, min_qty, discount_percent),
+            )
+            return conn.execute(
+                "SELECT id FROM reseller_tier_qty_discounts WHERE tier_code=? AND min_qty=?", (code, min_qty)
+            ).fetchone()["id"]
+
+    def delete_tier_qty_discount(self, discount_id: int) -> bool:
+        with self._get_conn() as conn:
+            return conn.execute("DELETE FROM reseller_tier_qty_discounts WHERE id=?", (discount_id,)).rowcount > 0
+
+    def get_tier_price_info(self, user_tg_id: int, unit_price: int, quantity: int = 1) -> dict:
+        total = unit_price * quantity
+        info = {"percent": 0, "amount": 0, "total": total, "total_after": total, "title": "", "icon": ""}
+        with self._get_conn() as conn:
+            user = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+            if not user or not user["reseller_tier"]:
+                return info
+            tier = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (user["reseller_tier"],)).fetchone()
+            if not tier or not tier["is_enabled"] or tier["model"] != "discount":
+                return info
+            bulk = conn.execute(
+                "SELECT MAX(discount_percent) AS p FROM reseller_tier_qty_discounts WHERE tier_code=? AND min_qty<=?",
+                (tier["code"], quantity),
+            ).fetchone()["p"]
+        percent = max(tier["permanent_discount_percent"] or 0, bulk or 0)
+        amount = total * percent // 100
+        info.update(percent=percent, amount=amount, total_after=total - amount, title=tier["title"], icon=tier["icon"])
+        return info
+
+    def create_tier_request(self, user_tg_id: int, code: str) -> int:
+        with self._get_conn() as conn:
+            return conn.execute(
+                "INSERT INTO reseller_tier_requests (user_id, tier_code, status) VALUES (?, ?, 'pending')",
+                (user_tg_id, code),
+            ).lastrowid
+
+    def get_tier_request(self, request_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM reseller_tier_requests WHERE id=?", (request_id,)).fetchone()
+
+    def get_pending_tier_request(self, user_tg_id: int, code: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM reseller_tier_requests WHERE user_id=? AND tier_code=? AND status='pending' "
+                "ORDER BY id DESC LIMIT 1",
+                (user_tg_id, code),
+            ).fetchone()
+
+    def list_tier_requests(self, status: str = None):
+        with self._get_conn() as conn:
+            if status:
+                return conn.execute(
+                    "SELECT * FROM reseller_tier_requests WHERE status=? ORDER BY id DESC", (status,)
+                ).fetchall()
+            return conn.execute("SELECT * FROM reseller_tier_requests ORDER BY id DESC").fetchall()
+
+    def approve_tier_request(self, request_id: int, admin_id: int) -> bool:
+        with self._get_conn() as conn:
+            req = conn.execute("SELECT * FROM reseller_tier_requests WHERE id=?", (request_id,)).fetchone()
+            if not req or req["status"] != "pending":
+                return False
+            conn.execute(
+                "UPDATE reseller_tier_requests SET status='approved', reviewed_by=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?",
+                (admin_id, request_id),
+            )
+            conn.execute("UPDATE users SET reseller_tier=? WHERE telegram_id=?", (req["tier_code"], req["user_id"]))
+            return True
+
+    def reject_tier_request(self, request_id: int, admin_id: int, reason: str = None) -> bool:
+        with self._get_conn() as conn:
+            return conn.execute(
+                "UPDATE reseller_tier_requests SET status='rejected', reviewed_by=?, reject_reason=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'",
+                (admin_id, reason, request_id),
+            ).rowcount > 0
 
     def _seed_default_test_config_plan(self, conn):
         """مهاجرت یک‌باره: اگر نصب قدیمی‌تر یک پنل برای «کانفیگ تست» فعال داشته
@@ -2563,10 +2811,7 @@ class Database:
                 "SELECT is_auto_provision FROM products WHERE id=?", (product_id,)
             ).fetchone()
             if prod and prod["is_auto_provision"]:
-                # این محصولات لحظه‌ی خرید و به‌صورت خودکار از اعتبار حجمی نماینده ساخته می‌شوند؛
-                # عدد ثابتی به‌عنوان سقفِ معقول تعداد قابل‌خرید در یک سفارش برمی‌گردد (نه موجودی واقعی)،
-                # کفایت واقعی اعتبار همان لحظه‌ی خرید در provision_auto_config چک می‌شود.
-                return 20
+                return AUTO_PROVISION_UNLIMITED_STOCK
             row = conn.execute(
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
@@ -2881,13 +3126,16 @@ class Database:
         discount_amount: int = 0,
         quantity: int = 1,
         config_name: str = None,
+        tier_discount_amount: int = 0,
     ) -> int:
         final_price = max(base_price - wallet_used - discount_amount, 0)
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, "
-                "discount_code_id, discount_amount, final_price, quantity, config_name) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
-                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price, quantity, config_name),
+                "discount_code_id, discount_amount, final_price, quantity, config_name, tier_discount_amount) "
+                "VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price,
+                 quantity, config_name, tier_discount_amount),
             )
             return cur.lastrowid
 
@@ -3676,6 +3924,7 @@ class Database:
                 )
             else:
                 conn.execute("UPDATE users SET inline_reseller_enabled=1 WHERE telegram_id=?", (owner_tg_id,))
+            conn.execute("UPDATE users SET reseller_tier=NULL WHERE telegram_id=?", (owner_tg_id,))
 
     def set_inline_reseller_commission_percent(self, owner_tg_id: int, percent: int):
         """تغییر درصد کمیسیونِ یک نماینده‌ی کمیسیونیِ از قبل فعال (بدون تغییر
@@ -5181,8 +5430,63 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE products SET payment_methods=? WHERE id=?", (value, product_id))
 
+    def get_custom_config_product_payment_methods(self, product_id: int):
+        """معادل get_product_payment_methods اما برای محصولات «ساخت کانفیگ شخصی»
+        (custom_config_products) - شامل حالت قیمت‌گذاری پله‌ای/پلکانی هم می‌شود.
+        None = همه‌ی روش‌ها مجازند (پیش‌فرض/بدون محدودیت)."""
+        row = self.get_custom_config_product(product_id)
+        if not row:
+            return None
+        raw = row["payment_methods"] if "payment_methods" in row.keys() else None
+        if not raw:
+            return None
+        try:
+            methods = json.loads(raw)
+        except Exception:
+            return None
+        if not methods:
+            return None
+        return methods
+
+    def set_custom_config_product_payment_methods(self, product_id: int, methods):
+        """methods=None یا [] یعنی «همه‌ی روش‌ها مجاز» (حذف محدودیت)."""
+        value = json.dumps(methods, ensure_ascii=False) if methods else None
+        with self._get_conn() as conn:
+            conn.execute("UPDATE custom_config_products SET payment_methods=? WHERE id=?", (value, product_id))
+
     def product_allows_payment_method(self, product_id: int, method_key: str) -> bool:
         allowed = self.get_product_payment_methods(product_id)
+        if allowed is None:
+            return True
+        return method_key in allowed
+
+    # -----------------------------------------------------------------------
+    # محدودسازی روش پرداخت مجاز برای «شارژ کیف پول» (مستقل از محصولات)
+    # -----------------------------------------------------------------------
+
+    def get_wallet_topup_payment_methods(self):
+        """None = همه‌ی روش‌ها برای شارژ کیف پول مجازند (پیش‌فرض/بدون محدودیت).
+        در غیر این صورت لیستی از کلیدهای مجاز - همان قراردادِ
+        get_product_payment_methods، با این تفاوت که این تنظیم سراسری است
+        (در جدول settings ذخیره می‌شود، نه ستون یک محصول)."""
+        raw = self.get_setting("wallet_topup_payment_methods", "")
+        if not raw:
+            return None
+        try:
+            methods = json.loads(raw)
+        except Exception:
+            return None
+        if not methods:
+            return None
+        return methods
+
+    def set_wallet_topup_payment_methods(self, methods):
+        """methods=None یا [] یعنی «همه‌ی روش‌ها مجاز» (حذف محدودیت)."""
+        value = json.dumps(methods, ensure_ascii=False) if methods else ""
+        self.set_setting("wallet_topup_payment_methods", value)
+
+    def wallet_topup_allows_payment_method(self, method_key: str) -> bool:
+        allowed = self.get_wallet_topup_payment_methods()
         if allowed is None:
             return True
         return method_key in allowed
@@ -6378,9 +6682,13 @@ class Database:
                 "SELECT * FROM custom_configs WHERE id=?", (custom_config_id,)
             ).fetchone()
 
-    def apply_custom_config_renewal(self, custom_config_id: int, add_volume_gb: int = 0, add_days: int = 0) -> dict:
+    def apply_custom_config_renewal(self, custom_config_id: int, add_volume_gb: int = 0, add_days: int = 0,
+                                     full_reset: bool = False) -> dict:
         """بعد از موفقیت‌آمیز بودن به‌روزرسانی روی خودِ پنل (provider.update_user)،
-        رکورد بوکینگ محلی (حجم/مدت/تاریخ انقضا) را هم‌سو با آن به‌روز می‌کند."""
+        رکورد بوکینگ محلی (حجم/مدت/تاریخ انقضا) را هم‌سو با آن به‌روز می‌کند.
+        full_reset=True یعنی «تمدید کامل» (همان reset_usage سمت پنل): حجم رکورد
+        محلی هم باید با بستهٔ تازه جایگزین شود، نه رویش جمع بزند - وگرنه با پنل
+        (که مصرف را صفر و سقف را جایگزین کرده) ناهم‌خوان می‌شود."""
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM custom_configs WHERE id=?", (custom_config_id,)).fetchone()
             if not row:
@@ -6396,7 +6704,10 @@ class Database:
                 except ValueError:
                     pass
             new_expires_at = (base + timedelta(days=add_days)).isoformat() if add_days else current_expires_at
-            new_volume = (row["volume_gb"] or 0) + add_volume_gb if add_volume_gb else row["volume_gb"]
+            if add_volume_gb:
+                new_volume = add_volume_gb if full_reset else (row["volume_gb"] or 0) + add_volume_gb
+            else:
+                new_volume = row["volume_gb"]
             new_duration = (row["duration_days"] or 0) + add_days if add_days else row["duration_days"]
             conn.execute(
                 "UPDATE custom_configs SET volume_gb=?, duration_days=?, expires_at=? WHERE id=?",
@@ -6705,6 +7016,8 @@ class Database:
             conn.execute(
                 "UPDATE users SET is_reseller=? WHERE telegram_id=?", (1 if enabled else 0, user_tg_id)
             )
+            if enabled:
+                conn.execute("UPDATE users SET reseller_tier=NULL WHERE telegram_id=?", (user_tg_id,))
 
     def adjust_reseller_credit(self, user_tg_id: int, delta_gb: int, admin_id: int = None, reason: str = None):
         """شارژ/تنظیم اعتبار نماینده با تضمین اینکه موجودی هرگز منفی نشود.
@@ -7044,7 +7357,7 @@ class Database:
     def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str, wants_custom_config: int = 0,
                                  supply_model: str = "volume_credit", supply_product_id: int = None,
                                  supply_qty: int = None, bot_choice: str = "dedicated",
-                                 wants_web_panel: int = 0, wants_miniapp: int = 0) -> int:
+                                 wants_web_panel: int = 0, wants_miniapp: int = 0, tier_code: str = None) -> int:
         with self._get_conn() as conn:
             # status را صراحتاً اینجا ست می‌کنیم و به مقدار پیش‌فرض ستون در schema
             # تکیه نمی‌کنیم. روی دیتابیس‌های قدیمی‌تر که ستون status از قبل (قبل از
@@ -7058,7 +7371,7 @@ class Database:
                 "status": "pending_review", "wants_custom_config": 1 if wants_custom_config else 0,
                 "supply_model": supply_model, "supply_product_id": supply_product_id, "supply_qty": supply_qty,
                 "bot_choice": bot_choice, "wants_web_panel": 1 if wants_web_panel else 0,
-                "wants_miniapp": 1 if wants_miniapp else 0,
+                "wants_miniapp": 1 if wants_miniapp else 0, "tier_code": tier_code,
             }
             fields = list(known.keys())
             values = list(known.values())

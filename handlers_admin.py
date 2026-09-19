@@ -841,6 +841,127 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
         await call.answer()
 
+    @router.callback_query(F.data.startswith("adm_ccp_paymethods:"))
+    async def cb_admin_ccp_paymethods(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        product_id = callback_id(call.data, "adm_ccp_paymethods")
+        if product_id is None:
+            return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+        product = (await asyncio.to_thread(db.get_custom_config_product, product_id))
+        if not product:
+            return await call.answer("⚠️ این محصول دیگر وجود ندارد.", show_alert=True)
+        await safe_edit(call, 
+            f"💳 روش‌های پرداخت مجاز برای «{product['name']}»:\n\n"
+            "با لمس هر گزینه، فعال/غیرفعال می‌شود. اگر «همه‌ی روش‌ها» تیک بخورد، این پلن (چه فلت چه پله‌ای/پلکانی) "
+            "از هر روش پرداخت فعالی قابل خرید است.",
+            reply_markup=kb.admin_custom_config_product_payment_methods_kb(db, product_id),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ccppm_all:"))
+    async def cb_admin_ccppm_all(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        product_id = callback_id(call.data, "adm_ccppm_all")
+        if product_id is None:
+            return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+        (await asyncio.to_thread(db.set_custom_config_product_payment_methods, product_id, None))
+        await safe_edit(call, 
+            "💳 روش‌های پرداخت مجاز:",
+            reply_markup=kb.admin_custom_config_product_payment_methods_kb(db, product_id),
+        )
+        await call.answer("همه‌ی روش‌ها فعال شدند.")
+
+    @router.callback_query(F.data.startswith("adm_ccppm_tgl:"))
+    async def cb_admin_ccppm_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            _, product_id_s, method_key = call.data.split(":", 2)
+            product_id = int(product_id_s)
+        except (ValueError, IndexError):
+            return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+
+        catalog_keys = [item["key"] for item in (await asyncio.to_thread(db.get_payment_methods_catalog))]
+        allowed = (await asyncio.to_thread(db.get_custom_config_product_payment_methods, product_id))
+        current = set(catalog_keys) if allowed is None else set(allowed)
+
+        if method_key in current:
+            current.discard(method_key)
+        else:
+            current.add(method_key)
+
+        if not current:
+            return await call.answer("⚠️ حداقل یک روش پرداخت باید برای این پلن فعال بماند.", show_alert=True)
+
+        if current == set(catalog_keys):
+            (await asyncio.to_thread(db.set_custom_config_product_payment_methods, product_id, None))
+        else:
+            (await asyncio.to_thread(db.set_custom_config_product_payment_methods, product_id, sorted(current)))
+
+        await safe_edit(call, 
+            "💳 روش‌های پرداخت مجاز:",
+            reply_markup=kb.admin_custom_config_product_payment_methods_kb(db, product_id),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_wallet_paymethods")
+    async def cb_admin_wallet_paymethods(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call, 
+            "👛 روش‌های پرداخت مجاز برای «شارژ کیف پول»:\n\n"
+            "با لمس هر گزینه، فعال/غیرفعال می‌شود. اگر «همه‌ی روش‌ها» تیک بخورد، شارژ کیف پول از هر روش پرداخت "
+            "فعالی ممکن است (با اضافه‌شدن هر درگاه جدید در آینده هم خودکار برایش فعال می‌شود). این تنظیم فقط "
+            "روی شارژ کیف پول اثر دارد و مستقل از محدودیت روش پرداخت هر محصول است.",
+            reply_markup=kb.admin_wallet_payment_methods_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_walletpm_all")
+    async def cb_admin_walletpm_all(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        (await asyncio.to_thread(db.set_wallet_topup_payment_methods, None))
+        await safe_edit(call, 
+            "👛 روش‌های پرداخت مجاز برای شارژ کیف پول:",
+            reply_markup=kb.admin_wallet_payment_methods_kb(db),
+        )
+        await call.answer("همه‌ی روش‌ها فعال شدند.")
+
+    @router.callback_query(F.data.startswith("adm_walletpm_tgl:"))
+    async def cb_admin_walletpm_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            method_key = call.data.split(":", 1)[1]
+        except IndexError:
+            return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+
+        catalog_keys = [item["key"] for item in (await asyncio.to_thread(db.get_payment_methods_catalog))]
+        allowed = (await asyncio.to_thread(db.get_wallet_topup_payment_methods))
+        current = set(catalog_keys) if allowed is None else set(allowed)
+
+        if method_key in current:
+            current.discard(method_key)
+        else:
+            current.add(method_key)
+
+        if not current:
+            return await call.answer("⚠️ حداقل یک روش پرداخت باید برای شارژ کیف پول فعال بماند.", show_alert=True)
+
+        if current == set(catalog_keys):
+            (await asyncio.to_thread(db.set_wallet_topup_payment_methods, None))
+        else:
+            (await asyncio.to_thread(db.set_wallet_topup_payment_methods, sorted(current)))
+
+        await safe_edit(call, 
+            "👛 روش‌های پرداخت مجاز برای شارژ کیف پول:",
+            reply_markup=kb.admin_wallet_payment_methods_kb(db),
+        )
+        await call.answer()
+
     @router.callback_query(F.data == "adm_prod_add")
     async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -5709,12 +5830,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
                 f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {price:,}",
             ))
             await message.answer(f"✅ هزینه برای کاربر ارسال شد ({price:,} تومان).")
+            volume_line = f"📦 حجم: {req['volume_gb']:,} گیگ\n" if req["volume_gb"] else ""
             try:
                 await bot.send_message(
                     req["user_id"],
                     f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
                     f"💰 هزینه‌ی نمایندگی: {price:,} تومان\n"
-                    f"📦 حجم: {req['volume_gb']:,} گیگ\n\n"
+                    f"{volume_line}\n"
                     f"در صورت موافقت روی «پرداخت می‌کنم» بزنید:",
                     reply_markup=kb.reseller_request_pay_kb(request_id),
                 )
@@ -5734,6 +5856,46 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await state.set_state(AdminResellerRequestFlow.waiting_reject_reason)
             await call.message.answer("دلیل رد درخواست را بنویسید (برای کاربر ارسال می‌شود):")
             await call.answer()
+
+        async def _decide_tier_request(call: CallbackQuery, bot: Bot, approve: bool):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            request_id = int(call.data.split(":")[1])
+            req = (await asyncio.to_thread(db.get_tier_request, request_id))
+            if approve:
+                done = req is not None and (await asyncio.to_thread(db.approve_tier_request, request_id, call.from_user.id))
+            else:
+                done = req is not None and (await asyncio.to_thread(db.reject_tier_request, request_id, call.from_user.id))
+            if not done:
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            tier = (await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]))
+            label = f"{tier['icon']} {tier['title']}" if tier else req["tier_code"]
+            (await asyncio.to_thread(
+                db.log_admin_action, call.from_user.id, "tier_request_approve" if approve else "tier_request_reject",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | سطح {req['tier_code']}",
+            ))
+            text = (
+                f"✅ درخواست شما برای سطح {label} تایید شد. تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود."
+                if approve else f"❌ متاسفانه درخواست شما برای سطح {label} رد شد."
+            )
+            try:
+                await bot.send_message(req["user_id"], text)
+            except Exception:
+                pass
+            try:
+                await call.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            await call.answer("تایید شد." if approve else "رد شد.")
+
+        @router.callback_query(F.data.startswith("tierreq_ok:"))
+        async def cb_tierreq_ok(call: CallbackQuery, bot: Bot):
+            await _decide_tier_request(call, bot, True)
+
+        @router.callback_query(F.data.startswith("tierreq_no:"))
+        async def cb_tierreq_no(call: CallbackQuery, bot: Bot):
+            await _decide_tier_request(call, bot, False)
 
         @router.callback_query(F.data.startswith("resreq_payreject:"))
         async def cb_resreq_payreject(call: CallbackQuery, state: FSMContext):

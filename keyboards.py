@@ -113,15 +113,22 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
             return None
         return (settings.get("btn_reseller_panel", "🧑‍💼 پنل نمایندگی"), settings.get("btn_reseller_panel_style", "primary"))
 
+    tiers_menu_on = settings.get("reseller_tiers_menu_enabled", "0") == "1"
+
+    def item_reseller_tiers():
+        if not tiers_menu_on or not (show_reseller_request or show_commission_reseller_request):
+            return None
+        return (settings.get("btn_reseller_tiers", "🤝 نمایندگی"), settings.get("btn_reseller_tiers_style", "primary"))
+
     def item_reseller_request():
-        if not show_reseller_request:
+        if tiers_menu_on or not show_reseller_request:
             return None
         if settings.get("reseller_request_enabled", "1") != "1":
             return None
         return (settings.get("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲"), settings.get("btn_reseller_request_style", "primary"))
 
     def item_commission_reseller_request():
-        if not show_commission_reseller_request:
+        if tiers_menu_on or not show_commission_reseller_request:
             return None
         if settings.get("commission_reseller_request_enabled", "1") != "1":
             return None
@@ -140,6 +147,7 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
         "btn_contact": item_contact,
         "btn_admin_panel": item_admin_panel,
         "btn_reseller_panel": item_reseller_panel,
+        "btn_reseller_tiers": item_reseller_tiers,
         "btn_reseller_request": item_reseller_request,
         "btn_commission_reseller_request": item_commission_reseller_request,
     }
@@ -265,6 +273,29 @@ def inline_menu_for_user(db, user_tg_id: int, is_main_bot: bool = True) -> Inlin
                                 show_reseller_request, show_commission_reseller_request)
 
 
+def tier_request_review_kb(request_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ تایید", callback_data=f"tierreq_ok:{request_id}", style="success")],
+        [InlineKeyboardButton(text="❌ رد", callback_data=f"tierreq_no:{request_id}", style="danger")],
+    ])
+
+
+def reseller_tiers_kb(tiers) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"{t['icon']} {t['title']}", callback_data=f"rt:pick:{t['code']}")]
+        for t in tiers
+    ]
+    rows.append([InlineKeyboardButton(text="❌ بستن", callback_data="rt:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reseller_tier_detail_kb(code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ شروع درخواست", callback_data=f"rt:go:{code}", style="success")],
+        [InlineKeyboardButton(text="🔙 بازگشت به سطح‌ها", callback_data="rt:menu")],
+    ])
+
+
 # ---------------------------------------------------------------------------
 # دسته‌بندی‌ها / محصولات (کاربر)
 # ---------------------------------------------------------------------------
@@ -317,7 +348,7 @@ _PRODUCT_CONFIRM_BUILDERS = {
 }
 
 
-def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1) -> InlineKeyboardMarkup:
+def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1, bulk_step: int = 0) -> InlineKeyboardMarkup:
     max_qty = max(max_qty, 1)
     quantity = max(1, min(quantity, max_qty))
 
@@ -331,6 +362,14 @@ def product_confirm_kb(db, product_id, quantity: int = 1, max_qty: int = 1) -> I
     order = db.get_custom_order("buyflow_confirm", list(_PRODUCT_CONFIRM_BUILDERS.keys()))
     back_text = db.get_setting("btn_buy_back_text", "⬅️ بازگشت")
     rows = [qty_row]
+    if bulk_step > 1:
+        bulk_row = []
+        if quantity > 1:
+            bulk_row.append(InlineKeyboardButton(text=f"➖{bulk_step}", callback_data=f"qty_dec:{product_id}:{quantity}:{bulk_step}"))
+        if quantity < max_qty:
+            bulk_row.append(InlineKeyboardButton(text=f"➕{bulk_step}", callback_data=f"qty_inc:{product_id}:{quantity}:{bulk_step}"))
+        if bulk_row:
+            rows.append(bulk_row)
     for key in order:
         rows.append([_PRODUCT_CONFIRM_BUILDERS[key](db, product_id, quantity)])
     rows.append([_styled_inline(db, back_text, "back_categories", "btn_buy_back_style")])
@@ -975,6 +1014,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_card_auto", "📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "adm_card_auto"),
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
+    ("adm_wallet_paymethods", "👛 روش‌های پرداخت شارژ کیف پول", "adm_wallet_paymethods"),
     ("adm_edit_welcome", "📝 ویرایش پیام خوش‌آمد", "adm_edit_welcome"),
     ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
@@ -1042,6 +1082,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
+        "adm_wallet_paymethods",
     ]),
     ("alerts", "🔔 یادآوری‌ها و هشدارها", [
         "adm_renewal_settings",
@@ -1583,7 +1624,7 @@ def admin_products_categories_kb(categories, prefix="adm_prod_cat") -> InlineKey
 def admin_products_list_kb(db, products) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
-        stock = db.count_available_configs(p["id"])
+        stock = "∞" if p["is_auto_provision"] else db.count_available_configs(p["id"])
         state_icon = "🟢" if p["is_active"] else "🔴"
         dur = p["duration_days"]
         dur_label = "نامحدود" if (p["provision_server_id"] and dur == 0) else f"{dur if dur is not None else 30} روز"
@@ -1676,6 +1717,53 @@ def admin_product_payment_methods_kb(db, product_id: int) -> InlineKeyboardMarku
             callback_data=f"adm_prodpm_tgl:{product_id}:{item['key']}",
         )])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_custom_config_product_payment_methods_kb(db, product_id: int) -> InlineKeyboardMarkup:
+    """معادل admin_product_payment_methods_kb برای محصولات «ساخت کانفیگ شخصی»
+    (چه قیمت‌گذاری فلت، چه پله‌ای/پلکانی). None/[] یعنی «همه مجاز» (پیش‌فرض)."""
+    allowed = db.get_custom_config_product_payment_methods(product_id)
+    all_allowed = allowed is None
+    catalog = db.get_payment_methods_catalog()
+
+    rows = [[InlineKeyboardButton(
+        text=f"{'✅' if all_allowed else '⬜️'} همه‌ی روش‌ها فعال باشند",
+        callback_data=f"adm_ccppm_all:{product_id}",
+    )]]
+    for item in catalog:
+        checked = all_allowed or (item["key"] in (allowed or []))
+        icon = "✅" if checked else "⬜️"
+        suffix = "" if item["enabled"] else " (غیرفعال)"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {item['label']}{suffix}",
+            callback_data=f"adm_ccppm_tgl:{product_id}:{item['key']}",
+        )])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm_ccp_view:{product_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_wallet_payment_methods_kb(db) -> InlineKeyboardMarkup:
+    """صفحه‌ی چندانتخابی روش‌های پرداخت مجاز برای «شارژ کیف پول» - دقیقاً
+    مشابه admin_product_payment_methods_kb اما مستقل از محصول (سراسری،
+    فقط برای فرایند شارژ کیف پول کاربرد دارد)."""
+    allowed = db.get_wallet_topup_payment_methods()
+    all_allowed = allowed is None
+    catalog = db.get_payment_methods_catalog()
+
+    rows = [[InlineKeyboardButton(
+        text=f"{'✅' if all_allowed else '⬜️'} همه‌ی روش‌ها فعال باشند",
+        callback_data="adm_walletpm_all",
+    )]]
+    for item in catalog:
+        checked = all_allowed or (item["key"] in (allowed or []))
+        icon = "✅" if checked else "⬜️"
+        suffix = "" if item["enabled"] else " (غیرفعال)"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {item['label']}{suffix}",
+            callback_data=f"adm_walletpm_tgl:{item['key']}",
+        )])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1825,6 +1913,7 @@ BUTTON_LABELS = {
     "btn_reseller_panel": "دکمه پنل نمایندگی",
     "btn_reseller_request": "دکمه درخواست نمایندگی سطح ۲",
     "btn_commission_reseller_request": "دکمه درخواست نمایندگی کمیسیونی",
+    "btn_reseller_tiers": "دکمه انتخاب سطح نمایندگی",
 }
 
 
@@ -2472,6 +2561,7 @@ def custom_config_product_view_kb(db, product) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="💰 مدیریت تعرفه‌های پله‌ای این محصول", callback_data=f"adm_ccp_tiers:{pid}")])
     else:
         rows.append([InlineKeyboardButton(text="✏️ تغییر قیمت هر گیگ", callback_data=f"adm_ccp_edit_flat_price:{pid}")])
+    rows.append([InlineKeyboardButton(text="💳 روش‌های پرداخت مجاز", callback_data=f"adm_ccp_paymethods:{pid}")])
     rows += [
         [InlineKeyboardButton(text=toggle_text, callback_data=f"adm_ccp_toggle:{pid}")],
         [InlineKeyboardButton(text="🗑 حذف محصول", callback_data=f"adm_ccp_delete:{pid}")],
