@@ -4471,7 +4471,7 @@ async function renderAdminEditProduct(body) {
         <input type="checkbox" id="edit-prod-volume-unlimited" ${volumeIsUnlimited ? "checked" : ""} /> ♾ حجم نامحدود
       </label>
       <p class="hint-text">🔌 با تغییر پنل، ساخت‌های بعدیِ همین محصول از پنل/اینباند جدید انجام می‌شود؛ سرویس‌های قبلاً ساخته‌شده تغییر نمی‌کنند.</p>
-      ` : `<p class="hint-text">🔌 این محصول به‌صورت خودکار (${p.auto_provision_volume_gb ? p.auto_provision_volume_gb + " گیگ" : "نامحدود"}) ساخته می‌شود. برای تغییر پنل/اینباند باید نمایندگی سطح ۲ باشی.</p>`) : ""}
+      ` : `<p class="hint-text">🔌 این محصول به‌صورت خودکار (${p.auto_provision_volume_gb ? p.auto_provision_volume_gb + " گیگ" : "نامحدود"}) ساخته می‌شود. برای تغییر پنل/اینباند باید نمایندگی باشی.</p>`) : ""}
       <div class="field-error" id="edit-prod-error"></div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn" id="edit-prod-save">💾 ذخیره تغییرات</button>
