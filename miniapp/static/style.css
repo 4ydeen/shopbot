@@ -1132,3 +1132,27 @@ html[data-theme="clean-light"] #tabbar { background: #ffffff; }
 .svc-hist-row .svc-hist-detail { font-size: 12.5px; opacity: 0.8; margin-top: 2px; }
 .svc-hist-row .svc-hist-date { font-size: 11.5px; opacity: 0.6; margin-top: 4px; }
 
+
+/* ===================================================== reseller owner UI === */
+html.reseller-owner.tier-gold { --accent:#e0b95d; --accent-dim:#b88d34; --accent-2:#fff0b0; --cyan:#ffe08a; --violet:#cda75a; --pink:#f1c76d; }
+html.reseller-owner.tier-vip { --accent:#a98cff; --accent-dim:#7658d5; --accent-2:#e8ddff; --cyan:#c7b8ff; --violet:#8e6cff; --pink:#d2c6ff; }
+html.reseller-owner.tier-gold .topbar { background:linear-gradient(135deg,#2a1d0b,#5a4217 55%,#1d1508); border-bottom-color:rgba(255,216,116,.25); }
+html.reseller-owner.tier-vip .topbar { background:linear-gradient(135deg,#160d30,#342060 55%,#120b24); border-bottom-color:rgba(181,159,255,.25); }
+html.reseller-owner.tier-gold .brand { color:#ffe8a2; }
+html.reseller-owner.tier-vip .brand { color:#e6dcff; }
+.reseller-mini-hero { position:relative; overflow:hidden; padding:20px; border-radius:22px; margin-bottom:14px; border:1px solid var(--glass-brd); background:linear-gradient(135deg,rgba(255,255,255,.09),rgba(255,255,255,.025)); }
+.reseller-mini-hero::after { content:""; position:absolute; width:180px;height:180px;border-radius:50%;left:-80px;top:-100px;filter:blur(10px);opacity:.18;background:var(--accent); }
+.reseller-mini-kicker { font-size:10px;letter-spacing:1.5px;font-family:var(--font-mono);opacity:.65; }
+.reseller-mini-title { display:flex;align-items:center;gap:10px;margin-top:6px; }
+.reseller-mini-title .tier-icon { font-size:28px; }
+.reseller-mini-title h2 { margin:0;font-size:21px; }
+.reseller-mini-sub { margin:7px 0 0;color:var(--text-muted);font-size:12px; }
+.reseller-mini-kpis { display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px; }
+.reseller-mini-kpi { padding:14px;border:1px solid var(--glass-brd);border-radius:16px;background:var(--glass); }
+.reseller-mini-kpi span,.reseller-mini-kpi small { display:block;color:var(--text-muted);font-size:10px; }
+.reseller-mini-kpi strong { display:block;font-size:19px;margin:7px 0 2px; }
+.reseller-mini-actions { display:grid;grid-template-columns:1fr 1fr;gap:9px; }
+.reseller-mini-action { border:1px solid var(--glass-brd);background:var(--glass);border-radius:15px;padding:14px;text-align:right;color:var(--text); }
+.reseller-mini-action b,.reseller-mini-action span { display:block; }
+.reseller-mini-action span { color:var(--text-muted);font-size:10px;margin-top:4px; }
+@media(max-width:380px){.reseller-mini-actions{grid-template-columns:1fr}.reseller-mini-title h2{font-size:18px}}

@@ -649,6 +649,44 @@ function wirePromoCarousel(root) {
   }, { passive: true });
 }
 
+async function renderResellerHome() {
+  content.innerHTML = skeleton(3);
+  try {
+    const data = await api('/api/reseller/overview');
+    const t = data.tier || {};
+    const vip = String(t.code || '').toLowerCase() === 'vip';
+    const sales = data.sales || {};
+    const supply = data.supply || {};
+    setHeaderWallet((await api('/api/me')).wallet_credit);
+    content.innerHTML = `
+      <div class="reseller-mini-hero">
+        <div class="reseller-mini-kicker">SHOPVPN · ${vip ? 'VIP COMMAND' : 'GOLD OPERATIONS'}</div>
+        <div class="reseller-mini-title"><span class="tier-icon">${t.icon || (vip ? '💎' : '🥇')}</span><h2>مرکز نمایندگی ${escHtml(t.title || (vip ? 'VIP' : 'طلایی'))}</h2></div>
+        <p class="reseller-mini-sub">${vip ? 'فروش، مصرف اعتبار و سرویس‌های نمایندگی را از همین‌جا کنترل کن.' : 'مدیریت سریع فروش و موجودی نمایندگی طلایی.'}</p>
+      </div>
+      <div class="reseller-mini-kpis">
+        <div class="reseller-mini-kpi"><span>فروش تاییدشده</span><strong>${fmt(sales.revenue_toman || 0)}</strong><small>تومان</small></div>
+        <div class="reseller-mini-kpi"><span>سفارش موفق</span><strong>${fmt(sales.paid_orders || 0)}</strong><small>سفارش</small></div>
+        <div class="reseller-mini-kpi"><span>سرویس ساخته‌شده</span><strong>${fmt(sales.configs_created || 0)}</strong><small>سرویس</small></div>
+        <div class="reseller-mini-kpi"><span>${vip ? 'حجم مصرف‌شده' : 'اعتبار نمایندگی'}</span><strong>${fmt(vip ? (sales.volume_sold_gb || 0) : (supply.credit_gb || 0))}</strong><small>${vip ? 'GB' : 'GB اعتبار'}</small></div>
+      </div>
+      <div class="eyebrow">دسترسی سریع</div>
+      <div class="reseller-mini-actions">
+        <button class="reseller-mini-action" data-mini-go="services"><b>🛡 سرویس‌های من</b><span>سرویس‌های ساخته‌شده را ببین</span></button>
+        <button class="reseller-mini-action" data-mini-go="store"><b>🛒 فروشگاه</b><span>خرید و مدیریت محصولات</span></button>
+        <button class="reseller-mini-action" data-mini-go="profile"><b>👤 حساب</b><span>اطلاعات و موجودی حساب</span></button>
+        <button class="reseller-mini-action" data-mini-go="support"><b>💬 پشتیبانی</b><span>ارتباط با پشتیبانی</span></button>
+      </div>
+      <div class="eyebrow" style="margin-top:18px">${vip ? 'موجودی و مصرف' : 'موجودی محصول'}</div>
+      <div class="card">
+        ${supply.model === 'fixed_product'
+          ? ((data.inventory || []).map(x => `<div class="list-row"><div class="list-row-main"><div class="list-row-ic line">📦</div><div class="list-row-text"><div class="list-row-title">${escHtml(x.name || 'محصول')}</div><div class="list-row-sub">موجودی باقی‌مانده</div></div></div><b>${fmt(x.qty)}</b></div>`).join('') || `<div class="state-msg"><span class="ic">◌</span>موجودی محصولی باقی نمانده است.</div>`)
+          : `<div class="stat-row"><span>اعتبار حجمی</span><b>${fmt(supply.credit_gb || 0)} GB</b></div><div class="stat-row"><span>حجم مصرف‌شده</span><b>${fmt(sales.volume_sold_gb || 0)} GB</b></div>`}
+      </div>`;
+    content.querySelectorAll('[data-mini-go]').forEach(el => el.onclick = () => switchTab(el.dataset.miniGo));
+  } catch (e) { content.innerHTML = errorState(e.message); }
+}
+
 async function renderHome() {
   content.innerHTML = skeleton(3);
   try {
@@ -675,6 +713,13 @@ async function renderHome() {
 
     const adminTabBtn = document.getElementById("admin-tab-btn");
     if (adminTabBtn) adminTabBtn.style.display = me.is_admin ? "" : "none";
+    const resellerTabBtn = document.getElementById("reseller-tab-btn");
+    if (resellerTabBtn) resellerTabBtn.style.display = me.is_reseller_owner ? "" : "none";
+    if (me.is_reseller_owner && me.reseller) {
+      document.documentElement.classList.add('reseller-owner');
+      document.documentElement.classList.toggle('tier-vip', String(me.reseller.tier_code || '').toLowerCase() === 'vip');
+      document.documentElement.classList.toggle('tier-gold', String(me.reseller.tier_code || '').toLowerCase() !== 'vip');
+    }
 
     const slides = promoSlides({ me, expiring, referralLink: referral && referral.link, customBanners });
 
@@ -693,6 +738,7 @@ async function renderHome() {
         <div class="quick-item" data-nav="wallet"><span class="q-label">کیف پول</span><span class="q-ic">${ICON_WALLET}</span></div>
         <div class="quick-item" data-nav="profile"><span class="q-label">حساب کاربری</span><span class="q-ic">${ICON_PROFILE}</span></div>
         <div class="quick-item full" data-nav="support"><span class="q-label">پشتیبانی</span><span class="q-ic">${ICON_SUPPORT}</span></div>
+        ${me.is_reseller_owner ? `<div class="quick-item full" data-nav="reseller"><span class="q-label">${me.reseller?.icon || '🥇'} مرکز نمایندگی ${escHtml(me.reseller?.title || 'نمایندگی')}</span><span class="q-ic">🛡️</span></div>` : ''}
       </div>
 
       <div class="eyebrow">سرویس‌های من</div>
@@ -6464,6 +6510,7 @@ const tabs = {
   referral: renderReferral,
   support: renderSupport,
   wallet: renderWallet,
+  reseller: renderResellerHome,
   admin: renderAdmin,
 };
 
