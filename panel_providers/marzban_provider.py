@@ -289,7 +289,13 @@ class MarzbanProvider(BasePanelProvider):
             current_expire = _expire_to_epoch(current.get("expire"))
             base_expire = current_expire if (current_expire and current_expire > now_ts) else now_ts
             new_expire = base_expire + add_days * 86400 if add_days else current_expire
-            new_limit = int(current.get("data_limit") or 0) + int(add_volume_gb * (1024 ** 3)) if add_volume_gb else current.get("data_limit")
+            # تمدید «کامل» باید سقف حجم را با بستهٔ تازه جایگزین کند (نه رویش اضافه کند)،
+            # وگرنه حجم باقیمانده‌ی قبلی هم به اشتباه به سقف جدید اضافه می‌شود؛ فقط تمدید
+            # «افزایشی» (reset_usage=False) باید روی سقف قبلی جمع بزند.
+            if add_volume_gb:
+                new_limit = int(add_volume_gb * (1024 ** 3)) if reset_usage else int(current.get("data_limit") or 0) + int(add_volume_gb * (1024 ** 3))
+            else:
+                new_limit = current.get("data_limit")
 
             payload = {"data_limit": new_limit, "expire": new_expire, "status": "active"}
             try:

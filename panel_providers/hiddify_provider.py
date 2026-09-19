@@ -153,7 +153,15 @@ class HiddifyProvider(BasePanelProvider):
                            reset_usage: bool = False) -> PanelUserResult:
         async with aiohttp.ClientSession() as session:
             user = await self._find_by_name(session, username)
-            new_limit = float(user.get("usage_limit_GB") or 0) + add_volume_gb if add_volume_gb else user.get("usage_limit_GB")
+            # تمدید «کامل» (reset_usage=True) یعنی حجم مصرفی صفر می‌شود و سقف حجم هم باید
+            # جایگزین بستهٔ قبلی شود (نه رویش اضافه شود)؛ وگرنه مثلاً کاربری که از ۵۰ گیگ
+            # ۳۰ گیگ مصرف کرده، با تمدید کامل ۵۰ گیگ، سقفش ۱۰۰ گیگ می‌شد در حالی که باید ۵۰
+            # گیگ تازه شود. فقط تمدید «افزایشی» (reset_usage=False) باید روی سقف قبلی اضافه
+            # شود تا حجم باقیمانده حفظ شود.
+            if add_volume_gb:
+                new_limit = add_volume_gb if reset_usage else float(user.get("usage_limit_GB") or 0) + add_volume_gb
+            else:
+                new_limit = user.get("usage_limit_GB")
             new_days = int(user.get("package_days") or 0) + add_days if add_days else user.get("package_days")
             payload = dict(user)
             payload["usage_limit_GB"] = new_limit

@@ -340,7 +340,13 @@ class ThreeXUIProvider(BasePanelProvider):
                     current_expiry = 0
                 base_ms = current_expiry if current_expiry > now_ms else now_ms
                 new_expiry = base_ms + add_days * 86400000 if add_days else current_expiry
-                new_total = int(client.get("totalGB") or 0) + int(add_volume_gb * (1024 ** 3)) if add_volume_gb else client.get("totalGB")
+                # تمدید «کامل» باید سقف حجم را با بستهٔ تازه جایگزین کند (نه رویش اضافه کند)،
+                # وگرنه حجم باقیمانده‌ی قبلی هم به اشتباه به سقف جدید اضافه می‌شود؛ فقط تمدید
+                # «افزایشی» (reset_usage=False) باید روی سقف قبلی جمع بزند.
+                if add_volume_gb:
+                    new_total = int(add_volume_gb * (1024 ** 3)) if reset_usage else int(client.get("totalGB") or 0) + int(add_volume_gb * (1024 ** 3))
+                else:
+                    new_total = client.get("totalGB")
 
                 updated_client = dict(client)
                 updated_client["expiryTime"] = new_expiry

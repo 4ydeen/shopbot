@@ -325,7 +325,13 @@ class MarzneshinProvider(BasePanelProvider):
                     current_expire_dt = None
             base_dt = current_expire_dt if (current_expire_dt and current_expire_dt > now_dt) else now_dt
             new_expire_dt = (base_dt + datetime.timedelta(days=add_days)) if add_days else current_expire_dt
-            new_limit = int(current.get("data_limit") or 0) + int(add_volume_gb * (1024 ** 3)) if add_volume_gb else current.get("data_limit")
+            # تمدید «کامل» باید سقف حجم را با بستهٔ تازه جایگزین کند (نه رویش اضافه کند)،
+            # وگرنه حجم باقیمانده‌ی قبلی هم به اشتباه به سقف جدید اضافه می‌شود؛ فقط تمدید
+            # «افزایشی» (reset_usage=False) باید روی سقف قبلی جمع بزند.
+            if add_volume_gb:
+                new_limit = int(add_volume_gb * (1024 ** 3)) if reset_usage else int(current.get("data_limit") or 0) + int(add_volume_gb * (1024 ** 3))
+            else:
+                new_limit = current.get("data_limit")
 
             payload = {"data_limit": new_limit}
             if new_expire_dt:
