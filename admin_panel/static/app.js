@@ -2174,6 +2174,13 @@ async function mountServerMap() {
 
 /* ============================================================ orders === */
 let ordersStatus = 'pending';
+function tierDiscountText(o) {
+  return Number(o.tier_discount_amount) > 0 ? `🏷 تخفیف سطح: -${fmt(o.tier_discount_amount)}` : '';
+}
+function tierDiscountNote(o) {
+  const text = tierDiscountText(o);
+  return text ? `<div style="font-size:12px;color:var(--muted,#888)">${text}</div>` : '';
+}
 async function renderOrders() {
   const canAct = hasPerm('orders');
   const orders = await apiGet(`/orders?status=${ordersStatus}`);
@@ -2192,7 +2199,7 @@ async function renderOrders() {
             <td>${esc(o.username || o.user_id)}</td>
             <td>${esc(o.product_name)}</td>
             <td class="mono">${fmt(o.quantity || 1)}</td>
-            <td class="mono">${fmt(o.final_price ?? o.base_price)}</td>
+            <td class="mono">${fmt(o.final_price ?? o.base_price)}${tierDiscountNote(o)}</td>
             <td class="mono">${fmtDate(o.created_at)}</td>
             <td>${o.receipt_file_id ? `<button class="btn btn-sm" data-receipt="order:${o.id}">مشاهده رسید</button>` : '<span class="mono">-</span>'}</td>
             ${canAct && ordersStatus === 'pending' ? `<td>
@@ -2236,7 +2243,7 @@ function renderOrdersBento(orders, canAct) {
             ${bnAvatar((o.product_name || '?').trim().charAt(0), i)}
             <div class="bn-row-main">
               <span class="bn-row-title">${esc(o.product_name)}</span>
-              <span class="bn-row-sub">${esc(o.username || o.user_id)} · ${fmtDate(o.created_at)}</span>
+              <span class="bn-row-sub">${esc(o.username || o.user_id)} · ${fmtDate(o.created_at)}${tierDiscountText(o) ? ' · ' + tierDiscountText(o) : ''}</span>
             </div>
             <div class="bn-row-trail">
               <span class="bn-row-amount mono">${fmt(o.final_price ?? o.base_price)} ت</span>
@@ -2310,6 +2317,7 @@ function renderOrdersBrutalist(orders, canAct) {
             <div class="bru-ticket-row"><span>محصول</span><b>${esc(o.product_name)}</b></div>
             <div class="bru-ticket-row"><span>تعداد</span><b class="mono">${fmt(o.quantity || 1)}</b></div>
             <div class="bru-ticket-row"><span>مبلغ</span><b class="mono bru-amount">${fmt(o.final_price ?? o.base_price)} ت</b></div>
+            ${Number(o.tier_discount_amount) > 0 ? `<div class="bru-ticket-row"><span>تخفیف سطح</span><b class="mono">-${fmt(o.tier_discount_amount)} ت</b></div>` : ''}
             <div class="bru-ticket-row"><span>تاریخ</span><b class="mono">${fmtDate(o.created_at)}</b></div>
           </div>
           <div class="bru-ticket-actions">
@@ -2695,7 +2703,7 @@ async function showUserDetail(tgId) {
 
     <h4 class="ud-section-title">سفارش‌های اخیر</h4>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
-    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}</td><td>${esc(o.status)}</td><td class="mono">${fmtDate(o.created_at)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی نیست</td></tr>`}</tbody></table></div>
+    <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}${tierDiscountNote(o)}</td><td>${esc(o.status)}</td><td class="mono">${fmtDate(o.created_at)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی نیست</td></tr>`}</tbody></table></div>
 
     <h4 class="ud-section-title">شارژهای کیف پول</h4>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
@@ -3622,8 +3630,11 @@ function tierSummaryLine(t) {
   return parts.join(' · ') || '—';
 }
 function openTierEditor(t, reload) {
-  const nums = TIER_NUM_FIELDS.map(([k, label]) => `<label class="field"><span>${label}</span><input class="input" id="tier-${k}" type="number" min="0" value="${t[k] ?? ''}"></label>`).join('');
-  const flags = TIER_FLAG_FIELDS.map(([k, label]) => `<label class="field"><span><input type="checkbox" id="tier-${k}" ${t[k] ? 'checked' : ''}> ${label}</span></label>`).join('');
+  const isDiscount = t.model === 'discount';
+  const numFields = isDiscount ? TIER_NUM_FIELDS.filter(([k]) => k === 'permanent_discount_percent') : TIER_NUM_FIELDS;
+  const flagFields = isDiscount ? TIER_FLAG_FIELDS.filter(([k]) => k === 'auto_approve') : TIER_FLAG_FIELDS;
+  const nums = numFields.map(([k, label]) => `<label class="field"><span>${label}</span><input class="input" id="tier-${k}" type="number" min="0" value="${t[k] ?? ''}"></label>`).join('');
+  const flags = flagFields.map(([k, label]) => `<label class="field"><span><input type="checkbox" id="tier-${k}" ${t[k] ? 'checked' : ''}> ${label}</span></label>`).join('');
   openModal(`ویرایش سطح ${esc(t.title)}`, `
     <div class="form-grid">
       <div class="form-row">
@@ -3642,8 +3653,8 @@ function openTierEditor(t, reload) {
         summary: $('#tier-summary', b).value.trim(), description: $('#tier-description', b).value.trim(),
         sort_order: Number($('#tier-sort_order', b).value) || 0,
       };
-      TIER_NUM_FIELDS.forEach(([k]) => { const v = $('#tier-' + k, b).value; payload[k] = v === '' ? null : Number(v); });
-      TIER_FLAG_FIELDS.forEach(([k]) => { payload[k] = $('#tier-' + k, b).checked; });
+      numFields.forEach(([k]) => { const v = $('#tier-' + k, b).value; payload[k] = v === '' ? null : Number(v); });
+      flagFields.forEach(([k]) => { payload[k] = $('#tier-' + k, b).checked; });
       try { await apiPut(`/reseller-tiers/${t.code}`, payload); toast('ذخیره شد.'); close(); reload(); } catch (e) { handleErr(e); }
     });
   });
@@ -3672,6 +3683,7 @@ async function renderResellerTiers() {
         <button class="btn btn-primary btn-sm" data-tier-edit="${t.code}">ویرایش</button>
       </div>
       <p style="margin:0 12px 12px;font-size:13px">${esc(t.summary)}<br><span style="color:var(--muted,#888)">${tierSummaryLine(t)}</span></p>
+      ${t.model === 'discount' && !t.permanent_discount_percent && !t.qty_discounts.length ? '<p style="margin:0 12px 12px;font-size:13px;color:var(--danger,#d33)">⚠️ هنوز هیچ تخفیفی (دائمی یا پلکانی) برای این سطح تنظیم نشده؛ تا آن موقع خریدها بدون تخفیف ثبت می‌شوند.</p>' : ''}
       ${t.model === 'discount' ? `
         <div style="margin:0 12px 12px">
           <div class="toolbar"><strong style="font-size:13px">پلکان تخفیف خرید یک‌جا</strong>
@@ -3679,7 +3691,8 @@ async function renderResellerTiers() {
           <div class="table-wrap"><table><thead><tr><th>از تعداد</th><th>درصد تخفیف</th><th></th></tr></thead>
           <tbody>${t.qty_discounts.map(q => `<tr><td class="mono">${fmt(q.min_qty)}</td><td class="mono">${fmt(q.discount_percent)}٪</td>
             <td><button class="btn btn-danger btn-sm" data-qty-del="${q.id}">حذف</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">پله‌ای ثبت نشده</td></tr>'}</tbody></table></div>
-          <div class="toolbar" style="margin-top:8px"><strong style="font-size:13px">اعضا (${fmt(t.members_count)})</strong></div>
+          <div class="toolbar" style="margin-top:8px"><strong style="font-size:13px">اعضا (${fmt(t.members_count)})</strong>
+            <button class="btn btn-sm" data-member-add="${t.code}">+ عضو</button></div>
           <div class="table-wrap"><table><thead><tr><th>نام</th><th>آیدی</th><th></th></tr></thead>
           <tbody>${(members[t.code] || []).map(m => `<tr><td>${esc(m.first_name || '')} ${m.username ? '@' + esc(m.username) : ''}</td>
             <td class="mono">${m.telegram_id}</td>
@@ -3707,6 +3720,18 @@ async function renderResellerTiers() {
     const [code, uid] = b.dataset.memberDel.split(':');
     try { await apiDelete(`/reseller-tiers/${code}/members/${uid}`); toast('حذف شد.'); reload(); } catch (e) { handleErr(e); }
   }));
+  $$('[data-member-add]', content()).forEach(b => b.addEventListener('click', () => openModal('افزودن عضو به سطح', `
+    <div class="form-grid">
+      <input class="input" id="member-tgid" type="number" min="1" placeholder="آیدی عددی تلگرام کاربر">
+      <button class="btn btn-primary" id="member-save">افزودن</button>
+    </div>`, (m, close) => {
+    $('#member-save', m).addEventListener('click', async () => {
+      try {
+        await apiPost(`/reseller-tiers/${b.dataset.memberAdd}/members`, { telegram_id: Number($('#member-tgid', m).value) });
+        toast('عضو اضافه شد.'); close(); reload();
+      } catch (e) { handleErr(e); }
+    });
+  })));
   $$('[data-qty-add]', content()).forEach(b => b.addEventListener('click', () => openModal('پله‌ی جدید تخفیف', `
     <div class="form-grid">
       <input class="input" id="qty-min" type="number" min="2" placeholder="حداقل تعداد خرید یک‌جا (مثلا ۱۰)">
