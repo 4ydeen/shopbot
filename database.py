@@ -2255,6 +2255,22 @@ class Database:
         self._maybe_reload_admin_cache()
         return tg_id in self._admin_cache
 
+    def is_full_access_bot(self, is_main_bot: bool = True) -> bool:
+        """Return whether this Telegram bot has the full-access bot feature set.
+
+        The keyboard layer uses this single gate for features that require the
+        main bot's direct VPN-panel/config-bank access (for example custom
+        config settings and the legacy manual config bank).  Dedicated reseller
+        bots, including the ``gold`` tier, intentionally do not get those
+        capabilities merely because they have their own web panel/mini-app.
+
+        ``is_main_bot`` is supplied by ``bot_manager``/the handlers, so this
+        method does not infer bot identity from the local SQLite database.
+        Keeping the check here gives callers one canonical Database API and
+        avoids the AttributeError raised by keyboards.py.
+        """
+        return bool(is_main_bot)
+
     def update_user_profile(self, user_tg_id: int, first_name: str = None, username: str = None):
         fields=[]; values=[]
         if first_name is not None:
