@@ -57,6 +57,7 @@ from renewal_engine import execute_renewal, RenewalError
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
     PROVIDERS, SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, TEMPLATE_BASED_PANEL_TYPES,
+    SINGLE_INBOUND_PANEL_TYPES, TOKEN_ONLY_PANEL_TYPES, TEMPLATE_PROMPTS,
     parse_xui_inbound_ids,
 )
 from renewal_reminders import STATUS_KEY_LAST_RUN, STATUS_KEY_LAST_DATE_SENT, STATUS_KEY_LAST_VOLUME_SENT
@@ -4686,6 +4687,9 @@ def api_panel_server_types(admin=Depends(require_permission("panels")), _fa=Depe
             "needs_template": k in TEMPLATE_BASED_PANEL_TYPES,
             "needs_sub_base_url": k in SUB_BASE_URL_PANEL_TYPES,
             "needs_inbound_select": k in INBOUND_SELECT_PANEL_TYPES,
+            "single_inbound": k in SINGLE_INBOUND_PANEL_TYPES,
+            "token_only": k in TOKEN_ONLY_PANEL_TYPES,
+            "template_prompt": TEMPLATE_PROMPTS.get(k),
         }
         for k, v in PANEL_TYPE_LABELS.items()
     ]
@@ -4699,9 +4703,8 @@ async def api_add_panel_server(body: PanelServerBody, admin=Depends(require_perm
         raise HTTPException(400, "نوع پنل پشتیبانی نمی‌شود.")
 
     username = body.api_username.strip()
-    if body.panel_type == "3xui":
-        # 3X-UI جدید فقط با API Token (فیلد پسورد) کار می‌کند؛ یوزرنیم استفاده نمی‌شود.
-        username = username or "3xui"
+    if body.panel_type in TOKEN_ONLY_PANEL_TYPES:
+        username = username or TOKEN_ONLY_PANEL_TYPES[body.panel_type]
 
     if body.panel_type in INBOUND_SELECT_PANEL_TYPES:
         server_id = db.add_panel_server(body.name.strip(), body.panel_type, body.api_url.strip(), username, body.api_password, body.default_group)
@@ -4766,6 +4769,8 @@ async def api_set_panel_server_xui_config(server_id: int, body: PanelServerXuiCo
         raise HTTPException(400, "این سرور به این تنظیمات نیاز ندارد.")
     if server["panel_type"] in INBOUND_SELECT_PANEL_TYPES and not body.inbound_ids:
         raise HTTPException(400, "انتخاب حداقل یک inbound برای این نوع پنل الزامی است.")
+    if server["panel_type"] in SINGLE_INBOUND_PANEL_TYPES and len(body.inbound_ids or []) > 1:
+        raise HTTPException(400, "برای این نوع پنل فقط یک inbound قابل انتخاب است.")
     url = body.sub_base_url.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(400, "آدرس Subscription باید با http:// یا https:// شروع شود.")
@@ -4828,6 +4833,8 @@ def api_update_panel_server(server_id: int, body: PanelServerUpdateBody, admin=D
     if not server:
         raise HTTPException(404, "یافت نشد.")
     fields = {k: v for k, v in body.dict().items() if v is not None}
+    if server["panel_type"] in SINGLE_INBOUND_PANEL_TYPES and len(fields.get("xui_inbound_ids") or []) > 1:
+        raise HTTPException(400, "برای این نوع پنل فقط یک inbound قابل انتخاب است.")
     if "xui_inbound_ids" in fields:
         fields["xui_inbound_ids"] = json.dumps(fields["xui_inbound_ids"])
     if fields:
