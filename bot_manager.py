@@ -195,6 +195,11 @@ class BotManager:
 
         db = Database(db_path)
         db.init_db(owner_id=owner_id)
+        # Dedicated reseller bots are intentionally a near-complete copy of the
+        # main bot.  The only missing capability is the main-bot-only reseller
+        # management section (create/approve/manage other full resellers).
+        if not is_main_bot:
+            db.set_setting("bot_role", "full_reseller")
 
         bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         # قبلاً MemoryStorage (فقط RAM) بود که با هر ری‌استارت پروسه state‌های

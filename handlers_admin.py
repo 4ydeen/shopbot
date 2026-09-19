@@ -202,6 +202,11 @@ async def _deliver_webpanel_link(db, answerable, admin_id: int, bot_id: int) -> 
 
 
 def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
+    # A dedicated reseller is a near-complete copy of the main bot.  Keep
+    # ``is_main_bot`` for genuinely main-only operations (especially reseller
+    # management), while ``full_access_bot`` unlocks the normal store/VPN
+    # administration features for a dedicated reseller.
+    full_access_bot = db.is_full_access_bot(is_main_bot)
     router = Router()
 
     def admin_only(user_id: int) -> bool:
@@ -704,8 +709,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         product = (await asyncio.to_thread(db.get_product, product_id))
         if not product or not product["provision_server_id"]:
             return await call.answer("⚠️ این محصول اتصال مستقیم به پنل ندارد.", show_alert=True)
-        if not is_main_bot:
-            return await call.answer("⛔️ تغییر پنل/اینباند فقط برای نمایندگی ممکن است.", show_alert=True)
+        if not full_access_bot:
+            return await call.answer("⛔️ این بخش فقط برای بات اصلی یا نمایندگی کامل در دسترس است.", show_alert=True)
         await safe_edit(call, 
             f"🔌 پنل/اینباند جدید برای «{product['name']}» را انتخاب کنید:\n\n"
             "ساخت‌های بعدیِ همین محصول از پنل/اینباند جدید انجام می‌شود؛ سرویس‌های قبلاً ساخته‌شده تغییر نمی‌کنند.",
@@ -722,8 +727,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             product_id, server_id = int(product_id_s), int(server_id_s)
         except (ValueError, IndexError):
             return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
-        if not is_main_bot:
-            return await call.answer("⛔️ تغییر پنل/اینباند فقط برای نمایندگی ممکن است.", show_alert=True)
+        if not full_access_bot:
+            return await call.answer("⛔️ این بخش فقط برای بات اصلی یا نمایندگی کامل در دسترس است.", show_alert=True)
         product = (await asyncio.to_thread(db.get_product, product_id))
         if not product or not product["provision_server_id"]:
             return await call.answer("⚠️ این محصول دیگر وجود ندارد یا اتصال مستقیم به پنل ندارد.", show_alert=True)
@@ -1022,7 +1027,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.update_data(duration_days=int(text))
 
-        if is_main_bot:
+        if full_access_bot:
             await state.set_state(AdminAddProduct.waiting_provision_choice)
             await message.answer(
                 "منبع کانفیگ این محصول چیست؟\n\n"
@@ -1033,7 +1038,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             )
             return
 
-        # نمایندگی: به پنل/بانک لینک دسترسی ندارد، همیشه خودکار از اعتبار حجمی است - سوالی پرسیده نمی‌شود
+        # نمایندگی سطح محدود: به پنل/بانک لینک دسترسی ندارد. نمایندگی کامل مانند بات اصلی مسیر منبع کانفیگ را می‌بیند.
         await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
         await message.answer("این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):")
 
@@ -1219,8 +1224,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_add_configs(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not is_main_bot:
-            await call.answer("این بخش برای نمایندگی فعال نیست.", show_alert=True)
+        if not full_access_bot:
+            await call.answer("این بخش برای نمایندگی سطح محدود فعال نیست.", show_alert=True)
             return
         products = (await asyncio.to_thread(db.get_all_products))
         if not products:
@@ -1358,8 +1363,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_test_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not is_main_bot:
-            await call.answer("این بخش برای نمایندگی فعال نیست.", show_alert=True)
+        if not full_access_bot:
+            await call.answer("این بخش برای نمایندگی سطح محدود فعال نیست.", show_alert=True)
             return
         await state.set_state(AdminAddTestConfigs.waiting_links)
         await safe_edit(call, 
@@ -3591,7 +3596,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_settings")
     async def cb_admin_custom_config_settings(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -3605,7 +3610,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_custom_config_toggle")
     async def cb_admin_custom_config_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -3742,7 +3747,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_ccp_list")
     async def cb_ccp_list(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4256,7 +4261,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_servers")
     async def cb_admin_panel_servers(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4265,7 +4270,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_panel_server_add")
     async def cb_admin_panel_server_add(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4470,7 +4475,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_view:"))
     async def cb_admin_panel_server_view(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4498,7 +4503,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4540,7 +4545,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_suburl:"))
     async def cb_admin_panel_server_suburl(call: CallbackQuery, state: FSMContext):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4581,7 +4586,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_test:"))
     async def cb_admin_panel_server_test(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4600,7 +4605,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_usage:"))
     async def cb_admin_panel_server_usage_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4636,7 +4641,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4656,7 +4661,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete:"))
     async def cb_admin_panel_server_delete(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -4685,7 +4690,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data.startswith("adm_panel_server_delete_force:"))
     async def cb_admin_panel_server_delete_force(call: CallbackQuery):
-        if not is_main_bot:
+        if not full_access_bot:
             return await deny_reseller_panel_access(call)
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)

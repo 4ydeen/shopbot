@@ -108,10 +108,10 @@ class _MessageCall:
 
 
 def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
-    # نمایندگی در بات‌های مستقل، دیتابیس محلی جدا دارد؛ اعتبار، مدل تامین و
-    # پنل واقعی اما در دیتابیس اصلی نگهداری می‌شوند. این backend مشترک جلوی اختلاف
-    # رفتار «بات اصلی» و «بات نماینده» را می‌گیرد.
-    reseller_backend = db if is_main_bot else Database(DB_PATH)
+    # نمایندگی کامل دیتابیس مستقل خودش را دارد و باید تقریباً همان رفتار بات اصلی
+    # را داشته باشد. نمایندگی‌های سطح محدود همچنان backend اصلیِ اعتبار را می‌گیرند.
+    full_access_bot = db.is_full_access_bot(is_main_bot)
+    reseller_backend = db if full_access_bot else Database(DB_PATH)
 
     # امنیت/هزینه: جلوگیری از اسپم پیام به دستیار هوش مصنوعی. هر بات (اصلی یا
     # نمایندگی) نمونه‌ی مستقل خودش از این دیکشنری را دارد (بسته به closure)،
@@ -571,19 +571,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     async def show_categories(message: Message, state: FSMContext):
         await state.clear()
         categories = (await asyncio.to_thread(db.get_categories, active_only=True))
-        custom_enabled = is_main_bot and (
+        custom_enabled = full_access_bot and (
             (await asyncio.to_thread(db.get_setting, "custom_config_enabled", "0")) == "1"
             or (await asyncio.to_thread(db.count_active_custom_config_products)) > 0
         )
         if not categories and not custom_enabled:
             await message.answer("در حال حاضر دسته‌بندی فعالی وجود ندارد.")
             return
-        await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories, is_main_bot))
+        await message.answer("یک گزینه را انتخاب کنید:", reply_markup=kb.categories_kb(db, categories, full_access_bot))
 
     @router.callback_query(F.data == "custom_config_start")
     async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
         await call.answer()
-        if not is_main_bot:
+        if not full_access_bot:
             return
         try:
             await call.message.delete()
@@ -1590,7 +1590,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         return "\n".join(lines)
 
     async def custom_config_start(message: Message, state: FSMContext):
-        if not is_main_bot:
+        if not full_access_bot:
             await message.answer("این بخش در حال حاضر غیرفعال است.")
             return
         products = (await asyncio.to_thread(db.get_custom_config_products, True))
@@ -2182,7 +2182,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 )
             return
 
-        if not is_main_bot:
+        if not full_access_bot:
             await message.answer("در حال حاضر هیچ پلن کانفیگ تستی تعریف نشده است؛ با پشتیبانی تماس بگیرید.")
             return
 
@@ -2220,8 +2220,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
             return
 
-        if not is_main_bot:
-            # نماینده: همیشه از پنل اعتباری خودش و اعتبار حجمی‌اش ساخته می‌شود
+        if not full_access_bot:
+            # نمایندگی سطح محدود: همیشه از پنل اعتباری خودش و اعتبار حجمی‌اش ساخته می‌شود
             try:
                 result = await provision_test_config(db, plan, user_id=message.from_user.id)
             except ProvisionError as e:

@@ -2256,20 +2256,23 @@ class Database:
         return tg_id in self._admin_cache
 
     def is_full_access_bot(self, is_main_bot: bool = True) -> bool:
-        """Return whether this Telegram bot has the full-access bot feature set.
+        """Whether this bot has the near-main feature set.
 
-        The keyboard layer uses this single gate for features that require the
-        main bot's direct VPN-panel/config-bank access (for example custom
-        config settings and the legacy manual config bank).  Dedicated reseller
-        bots, including the ``gold`` tier, intentionally do not get those
-        capabilities merely because they have their own web panel/mini-app.
-
-        ``is_main_bot`` is supplied by ``bot_manager``/the handlers, so this
-        method does not infer bot identity from the local SQLite database.
-        Keeping the check here gives callers one canonical Database API and
-        avoids the AttributeError raised by keyboards.py.
+        The real main bot is always full-access.  A dedicated reseller bot is
+        also full-access because it is a 99%-copy of the main bot with one
+        intentional exception: it must never be able to create/manage another
+        full reseller.  Older reseller databases are recognized by their
+        ``miniapp_tenant_id`` marker; newer ones may also use ``bot_role``.
         """
-        return bool(is_main_bot)
+        if is_main_bot:
+            return True
+        try:
+            role = self.get_setting("bot_role", "")
+            if role == "full_reseller":
+                return True
+            return bool(self.get_setting("miniapp_tenant_id", ""))
+        except Exception:
+            return False
 
     def update_user_profile(self, user_tg_id: int, first_name: str = None, username: str = None):
         fields=[]; values=[]
