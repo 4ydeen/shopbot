@@ -635,7 +635,9 @@ MAIN_TENANT_ONLY_PERMISSIONS = {"resellers"}
 # دیتابیس اصلی تبدیل کند. این مجوزها فقط در tenant اصلی معنی دارند؛ برای
 # نماینده مسیرهای self-service پایین‌تر استفاده می‌شوند.
 TENANT_BLOCKED_PERMISSIONS = {
-    "catalog", "discounts", "panels", "system", "settings", "backup", "resellers",
+    # A dedicated reseller is a near-complete copy of the main bot.  The one
+    # intentional tenant restriction is managing/creating other resellers.
+    "resellers",
 }
 
 
@@ -682,8 +684,8 @@ def require_full_access_tenant(admin=Depends(get_current_admin)):
     دسترس‌اند. تا قبل از این‌که پنل وب برای نماینده باز شود، همین که کاربر به این پنل وارد
     می‌شد یعنی حتماً سطح ۱ بود؛ حالا که سطح ۲ هم می‌تواند پنل وب داشته باشد، owner پنل او از چک
     require_permission معمولی عبور می‌کند (owner همیشه مجاز است) و باید همین‌جا صریحاً مسدود شود."""
-    if admin["tenant"]:
-        raise HTTPException(403, "این بخش فقط برای بات اصلی در دسترس است.")
+    # Dedicated reseller tenants are full-access tenants; the separate
+    # ``resellers`` permission remains main-tenant-only via require_permission.
     return admin
 
 
