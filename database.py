@@ -1441,6 +1441,10 @@ class Database:
             ("reseller_requests", "wants_miniapp", "INTEGER DEFAULT 0"),
             ("reseller_requests", "payment_method", "TEXT"),
             ("reseller_requests", "commission_percent", "INTEGER"),
+            # دیتابیس‌های قدیمی جدول reseller_tier_requests را بدون متن درخواست ساخته‌اند؛
+            # مهاجرت یکپارچه‌ی درخواست‌ها پایین‌تر r.request_text را می‌خواند، پس این ستون
+            # باید قبل از اجرای seed/migration اضافه شود.
+            ("reseller_tier_requests", "request_text", "TEXT"),
             # رفع باگ: قبلاً وضعیت pending_review در طول کل مراحل «انتخاب پنل» و
             # «تعیین قیمت» ثابت می‌ماند، پس اگر دو ادمین senior هم‌زمان روی یک
             # درخواست کار می‌کردند، هر دو می‌توانستند پنل انتخاب کنند و قیمت
