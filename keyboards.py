@@ -113,7 +113,7 @@ def _menu_items(db, is_admin: bool, is_reseller: bool, is_main_bot: bool, show_r
             return None
         return (settings.get("btn_reseller_panel", "🧑‍💼 پنل نمایندگی"), settings.get("btn_reseller_panel_style", "primary"))
 
-    tiers_menu_on = settings.get("reseller_tiers_menu_enabled", "0") == "1"
+    tiers_menu_on = settings.get("reseller_tiers_menu_enabled", "1") == "1"
 
     def item_reseller_tiers():
         if not tiers_menu_on or not (show_reseller_request or show_commission_reseller_request):

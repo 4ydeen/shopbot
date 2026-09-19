@@ -262,6 +262,8 @@ DEFAULT_SETTINGS = {
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
     "miniapp_enabled": "1",
     "reseller_request_enabled": "1",
+    # منوی یکپارچه انتخاب سطح نمایندگی برای کاربران عادی
+    "reseller_tiers_menu_enabled": "1",
     # روشن/خاموش سراسری هرکدام از ۵ محور فرم درخواست نمایندگی (بند ۶ اسپک).
     # اگر مالک بخواهد یک محور را کلاً از فرم درخواست حذف کند (نه فقط رد کردنش توسط
     # کاربر)، همین کلیدها را از پنل ادمین (API) به "0" تغییر می‌دهد.
@@ -588,6 +590,7 @@ class Database:
                     owner_reseller_id INTEGER,
                     inline_reseller_enabled INTEGER DEFAULT 0,
                     inline_reseller_commission_percent INTEGER,
+                    reseller_discount_percent INTEGER,
                     reseller_supply_model TEXT DEFAULT 'volume_credit',
                     fixed_product_main_id INTEGER,
                     joined_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1336,6 +1339,7 @@ class Database:
             ("users", "owner_reseller_id", "INTEGER"),
             ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
             ("users", "inline_reseller_commission_percent", "INTEGER"),
+            ("users", "reseller_discount_percent", "INTEGER"),
             ("users", "reseller_supply_model", "TEXT DEFAULT 'volume_credit'"),
             ("users", "fixed_product_main_id", "INTEGER"),
             ("users", "referral_credit", "INTEGER DEFAULT 0"),
@@ -1441,6 +1445,7 @@ class Database:
             ("reseller_requests", "wants_miniapp", "INTEGER DEFAULT 0"),
             ("reseller_requests", "payment_method", "TEXT"),
             ("reseller_requests", "commission_percent", "INTEGER"),
+            ("reseller_requests", "discount_percent", "INTEGER"),
             # دیتابیس‌های قدیمی جدول reseller_tier_requests را بدون متن درخواست ساخته‌اند؛
             # مهاجرت یکپارچه‌ی درخواست‌ها پایین‌تر r.request_text را می‌خواند، پس این ستون
             # باید قبل از اجرای seed/migration اضافه شود.
@@ -1654,6 +1659,15 @@ class Database:
         if marker is None:
             conn.execute("UPDATE reseller_tiers SET is_enabled=1 WHERE code='silver'")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reseller_tiers_four_level_v2','1')")
+
+        # در نسخه‌های قدیمی منوی انتخاب سطح نمایندگی وجود نداشت یا با مقدار 0
+        # ذخیره شده بود؛ سیستم جدید چهارسطحی باید دکمه‌ی «درخواست نمایندگی»
+        # را به‌صورت پیش‌فرض برای کاربر عادی نمایش دهد. این migration فقط یک‌بار
+        # مقدار را فعال می‌کند و بعد از آن ادمین می‌تواند از پنل آن را خاموش کند.
+        menu_marker = conn.execute("SELECT value FROM settings WHERE key='reseller_tiers_menu_v2' LIMIT 1").fetchone()
+        if menu_marker is None:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reseller_tiers_menu_enabled','1')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('reseller_tiers_menu_v2','1')")
         # انتقال درخواست‌های قدیمی دو جدول جداگانه به موتور واحد درخواست نمایندگی.
         # این کار فقط برای pendingهای قدیمی انجام می‌شود و پس از آن رکورد قدیمی
         # migrated می‌شود تا دوباره وارد سیستم نشود.
@@ -1741,15 +1755,22 @@ class Database:
             row = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
             return row["reseller_tier"] if row and row["reseller_tier"] else None
 
-    def set_user_reseller_tier(self, user_tg_id: int, code) -> bool:
+    def set_user_reseller_tier(self, user_tg_id: int, code, discount_percent: int = None) -> bool:
+        if discount_percent is not None:
+            discount_percent = int(discount_percent)
+            if not 1 <= discount_percent <= 100:
+                raise ValueError("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
         with self._get_conn() as conn:
-            cur = conn.execute("UPDATE users SET reseller_tier=? WHERE telegram_id=?", (code or None, user_tg_id))
+            cur = conn.execute(
+                "UPDATE users SET reseller_tier=?, reseller_discount_percent=? WHERE telegram_id=?",
+                (code or None, discount_percent if code == "silver" else None, user_tg_id),
+            )
             return cur.rowcount > 0
 
     def list_tier_members(self, code: str):
         with self._get_conn() as conn:
             return conn.execute(
-                "SELECT telegram_id, username, first_name FROM users WHERE reseller_tier=? ORDER BY id DESC", (code,)
+                "SELECT telegram_id, username, first_name, reseller_discount_percent FROM users WHERE reseller_tier=? ORDER BY id DESC", (code,)
             ).fetchall()
 
     def list_tier_qty_discounts(self, code: str):
@@ -1784,7 +1805,7 @@ class Database:
         total = unit_price * quantity
         info = {"percent": 0, "amount": 0, "total": total, "total_after": total, "title": "", "icon": ""}
         with self._get_conn() as conn:
-            user = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+            user = conn.execute("SELECT reseller_tier, reseller_discount_percent FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
             if not user or not user["reseller_tier"]:
                 return info
             tier = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (user["reseller_tier"],)).fetchone()
@@ -1794,7 +1815,7 @@ class Database:
                 "SELECT MAX(discount_percent) AS p FROM reseller_tier_qty_discounts WHERE tier_code=? AND min_qty<=?",
                 (tier["code"], quantity),
             ).fetchone()["p"]
-        percent = max(tier["permanent_discount_percent"] or 0, bulk or 0)
+        percent = max(user["reseller_discount_percent"] or 0, tier["permanent_discount_percent"] or 0, bulk or 0)
         amount = total * percent // 100
         info.update(percent=percent, amount=amount, total_after=total - amount, title=tier["title"], icon=tier["icon"])
         return info
@@ -1839,7 +1860,7 @@ class Database:
         if not claimed:
             return False
         self.switch_agent_tier(req["user_id"], req["tier_code"])
-        self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+        self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
         return True
 
     def get_agent_tier(self, user_tg_id: int):
@@ -1889,7 +1910,7 @@ class Database:
         self.purge_reseller_leftovers(user_tg_id)
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE users SET inline_reseller_commission_percent=NULL, reseller_tier=NULL WHERE telegram_id=?",
+                "UPDATE users SET inline_reseller_commission_percent=NULL, reseller_discount_percent=NULL, reseller_tier=NULL WHERE telegram_id=?",
                 (user_tg_id,),
             )
             conn.execute("DELETE FROM reseller_product_credit WHERE reseller_id=?", (user_tg_id,))
@@ -7631,12 +7652,17 @@ class Database:
         methods = list(dict.fromkeys(str(x) for x in (methods or []) if x))
         self.set_setting(f"reseller_payment_methods_{tier_code}", json.dumps(methods, ensure_ascii=False))
 
-    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int, commission_percent: int = None):
+    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int, commission_percent: int = None, discount_percent: int = None):
         fields = {
             "price_toman": price_toman, "panel_server_id": panel_server_id, "reviewed_by": admin_id,
         }
         if commission_percent is not None:
             fields["commission_percent"] = int(commission_percent)
+        if discount_percent is not None:
+            discount_percent = int(discount_percent)
+            if not 1 <= discount_percent <= 100:
+                raise ValueError("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+            fields["discount_percent"] = discount_percent
         self.set_reseller_request_status(request_id, "awaiting_payment", **fields)
 
     def reject_reseller_request(self, request_id: int, status: str, admin_id: int, reason: str = None):
@@ -7670,9 +7696,9 @@ class Database:
             if tier["model"] == "commission":
                 percent = int(req["commission_percent"] or tier["commission_min"] or 10)
                 self.enable_inline_reseller(req["user_id"], percent)
-                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
             else:
-                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
         return True
 
     def complete_reseller_request_gateway_payment(self, request_id: int) -> bool:
@@ -7697,9 +7723,9 @@ class Database:
             if tier["model"] == "commission":
                 percent = int(req["commission_percent"] or tier["commission_min"] or 10)
                 self.enable_inline_reseller(req["user_id"], percent)
-                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
             else:
-                self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+                self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
         return True
 
     def set_reseller_request_bot(self, request_id: int, token: str, username: str):
