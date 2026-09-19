@@ -2594,6 +2594,30 @@ let adminSection = "stats"; // stats | menu | branding | catalog | tickets | liv
 let adminGroup = null; // گروه فعلاً باز در پنل مدیریت (سطح اول ناوبری)
 let adminCatalogView = { level: "categories" }; // categories | products | configs
 let adminPanelsView = { level: "servers" }; // servers | pricing
+const PANEL_INBOUND_TYPES = ["3xui", "alireza"];
+const PANEL_SUBURL_ONLY_TYPES = ["hiddify"];
+const PANEL_NO_TEMPLATE_TYPES = [...PANEL_INBOUND_TYPES, ...PANEL_SUBURL_ONLY_TYPES];
+const PANEL_TOKEN_ONLY_TYPES = { "3xui": "3xui", rebecca: "rebecca", sui: "sui", wgdashboard: "wgdashboard" };
+const PANEL_SECRET_LABELS = {
+  rebecca: "توکن ادمین (Bearer token)",
+  sui: "API Token (Admin ← API Token در پنل)",
+  wgdashboard: "API Key (Settings ← API Keys در پنل)",
+};
+const PANEL_TEMPLATE_LABELS = {
+  sui: "نام یک کاربر (client) که از قبل روی پنل موجود است",
+  rebecca: "نام یک کاربر که از قبل روی پنل موجود است",
+  wgdashboard: "نام configuration (مثلاً wg0)",
+  mikrotik: "نام profile در User Manager",
+  ibsng: "نام گروه (Group) در IBSng",
+};
+const PANEL_TEMPLATE_HINTS = {
+  sui: "inbound های همین کاربر برای کاربرهای جدید استفاده می‌شود.",
+  rebecca: "سرویس (service) همین کاربر برای کاربرهای جدید استفاده می‌شود.",
+  wgdashboard: "کاربرها به‌صورت peer داخل این configuration ساخته می‌شوند و حجم/انقضا با Schedule Job اعمال می‌شود.",
+  mikrotik: "حجم و مدت را profile تعیین می‌کند و مقدار حجم/مدت محصول اعمال نمی‌شود.",
+  ibsng: "حجم و مدت را گروه تعیین می‌کند و مقدار حجم/مدت محصول اعمال نمی‌شود.",
+};
+const PANEL_TEMPLATE_VALUE_LABELS = { wgdashboard: "configuration", mikrotik: "profile", ibsng: "گروه" };
 let adminTicketView = { level: "list" }; // list | thread
 let adminLiveChatView = { level: "list" }; // list | thread
 let adminPresenceTimer = null;
@@ -3736,16 +3760,24 @@ async function renderAdminPanelsSection() {
             <option value="marzban">Marzban</option>
             <option value="marzneshin">Marzneshin</option>
             <option value="hiddify">Hiddify</option>
+            <option value="alireza">Alireza X-UI</option>
+            <option value="rebecca">Rebecca</option>
+            <option value="sui">S-UI</option>
+            <option value="wgdashboard">WGDashboard</option>
+            <option value="mikrotik">MikroTik</option>
+            <option value="ibsng">IBSng</option>
           </select>
           <label class="field-label">آدرس API (مثلاً https://panel.example.com)</label>
           <input class="input" id="ps-url" type="text" placeholder="https://..." style="direction:ltr;text-align:left;margin-bottom:10px" />
-          <label class="field-label">نام کاربری ادمین پنل</label>
-          <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
-          <label class="field-label">رمز عبور ادمین پنل</label>
+          <div id="ps-username-wrap">
+            <label class="field-label">نام کاربری ادمین پنل</label>
+            <input class="input" id="ps-username" type="text" style="direction:ltr;text-align:left;margin-bottom:10px" />
+          </div>
+          <label class="field-label" id="ps-password-label">رمز عبور ادمین پنل</label>
           <input class="input" id="ps-password" type="password" style="direction:ltr;text-align:left;margin-bottom:10px" />
           <div id="ps-template-wrap">
-            <label class="field-label">نام کاربری نمونه (که از قبل روی پنل موجود است)</label>
-            <p class="hint-text" style="margin-top:0">تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی کانفیگ‌های جدید استفاده می‌شود.</p>
+            <label class="field-label" id="ps-template-label">نام کاربری نمونه (که از قبل روی پنل موجود است)</label>
+            <p class="hint-text" id="ps-template-hint" style="margin-top:0">تنظیمات پروتکل/گروه همین کاربر به‌عنوان قالب پیش‌فرض برای همه‌ی کانفیگ‌های جدید استفاده می‌شود.</p>
             <input class="input" id="ps-template" type="text" style="direction:ltr;text-align:left;margin-bottom:4px" />
           </div>
           <p class="hint-text" id="ps-xui-hint" style="display:none;margin-top:0">بعد از اتصال، لیست inbound های پنل خوانده می‌شود و در مرحله‌ی بعد یکی را انتخاب می‌کنی.</p>
@@ -3758,11 +3790,16 @@ async function renderAdminPanelsSection() {
         </div>
       `;
       const psType = document.getElementById("ps-type");
-      const NO_TEMPLATE_TYPES = ["3xui", "hiddify"];
+      const DEFAULT_TEMPLATE_LABEL = document.getElementById("ps-template-label").textContent;
+      const DEFAULT_TEMPLATE_HINT = document.getElementById("ps-template-hint").textContent;
       const syncPsType = () => {
-        const needsTemplate = !NO_TEMPLATE_TYPES.includes(psType.value);
+        const needsTemplate = !PANEL_NO_TEMPLATE_TYPES.includes(psType.value);
         document.getElementById("ps-template-wrap").style.display = needsTemplate ? "block" : "none";
-        document.getElementById("ps-xui-hint").style.display = psType.value === "3xui" ? "block" : "none";
+        document.getElementById("ps-template-label").textContent = PANEL_TEMPLATE_LABELS[psType.value] || DEFAULT_TEMPLATE_LABEL;
+        document.getElementById("ps-template-hint").textContent = PANEL_TEMPLATE_HINTS[psType.value] || DEFAULT_TEMPLATE_HINT;
+        document.getElementById("ps-username-wrap").style.display = PANEL_TOKEN_ONLY_TYPES[psType.value] ? "none" : "block";
+        document.getElementById("ps-password-label").textContent = PANEL_SECRET_LABELS[psType.value] || "رمز عبور ادمین پنل";
+        document.getElementById("ps-xui-hint").style.display = PANEL_INBOUND_TYPES.includes(psType.value) ? "block" : "none";
         document.getElementById("ps-hiddify-hint").style.display = psType.value === "hiddify" ? "block" : "none";
       };
       psType.onchange = syncPsType;
@@ -3776,22 +3813,22 @@ async function renderAdminPanelsSection() {
           name: document.getElementById("ps-name").value.trim(),
           panel_type: panelType,
           api_url: document.getElementById("ps-url").value.trim(),
-          api_username: document.getElementById("ps-username").value.trim(),
+          api_username: PANEL_TOKEN_ONLY_TYPES[panelType] || document.getElementById("ps-username").value.trim(),
           api_password: document.getElementById("ps-password").value,
           template_username: document.getElementById("ps-template").value.trim(),
         };
         if (!payload.name || !payload.api_url || !payload.api_username || !payload.api_password) {
           errBox.textContent = "نام، آدرس، یوزرنیم و پسورد الزامی هستند."; return;
         }
-        if (panelType !== "3xui" && panelType !== "hiddify" && !payload.template_username) {
-          errBox.textContent = "نام کاربری نمونه الزامی است."; return;
+        if (!PANEL_NO_TEMPLATE_TYPES.includes(panelType) && !payload.template_username) {
+          errBox.textContent = PANEL_TEMPLATE_LABELS[panelType] ? "مقدار قالب الزامی است." : "نام کاربری نمونه الزامی است."; return;
         }
         try {
           document.getElementById("ps-save").textContent = "⏳ در حال اتصال...";
           document.getElementById("ps-save").disabled = true;
           const res = await api("/api/admin/panel-servers", { method: "POST", body: JSON.stringify(payload) });
           tg.HapticFeedback.notificationOccurred("success");
-          if (panelType === "3xui") {
+          if (PANEL_INBOUND_TYPES.includes(panelType)) {
             adminPanelsView = { level: "xui-config", serverId: res.id, inbounds: res.inbounds, name: payload.name };
           } else if (panelType === "hiddify") {
             adminPanelsView = { level: "suburl-config", serverId: res.id, name: payload.name };
@@ -4010,22 +4047,22 @@ async function renderAdminPanelsSection() {
                 <span>${s.is_active ? "🟢" : "🔴"} <b>${s.name}</b> <span class="hint-text" style="margin:0">(${s.panel_type})</span></span>
               </div>
               <div class="hint-text" style="margin:4px 0 4px;direction:ltr;text-align:left">${s.api_url}</div>
-              <div class="hint-text" style="margin:0 0 4px">${s.panel_type === "3xui"
+              <div class="hint-text" style="margin:0 0 4px">${PANEL_INBOUND_TYPES.includes(s.panel_type)
                 ? (s.is_configured ? `⚙️ ${s.xui_inbound_ids.length} Inbound تنظیم شده (${s.xui_inbound_ids.map((i) => "#" + i).join("، ")})` : "⚠️ Inbound تنظیم نشده")
                 : s.panel_type === "hiddify"
                 ? (s.is_configured ? "✅ آدرس Subscription تنظیم شده" : "⚠️ آدرس Subscription تنظیم نشده")
-                : (s.has_template ? `🧩 قالب از کاربر «${s.template_username}»` : "⚠️ قالب تنظیم نشده")}</div>
+                : (s.has_template ? (PANEL_TEMPLATE_VALUE_LABELS[s.panel_type] ? `🧩 ${PANEL_TEMPLATE_VALUE_LABELS[s.panel_type]}: «${s.template_username}»` : `🧩 قالب از کاربر «${s.template_username}»`) : "⚠️ قالب تنظیم نشده")}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                 <span class="tag" style="opacity:${s.used_for_custom_config ? 1 : 0.4}">${s.used_for_custom_config ? "✅" : "◻️"} خرید شخصی</span>
                 <span class="tag" style="opacity:${s.used_for_test_config ? 1 : 0.4}">${s.used_for_test_config ? "✅" : "◻️"} کانفیگ تست</span>
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
                 <button class="btn outline" data-test="${s.id}" style="padding:4px 10px;font-size:12px">🔌 تست اتصال</button>
-                ${s.panel_type === "3xui"
+                ${PANEL_INBOUND_TYPES.includes(s.panel_type)
                   ? `<button class="btn outline" data-xui-inbound="${s.id}" data-xui-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم Inbound</button>`
                   : s.panel_type === "hiddify"
                   ? `<button class="btn outline" data-suburl="${s.id}" data-suburl-name="${s.name}" style="padding:4px 10px;font-size:12px">⚙️ تنظیم آدرس Sub</button>`
-                  : `<button class="btn outline" data-template="${s.id}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>`}
+                  : `<button class="btn outline" data-template="${s.id}" data-ptype="${s.panel_type}" style="padding:4px 10px;font-size:12px">🧩 تغییر قالب</button>`}
                 <button class="btn outline" data-usage-custom="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_custom_config ? "غیرفعال (خرید)" : "فعال (خرید)"}</button>
                 <button class="btn outline" data-usage-test="${s.id}" style="padding:4px 10px;font-size:12px">${s.used_for_test_config ? "غیرفعال (تست)" : "فعال (تست)"}</button>
                 <button class="btn outline" data-toggle="${s.id}" style="padding:4px 10px;font-size:12px">${s.is_active ? "غیرفعال کن" : "فعال کن"}</button>
@@ -4167,7 +4204,7 @@ async function renderAdminPanelsSection() {
     });
     document.querySelectorAll("[data-template]").forEach((btn) => {
       btn.onclick = async () => {
-        const username = prompt("نام کاربری نمونه‌ی جدید (که روی پنل موجود است) را وارد کن:");
+        const username = prompt((PANEL_TEMPLATE_LABELS[btn.dataset.ptype] || "نام کاربری نمونه‌ی جدید (که روی پنل موجود است)") + " را وارد کن:");
         if (!username || !username.trim()) return;
         btn.textContent = "⏳...";
         try {
