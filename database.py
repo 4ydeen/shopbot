@@ -225,6 +225,7 @@ DEFAULT_SETTINGS = {
     # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید
     "renewal_reminder_enabled": "1",
     "renewal_reminder_days_before": "5",  # چند روز قبل از اتمام سرویس یادآوری ارسال شود
+    "auto_provision_max_qty": "0",
     "low_stock_threshold": "3",  # وقتی موجودی یک محصول به این عدد یا کمتر برسد، به ادمین‌ها هشدار داده می‌شود
     "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
     "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
@@ -1786,17 +1787,90 @@ class Database:
             return conn.execute("SELECT * FROM reseller_tier_requests ORDER BY id DESC").fetchall()
 
     def approve_tier_request(self, request_id: int, admin_id: int) -> bool:
+        req = self.get_tier_request(request_id)
+        if not req or req["status"] != "pending":
+            return False
         with self._get_conn() as conn:
-            req = conn.execute("SELECT * FROM reseller_tier_requests WHERE id=?", (request_id,)).fetchone()
-            if not req or req["status"] != "pending":
-                return False
-            conn.execute(
+            claimed = conn.execute(
                 "UPDATE reseller_tier_requests SET status='approved', reviewed_by=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=?",
+                "WHERE id=? AND status='pending'",
                 (admin_id, request_id),
+            ).rowcount
+        if not claimed:
+            return False
+        self.switch_agent_tier(req["user_id"], req["tier_code"])
+        self.set_user_reseller_tier(req["user_id"], req["tier_code"])
+        return True
+
+    def get_agent_tier(self, user_tg_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT reseller_tier, is_reseller, inline_reseller_enabled, reseller_supply_model "
+                "FROM users WHERE telegram_id=?",
+                (user_tg_id,),
+            ).fetchone()
+        if not row:
+            return None
+        if row["reseller_tier"]:
+            return row["reseller_tier"]
+        if row["is_reseller"]:
+            return "gold" if row["reseller_supply_model"] == "fixed_product" else "vip"
+        if row["inline_reseller_enabled"]:
+            return "bronze"
+        return None
+
+    def owns_full_access_reseller(self, user_tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT 1 FROM reseller_bots WHERE owner_telegram_id=? AND reseller_level=1 LIMIT 1", (user_tg_id,)
+            ).fetchone() is not None
+
+    @staticmethod
+    def _remove_reseller_db_files(path: str) -> bool:
+        removed_all = True
+        for suffix in ("", "-wal", "-shm", ".fsm.sqlite3", ".fsm.sqlite3-wal", ".fsm.sqlite3-shm"):
+            target = path + suffix
+            try:
+                if os.path.exists(target):
+                    os.remove(target)
+            except OSError:
+                removed_all = False
+        return removed_all
+
+    def wipe_agent_state(self, user_tg_id: int) -> dict:
+        """حذف کامل هر چیزی که «نمایندگی قبلیِ» کاربر بود: بات و دیتابیس اختصاصی،
+        اعتبار حجمی/محصولی، پنل، لینک و درصد کمیسیون، سطح، و برچسب مشتری‌های وصل‌شده.
+        کیف پول و لاگ‌های مالی (سابقه‌ی حسابداری) عمداً دست‌نخورده می‌مانند."""
+        try:
+            from config import resolve_db_path
+        except Exception:
+            resolve_db_path = lambda p: p
+        removed_bots = 0
+        for bot_row in [b for b in self.list_reseller_bots() if b["owner_telegram_id"] == user_tg_id]:
+            self.delete_reseller_bot(bot_row["id"])
+            db_path = resolve_db_path(bot_row["db_path"])
+            if not self._remove_reseller_db_files(db_path):
+                self.queue_db_purge(bot_row["bot_token"], db_path)
+            removed_bots += 1
+        self.purge_reseller_leftovers(user_tg_id)
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET inline_reseller_commission_percent=NULL, reseller_tier=NULL WHERE telegram_id=?",
+                (user_tg_id,),
             )
-            conn.execute("UPDATE users SET reseller_tier=? WHERE telegram_id=?", (req["tier_code"], req["user_id"]))
-            return True
+            conn.execute("DELETE FROM reseller_product_credit WHERE reseller_id=?", (user_tg_id,))
+            conn.execute("UPDATE users SET owner_reseller_id=NULL WHERE owner_reseller_id=?", (user_tg_id,))
+        return {"bots_removed": removed_bots}
+
+    def switch_agent_tier(self, user_tg_id: int, new_code: str) -> dict:
+        current = self.get_agent_tier(user_tg_id)
+        if current is None or current == new_code:
+            return {"changed": False, "previous": current}
+        if self.owns_full_access_reseller(user_tg_id):
+            return {"changed": False, "previous": current, "skipped": "full_access"}
+        result = self.wipe_agent_state(user_tg_id)
+        result.update(changed=True, previous=current)
+        return result
 
     def reject_tier_request(self, request_id: int, admin_id: int, reason: str = None) -> bool:
         with self._get_conn() as conn:
@@ -2805,13 +2879,20 @@ class Database:
                 added += 1
         return added, duplicates
 
+    def get_auto_provision_max_qty(self) -> int:
+        try:
+            return max(0, int(self.get_setting("auto_provision_max_qty", "0") or 0))
+        except (TypeError, ValueError):
+            return 0
+
     def count_available_configs(self, product_id: int) -> int:
+        cap = self.get_auto_provision_max_qty()
         with self._get_conn() as conn:
             prod = conn.execute(
                 "SELECT is_auto_provision FROM products WHERE id=?", (product_id,)
             ).fetchone()
             if prod and prod["is_auto_provision"]:
-                return AUTO_PROVISION_UNLIMITED_STOCK
+                return cap or AUTO_PROVISION_UNLIMITED_STOCK
             row = conn.execute(
                 "SELECT COUNT(*) c FROM configs WHERE product_id=? AND is_used=0", (product_id,)
             ).fetchone()
@@ -4010,7 +4091,9 @@ class Database:
                 "SELECT * FROM commission_reseller_requests WHERE id=?", (request_id,)
             ).fetchone()
         if row:
+            self.switch_agent_tier(row["user_id"], "bronze")
             self.enable_inline_reseller(row["user_id"], int(percent))
+            self.set_user_reseller_tier(row["user_id"], "bronze")
         return row
 
     def reject_commission_reseller_request(self, request_id: int, reason: str, reviewed_by: int = None):
@@ -7518,7 +7601,12 @@ class Database:
                 "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_payment_review'",
                 (admin_id, request_id),
             )
-            return cur.rowcount > 0
+            won = cur.rowcount > 0
+        if won:
+            req = self.get_reseller_request(request_id)
+            if req and req["tier_code"]:
+                self.switch_agent_tier(req["user_id"], req["tier_code"])
+        return won
 
     def set_reseller_request_bot(self, request_id: int, token: str, username: str):
         self.set_reseller_request_status(
@@ -7529,3 +7617,6 @@ class Database:
         self.set_reseller_request_status(
             request_id, "completed", owner_telegram_id=owner_telegram_id,
         )
+        req = self.get_reseller_request(request_id)
+        if req and req["tier_code"]:
+            self.set_user_reseller_tier(owner_telegram_id, req["tier_code"])

@@ -4024,7 +4024,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"💼 درخواست نمایندگی کمیسیونی #{request_id}\n"
             f"👤 کاربر: {first_name} (@{username})\n"
             f"🆔 آیدی عددی: {user_id}\n"
-            f"📊 درصد پیشنهادی: {percent}٪\n\n"
+            f"📊 درصد پیشنهادی: {percent}٪"
+            f"{await _switch_warning_line(user_id, 'bronze')}\n\n"
             "این نمایندگی بدون حجم و بدون محصول آماده است؛ فقط کمیسیون دائمی روی خریدهای زیرمجموعه."
         )
         for admin_id in _senior_admin_ids():
@@ -4460,9 +4461,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         else:
             await message.answer(text, reply_markup=markup)
 
+    async def _switch_warning_line(user_id: int, new_code: str) -> str:
+        current = await asyncio.to_thread(db.get_agent_tier, user_id)
+        if not current or current == new_code:
+            return ""
+        return f"\n⚠️ سطح فعلی کاربر: {current}؛ با تایید، نمایندگی قبلی او کامل حذف می‌شود."
+
     async def _start_discount_tier_request(message: Message, tier):
         user_id = message.from_user.id
-        if (await asyncio.to_thread(db.get_user_reseller_tier, user_id)) == tier["code"]:
+        if (await asyncio.to_thread(db.get_agent_tier, user_id)) == tier["code"]:
             await message.answer(f"شما همین الان در سطح {tier['icon']} {tier['title']} هستید.")
             return
         if (await asyncio.to_thread(db.get_pending_tier_request, user_id, tier["code"])):
@@ -4483,6 +4490,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"سطح: {tier['icon']} {tier['title']}\n"
             f"👤 کاربر: {first_name} (@{username})\n"
             f"🆔 آیدی عددی: {user_id}"
+            f"{await _switch_warning_line(user_id, tier['code'])}"
         )
         for admin_id in _senior_admin_ids():
             try:
@@ -4492,6 +4500,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await message.answer("✅ درخواست شما ثبت شد. بعد از تایید ادمین، نتیجه به شما اطلاع داده می‌شود.")
 
     async def _start_tier_request(message: Message, state: FSMContext, tier):
+        if (await asyncio.to_thread(db.owns_full_access_reseller, message.from_user.id)):
+            await message.answer("حساب شما نمایندگی کامل است و از این مسیر سطحش قابل تغییر نیست.")
+            return
         if tier["model"] == "commission":
             await commission_reseller_request_start(message, state)
         elif tier["model"] == "discount":
@@ -4527,7 +4538,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if action == "menu":
             await _show_tiers_menu(call.message, edit=True)
             return
-        if action not in ("pick", "go") or len(parts) < 3:
+        if action not in ("pick", "go", "goc") or len(parts) < 3:
             return
         tier = await asyncio.to_thread(db.get_reseller_tier, parts[2])
         if not tier or not tier["is_enabled"]:
@@ -4539,6 +4550,23 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 reply_markup=kb.reseller_tier_detail_kb(tier["code"]), parse_mode="HTML",
             )
             return
+        if action == "go":
+            current_code = await asyncio.to_thread(db.get_agent_tier, call.from_user.id)
+            if (
+                current_code and current_code != tier["code"]
+                and not (await asyncio.to_thread(db.owns_full_access_reseller, call.from_user.id))
+            ):
+                current_tier = await asyncio.to_thread(db.get_reseller_tier, current_code)
+                current_label = f"{current_tier['icon']} {current_tier['title']}" if current_tier else current_code
+                await _safe_edit(
+                    call.message,
+                    f"⚠️ <b>تغییر سطح نمایندگی</b>\n\n"
+                    f"شما الان در سطح {current_label} هستید. بعد از تایید سطح {tier['icon']} {escape_html(tier['title'])}، "
+                    "نمایندگی فعلی شما (بات و دیتابیس اختصاصی، اعتبار حجمی/محصولی، پنل، لینک و کمیسیون و مشتری‌های وصل‌شده) "
+                    "کامل حذف می‌شود و قابل بازگشت نیست. کیف پول شما دست‌نخورده می‌ماند.\n\nادامه می‌دهید؟",
+                    reply_markup=kb.reseller_tier_switch_confirm_kb(tier["code"]), parse_mode="HTML",
+                )
+                return
         fake_message = call.message.model_copy(update={"from_user": call.from_user})
         try:
             await call.message.delete()
@@ -4561,8 +4589,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("در حال حاضر امکان درخواست نمایندگی سطح ۲ غیرفعال است.")
             return
         if (await asyncio.to_thread(db.is_reseller, message.from_user.id)):
-            await message.answer("شما همین الان هم نماینده هستید.")
-            return
+            current_tier = await asyncio.to_thread(db.get_agent_tier, message.from_user.id)
+            if tier is None or current_tier == tier["code"]:
+                await message.answer("شما همین الان هم نماینده هستید.")
+                return
         if (await asyncio.to_thread(db.get_open_reseller_request, message.from_user.id)):
             await message.answer("شما همین الان یک درخواست نمایندگی باز دارید؛ منتظر بررسی آن بمانید.")
             return
@@ -4766,6 +4796,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "dedicated": "بات مستقل با توکن", "inline_link": "لینک اختصاصی داخل بات اصلی", "none": "ندارد",
             }.get(bot_choice, bot_choice)
             tier_line = f"🏅 سطح: {tier['icon']} {tier['title']}\n" if tier else ""
+            if tier:
+                warning = await _switch_warning_line(user_id, tier["code"])
+                if warning:
+                    tier_line += warning.lstrip("\n") + "\n"
             volume_line = "" if supply_model == "fixed_product" and not volume_gb else f"📦 حجم درخواستی: {volume_gb:,} گیگ\n"
             caption = (
                 f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"

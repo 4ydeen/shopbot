@@ -280,6 +280,13 @@ def tier_request_review_kb(request_id) -> InlineKeyboardMarkup:
     ])
 
 
+def reseller_tier_switch_confirm_kb(code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ بله، ادامه", callback_data=f"rt:goc:{code}", style="danger")],
+        [InlineKeyboardButton(text="🔙 انصراف", callback_data="rt:menu")],
+    ])
+
+
 def reseller_tiers_kb(tiers) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{t['icon']} {t['title']}", callback_data=f"rt:pick:{t['code']}")]
