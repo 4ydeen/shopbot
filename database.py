@@ -6755,12 +6755,16 @@ class Database:
             ).fetchone()
 
     def apply_custom_config_renewal(self, custom_config_id: int, add_volume_gb: int = 0, add_days: int = 0,
-                                     full_reset: bool = False) -> dict:
+                                     full_reset: bool = False, set_volume_gb: float = None) -> dict:
         """بعد از موفقیت‌آمیز بودن به‌روزرسانی روی خودِ پنل (provider.update_user)،
         رکورد بوکینگ محلی (حجم/مدت/تاریخ انقضا) را هم‌سو با آن به‌روز می‌کند.
-        full_reset=True یعنی «تمدید کامل» (همان reset_usage سمت پنل): حجم رکورد
-        محلی هم باید با بستهٔ تازه جایگزین شود، نه رویش جمع بزند - وگرنه با پنل
-        (که مصرف را صفر و سقف را جایگزین کرده) ناهم‌خوان می‌شود."""
+        set_volume_gb (اختیاری): اگر داده شود، همان مقدار دقیقاً به‌عنوان سقف جدید
+        ثبت می‌شود - برای زمانی که فراخوان (renewal_engine) مقدار واقعیِ سقفِ
+        محاسبه‌شده روی خود پنل را از قبل می‌داند (مثلاً حاصل از preserve_remaining
+        در تمدید کامل) و نمی‌خواهیم اینجا دوباره و به‌شکلی متفاوت محاسبه شود.
+        در غیر این صورت (set_volume_gb داده نشده): full_reset=True یعنی «تمدید
+        کامل» بدون حفظ باقیمانده - حجم رکورد محلی هم با بستهٔ تازه جایگزین
+        می‌شود، نه رویش جمع بزند."""
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM custom_configs WHERE id=?", (custom_config_id,)).fetchone()
             if not row:
@@ -6776,7 +6780,9 @@ class Database:
                 except ValueError:
                     pass
             new_expires_at = (base + timedelta(days=add_days)).isoformat() if add_days else current_expires_at
-            if add_volume_gb:
+            if set_volume_gb is not None:
+                new_volume = set_volume_gb
+            elif add_volume_gb:
                 new_volume = add_volume_gb if full_reset else (row["volume_gb"] or 0) + add_volume_gb
             else:
                 new_volume = row["volume_gb"]

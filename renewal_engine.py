@@ -33,14 +33,23 @@ async def execute_renewal(db, order) -> str:
         server = db.get_panel_server(cc["panel_server_id"])
         if not server or not server["is_active"]:
             raise RenewalError("سرور پنل مربوط به این سرویس یافت نشد یا غیرفعال است.")
+        set_volume_gb = None
         try:
             provider = get_provider(server)
             await provider.update_user(
                 cc["username"], add_volume_gb=add_volume, add_days=add_days, reset_usage=(mode == "full"),
+                preserve_remaining=(mode == "full"),
             )
+            if mode == "full" and add_volume:
+                # سقف واقعیِ بعد از preserve_remaining را از خود پنل می‌خوانیم تا رکورد
+                # محلی دقیقاً هم‌سو با پنل بماند (نه با محاسبه‌ی جداگانه و احتمالاً ناهم‌خوان).
+                usage = await provider.get_user_usage(cc["username"])
+                set_volume_gb = usage["data_limit_bytes"] / (1024 ** 3)
         except PanelError as e:
             raise RenewalError(str(e)) from e
-        db.apply_custom_config_renewal(cc["id"], add_volume, add_days, full_reset=(mode == "full"))
+        db.apply_custom_config_renewal(
+            cc["id"], add_volume, add_days, full_reset=(mode == "full"), set_volume_gb=set_volume_gb,
+        )
         return "✅ سرویس شما با موفقیت تمدید شد."
 
     if kind == "config":
