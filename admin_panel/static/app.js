@@ -6147,6 +6147,9 @@ const SETTINGS_GROUPS = [
   ]},
 
   // ------------------------------------------------------ سرویس‌های ویژه
+  { tab: 'services', title: '🛒 سقف تعداد خرید در هر سفارش', fields: [
+    { key: 'auto_provision_max_qty', label: 'حداکثر تعداد محصولات خودکار در هر سفارش (۰=نامحدود)', type: 'number' },
+  ] },
   { tab: 'services', title: 'کانفیگ شخصی/سفارشی', fields: [
     { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
     { key: 'custom_config_min_gb', label: 'حداقل حجم مجاز (گیگ)', type: 'number' },
