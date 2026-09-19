@@ -380,8 +380,8 @@ function hasPerm(perm) {
 }
 function canSee(navRole) {
   const rp = ME?.reseller_profile;
-  if (navRole === 'reseller-self') return !!(ME?.tenant && rp?.level === 2);
-  if (ME?.tenant && rp?.level === 2) {
+  if (navRole === 'reseller-self') return !!(ME?.tenant && rp);
+  if (ME?.tenant && rp) {
     // سطح ۲ فقط ابزارهای عملیاتی خودش را می‌بیند؛ کاتالوگ/پنل/تنظیمات
     // مدیریتی عمداً از منو حذف شده‌اند و backend هم همان‌ها را 403 می‌کند.
     if (navRole === 'any') {
@@ -2664,8 +2664,8 @@ async function showUserDetail(tgId) {
         <span class="mono">ID: ${tgId}</span>
       </div>
       <span class="badge ${u.is_blocked ? 'badge-rejected' : 'badge-approved'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
-      ${hasPerm('resellers') && !d.is_reseller ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
-      ${hasPerm('resellers') && d.is_reseller ? `<button class="btn btn-sm btn-primary" id="ud-edit-reseller">⚙️ ویرایش نمایندگی</button><button class="btn btn-sm btn-danger" id="ud-delete-reseller">🗑 حذف نمایندگی</button>` : ''}
+      ${hasPerm('resellers') && !d.is_reseller && !d.agent_tier ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
+      ${hasPerm('resellers') && (d.is_reseller || d.agent_tier) ? `${d.is_reseller ? '<button class="btn btn-sm btn-primary" id="ud-edit-reseller">⚙️ ویرایش نمایندگی</button>' : ''}<button class="btn btn-sm btn-danger" id="ud-delete-reseller">🗑 حذف نمایندگی</button>` : ''}
       ${historyBtn('user', tgId)}
     </div>
 
@@ -2721,7 +2721,7 @@ async function showUserDetail(tgId) {
     const makeResellerBtn = $('#ud-make-reseller', body);
     if (makeResellerBtn) makeResellerBtn.addEventListener('click', () => openMakeResellerModal(tgId, close));
     const editResellerBtn = $('#ud-edit-reseller', body);
-    if (editResellerBtn) editResellerBtn.addEventListener('click', () => openLevel2ResellerManageModal(tgId));
+    if (editResellerBtn) editResellerBtn.addEventListener('click', () => openResellerManageModal(tgId));
     const deleteResellerBtn = $('#ud-delete-reseller', body);
     if (deleteResellerBtn) deleteResellerBtn.addEventListener('click', async () => {
       if (!confirm('حذف کامل نمایندگی این کاربر و موجودی‌های نمایندگی انجام شود؟')) return;
@@ -2735,88 +2735,75 @@ async function showUserDetail(tgId) {
   }, { wide: true });
 }
 
-/* نماینده‌کردن مستقیم یک کاربر توسط ادمین از پنل وب، با همان محورهای چندسطحیِ
-   فرم درخواست نمایندگی سطح ۲ خودِ کاربر (بات/پنل وب/مینی‌اپ/مدل تامین) - معادل
-   دقیقاً همان چیزی که کاربر خودش می‌تواند درخواست بدهد. */
-const MAKE_RESELLER_BOT_LABEL = {
-  dedicated: 'بات مستقل با توکن (بعد از ثبت، از کاربر توکن @BotFather خواسته می‌شود)',
-  inline_link: 'لینک اختصاصی فروش داخل بات اصلی',
-  none: 'بدون بات (فقط اعتبار/موجودی نمایندگی)',
-};
-
+/* نماینده‌کردن مستقیم یک کاربر بر اساس سطح‌های نمایندگی (برنزی، نقره‌ای، طلایی، VIP) */
 function openMakeResellerModal(tgId, closeUserModal) {
+  apiGet('/reseller-tiers').then(all => {
+    const tiers = all.filter(t => t.is_enabled);
+    if (!tiers.length) { toast('هیچ سطح نمایندگی فعالی وجود ندارد.', true); return; }
+    openMakeResellerTierModal(tgId, closeUserModal, tiers);
+  }).catch(handleErr);
+}
+
+function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
   openModal(`نماینده کردن کاربر ${tgId}`, `
     <div class="form-grid">
-      <div><b>بات این نمایندگی چطور باشد؟</b></div>
-      <select class="input" id="mr-bot-choice">
-        ${Object.entries(MAKE_RESELLER_BOT_LABEL).map(([v, l]) => `<option value="${v}"${v === 'none' ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+      <div><b>سطح نمایندگی</b></div>
+      <select class="input" id="mr-tier">
+        ${tiers.map(t => `<option value="${esc(t.code)}">${esc(t.icon)} ${esc(t.title)} (${esc(t.model_label)})</option>`).join('')}
       </select>
+      <div class="hint-text" id="mr-tier-info"></div>
 
       <div id="mr-percent-wrap" style="display:none">
         <div><b>درصد کمیسیون</b></div>
-        <div class="hint-text">نمایندگی کمیسیونی بدون حجم و بدون محصول آماده است؛ فقط این درصد از هر خرید مشتریانی که با لینک اختصاصی‌اش وارد شوند، به کیف پول او واریز می‌شود.</div>
+        <div class="hint-text" id="mr-percent-hint"></div>
         <input class="input" id="mr-percent" type="number" min="1" max="100" placeholder="مثلاً 10">
       </div>
 
-      <div id="mr-interface-wrap">
-        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-web-panel"> پنل وب اختصاصی می‌خواهد</label>
-        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mr-miniapp"> مینی‌اپ فروشگاه می‌خواهد</label>
+      <div id="mr-volume-wrap" style="display:none">
+        <div><b>حجم اعتبار اولیه (گیگ)</b></div>
+        <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
       </div>
 
-      <div id="mr-supply-wrap">
-        <div><b>مدل تامین</b></div>
-        <select class="input" id="mr-supply-model">
-          <option value="volume_credit" selected>اعتبار حجمی</option>
-          <option value="fixed_product">محصول آماده</option>
-        </select>
-
-        <div id="mr-volume-wrap">
-          <div><b>حجم اعتبار اولیه (گیگ)</b></div>
-          <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
-        </div>
-
-        <div id="mr-fixed-wrap" style="display:none">
-          <div><b>محصولات اولیه نماینده</b></div>
-          <div class="hint-text">چند محصول را هم‌زمان انتخاب کن و برای هرکدام تعداد جداگانه بده.</div>
-          <div id="mr-fixed-products" style="display:grid;gap:8px;max-height:260px;overflow:auto;padding:4px 0">
-            <div class="hint-text">در حال بارگذاری...</div>
-          </div>
+      <div id="mr-fixed-wrap" style="display:none">
+        <div><b>محصولات اولیه نماینده</b></div>
+        <div class="hint-text">چند محصول را هم‌زمان انتخاب کن و برای هرکدام تعداد جداگانه بده.</div>
+        <div id="mr-fixed-products" style="display:grid;gap:8px;max-height:260px;overflow:auto;padding:4px 0">
+          <div class="hint-text">در حال بارگذاری...</div>
         </div>
       </div>
 
-      <div id="mr-panel-wrap">
+      <div id="mr-panel-wrap" style="display:none">
         <div><b>پنل اعتباری نمایندگی (اختیاری)</b></div>
         <select class="input" id="mr-panel"><option value="">پیش‌فرض خودکار</option></select>
       </div>
 
-      <div><b>یادداشت داخلی (اختیاری)</b></div>
-      <textarea class="input" id="mr-note" rows="2" placeholder="مثلاً دلیل نماینده‌کردن این کاربر..."></textarea>
+      <div id="mr-note-wrap">
+        <div><b>یادداشت داخلی (اختیاری)</b></div>
+        <textarea class="input" id="mr-note" rows="2" placeholder="مثلاً دلیل نماینده‌کردن این کاربر..."></textarea>
+      </div>
 
-      <button class="btn btn-primary" id="mr-submit">✅ ثبت و نماینده کردن</button>
+      <button class="btn btn-primary" id="mr-submit">ثبت و نماینده کردن</button>
     </div>
   `, (body, close) => {
-    const supplySel = $('#mr-supply-model', body);
-    const botChoiceSel = $('#mr-bot-choice', body);
-    const syncSupplyVisibility = () => {
-      const isFixed = supplySel.value === 'fixed_product';
-      $('#mr-volume-wrap', body).style.display = isFixed ? 'none' : '';
-      $('#mr-fixed-wrap', body).style.display = isFixed ? '' : 'none';
+    const tierSel = $('#mr-tier', body);
+    const currentTier = () => tiers.find(t => t.code === tierSel.value);
+    const show = (id, on) => { $(id, body).style.display = on ? '' : 'none'; };
+    const syncTier = () => {
+      const t = currentTier();
+      const features = [t.has_dedicated_bot && 'بات مستقل', t.has_web_panel && 'پنل وب', t.has_miniapp && 'مینی‌اپ'].filter(Boolean);
+      $('#mr-tier-info', body).textContent = [t.summary, features.length ? `امکانات: ${features.join('، ')}` : ''].filter(Boolean).join(' | ');
+      show('#mr-percent-wrap', t.model === 'commission');
+      show('#mr-volume-wrap', t.model === 'volume_credit');
+      show('#mr-fixed-wrap', t.model === 'fixed_product');
+      show('#mr-panel-wrap', t.model === 'volume_credit' || t.model === 'fixed_product');
+      if (t.model === 'commission') {
+        const low = t.commission_min || 1;
+        const high = t.commission_max || 100;
+        $('#mr-percent-hint', body).textContent = `درصدی از هر خرید مشتریانی که با لینک اختصاصی او وارد شوند به کیف پولش واریز می‌شود (بازه مجاز: ${low} تا ${high}).`;
+      }
     };
-    const syncBotChoiceVisibility = () => {
-      // نمایندگی کمیسیونی (لینک اختصاصی داخل بات اصلی) نه حجم دارد، نه محصول
-      // آماده، نه پنل وب/مینی‌اپ مستقل - فقط یک درصد کمیسیون دائمی؛ برای این
-      // حالت باید فقط فیلد درصد نشان داده شود (معادل «ساخت مستقیم نماینده‌ی
-      // کمیسیونی»)، نه فرم کامل نمایندگی سطح ۲.
-      const isInlineLink = botChoiceSel.value === 'inline_link';
-      $('#mr-percent-wrap', body).style.display = isInlineLink ? '' : 'none';
-      $('#mr-interface-wrap', body).style.display = isInlineLink ? 'none' : '';
-      $('#mr-supply-wrap', body).style.display = isInlineLink ? 'none' : '';
-      $('#mr-panel-wrap', body).style.display = isInlineLink ? 'none' : '';
-    };
-    supplySel.addEventListener('change', syncSupplyVisibility);
-    botChoiceSel.addEventListener('change', syncBotChoiceVisibility);
-    syncSupplyVisibility();
-    syncBotChoiceVisibility();
+    tierSel.addEventListener('change', syncTier);
+    syncTier();
 
     apiGet('/reseller-panels-lite').then(panels => {
       const sel = $('#mr-panel', body);
@@ -2837,41 +2824,33 @@ function openMakeResellerModal(tgId, closeUserModal) {
     }).catch(() => {});
 
     $('#mr-submit', body).addEventListener('click', async () => {
-      if (botChoiceSel.value === 'inline_link') {
-        const percent = Number($('#mr-percent', body).value);
-        if (!percent || percent < 1 || percent > 100) { toast('درصد کمیسیون باید بین ۱ تا ۱۰۰ باشد.', true); return; }
-        try {
-          await apiPost('/resellers/inline-commissions', { owner_telegram_id: tgId, percent });
-          toast('کاربر با موفقیت نماینده‌ی کمیسیونی شد.');
-          close();
-          if (closeUserModal) closeUserModal();
-          showUserDetail(tgId);
-        } catch (e) { handleErr(e); }
-        return;
-      }
-      const supply_model = supplySel.value;
+      const t = currentTier();
       const payload = {
-        bot_choice: $('#mr-bot-choice', body).value,
-        wants_web_panel: $('#mr-web-panel', body).checked,
-        wants_miniapp: $('#mr-miniapp', body).checked,
-        supply_model,
-        panel_server_id: $('#mr-panel', body).value ? Number($('#mr-panel', body).value) : null,
+        tier_code: t.code,
         note: $('#mr-note', body).value.trim() || null,
       };
-      if (supply_model === 'fixed_product') {
+      if (t.model === 'commission') {
+        const percent = Number($('#mr-percent', body).value);
+        const low = t.commission_min || 1;
+        const high = t.commission_max || 100;
+        if (!percent || percent < low || percent > high) { toast(`درصد کمیسیون باید بین ${low} تا ${high} باشد.`, true); return; }
+        payload.percent = percent;
+      } else if (t.model === 'fixed_product') {
         const items = $$('.mr-product-check', body).filter(x => x.checked).map(ch => {
           const qtyEl = $$(`.mr-product-qty[data-product-id="${ch.dataset.productId}"]`, body)[0];
           return { product_id: Number(ch.dataset.productId), quantity: Number(qtyEl?.value || 0) };
         }).filter(x => x.quantity > 0);
         if (!items.length) { toast('حداقل یک محصول را انتخاب کنید.', true); return; }
         payload.supply_items = items;
-        // سازگاری با backendهای قدیمی/گزارش‌های موجود: اولین محصول primary است.
         payload.supply_product_id = items[0].product_id;
         payload.supply_qty = items[0].quantity;
-      } else {
+      } else if (t.model === 'volume_credit') {
         const volume_gb = Number($('#mr-volume', body).value);
         if (!volume_gb || volume_gb <= 0) { toast('حجم اعتبار اولیه نامعتبر است.', true); return; }
         payload.volume_gb = volume_gb;
+      }
+      if (t.model === 'volume_credit' || t.model === 'fixed_product') {
+        payload.panel_server_id = $('#mr-panel', body).value ? Number($('#mr-panel', body).value) : null;
       }
       try {
         await apiPost(`/users/${tgId}/make-reseller`, payload);
@@ -4468,7 +4447,7 @@ let resellersSubTab = 'bots'; // 'bots' | 'credit' | 'requests'
 let resellerReqFilter = 'open';
 
 const RESELLERS_SUBTABS = [
-  ['bots', 'نماینده‌های کامل'],
+  ['bots', 'نماینده‌های بات'],
   ['credit', 'نمایندگی اعتباری'],
   ['commission', 'نمایندگی کمیسیونی'],
   ['requests', 'درخواست‌های نمایندگی'],
@@ -4946,28 +4925,25 @@ async function renderResellersBotsTab() {
       <div class="card stat-card">
         <div class="stat-top"><span class="stat-icon stat-icon-4">${svg('tickets')}</span></div>
         <span class="value mono">${fmt(totalRevenue)} <span style="font-size:12px;font-weight:600">تومان</span></span>
-        <span class="label">مجموع فروش همه‌ی نماینده‌های کامل</span>
+        <span class="label">مجموع فروش همه‌ی نماینده‌ها</span>
       </div>
     </div>
     <div class="card">
       <div class="card-head"><h3>نماینده‌های صاحب بات مستقل</h3>
-        <span class="card-sub">نماینده‌ی «کامل» بات و (در صورت فعال‌سازی) پنل وب اختصاصی خودش را دارد؛ نماینده‌ی «سطح ۲» فقط از داخل همین بات با اعتبار حجمی کار می‌کند. مبلغ فروش از سفارش‌های تاییدشده‌ی همان دیتابیس مستقل نماینده محاسبه شده است.</span>
+        <span class="card-sub">مبلغ فروش از سفارش‌های تاییدشده‌ی همان دیتابیس مستقل نماینده محاسبه شده است.</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>مالک</th><th>بات</th><th>سطح</th><th>فروش</th><th>وضعیت</th><th>پنل وب</th><th>تاریخ ثبت</th><th>عملیات</th></tr></thead>
+        <thead><tr><th>#</th><th>مالک</th><th>بات</th><th>فروش</th><th>وضعیت</th><th>پنل وب</th><th>تاریخ ثبت</th><th>عملیات</th></tr></thead>
         <tbody>${bots.map(b => `<tr>
           <td class="mono">#${b.id}</td>
           <td>${esc(b.owner_name || '—')}<div class="mono" style="opacity:.65;font-size:12px">${b.owner_telegram_id}</div></td>
           <td>${b.bot_username ? '@' + esc(b.bot_username) : '<span style="opacity:.5">—</span>'}</td>
-          <td>${b.reseller_level === 1 ? '<span class="badge badge-approved">کامل</span>' : '<span class="badge badge-pending">سطح ۲</span>'}</td>
           <td><span class="mono">${fmt(b.revenue_toman)} تومان</span><div style="opacity:.6;font-size:11.5px">${fmt(b.paid_orders)} سفارش</div></td>
           <td>${b.is_active ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
-          <td>${b.reseller_level === 1
-            ? (b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>')
-            : '<span style="opacity:.5">—</span>'}</td>
+          <td>${b.web_panel_enabled ? '<span class="badge badge-approved">فعال</span>' : '<span class="badge badge-rejected">غیرفعال</span>'}</td>
           <td class="mono">${fmtDate(b.created_at)}</td>
           <td><button class="btn btn-sm" data-manage="${b.id}">مدیریت</button></td>
-        </tr>`).join('') || `<tr><td colspan="9" class="empty-state">${svg('empty')}<div>هیچ بات نمایندگی‌ای ثبت نشده</div></td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="8" class="empty-state">${svg('empty')}<div>هیچ بات نمایندگی‌ای ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
   `);
@@ -4977,7 +4953,6 @@ async function renderResellersBotsTab() {
 }
 
 function openResellerBotManageModal(bot) {
-  const isFull = bot.reseller_level === 1;
   openModal(`مدیریت نماینده #${bot.id}`, `
     <div class="form-grid">
       <div><b>بات:</b> ${bot.bot_username ? '@' + esc(bot.bot_username) : '—'}</div>
@@ -4991,9 +4966,6 @@ function openResellerBotManageModal(bot) {
       <div><b>آیدی عددی مالک (تلگرام)</b></div>
       <input class="input" id="rb-owner-id" type="number" value="${bot.owner_telegram_id}" placeholder="آیدی تلگرام مالک">
       <button class="btn btn-sm" id="rb-save-owner">ذخیره مشخصات مالک</button>
-      <hr>
-      <div><b>سطح نمایندگی</b></div>
-      <button class="btn btn-sm" id="rb-level">تغییر به «${isFull ? 'سطح ۲ (محدود)' : 'کامل'}»</button>
       <hr>
       <div><b>پنل وب اختصاصی</b></div>
       ${bot.web_panel_enabled ? `
@@ -5020,43 +4992,36 @@ function openResellerBotManageModal(bot) {
         toast('ذخیره شد.'); close(); renderResellers();
       } catch (e) { handleErr(e); }
     });
-    $('#rb-level', body).addEventListener('click', async () => {
+    const linkBtn = $('#rb-wp-link', body);
+    if (linkBtn) linkBtn.addEventListener('click', async () => {
       try {
-        await apiPost(`/reseller-bots/${bot.id}/level`, { level: isFull ? 2 : 1 });
-        toast('سطح نمایندگی تغییر کرد.'); close(); renderResellers();
+        const r = await apiGet(`/reseller-bots/${bot.id}/web-panel/login-link`);
+        openModal('لینک ورود ثابت پنل وب', `
+          <div class="form-grid"><input class="input" readonly value="${esc(r.login_link)}" onclick="this.select()"></div>
+        `);
       } catch (e) { handleErr(e); }
     });
-    if (isFull) {
-      const linkBtn = $('#rb-wp-link', body);
-      if (linkBtn) linkBtn.addEventListener('click', async () => {
-        try {
-          const r = await apiGet(`/reseller-bots/${bot.id}/web-panel/login-link`);
-          openModal('لینک ورود ثابت پنل وب', `
-            <div class="form-grid"><input class="input" readonly value="${esc(r.login_link)}" onclick="this.select()"></div>
-          `);
-        } catch (e) { handleErr(e); }
-      });
-      const regenBtn = $('#rb-wp-regen', body);
-      if (regenBtn) regenBtn.addEventListener('click', async () => {
-        try {
-          const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/regenerate`);
-          toast(r.sent_to_owner ? 'لینک جدید ساخته و برای نماینده ارسال شد.' : 'لینک ساخته شد ولی ارسال به نماینده ناموفق بود.');
-        } catch (e) { handleErr(e); }
-      });
-      const offBtn = $('#rb-wp-off', body);
-      if (offBtn) offBtn.addEventListener('click', async () => {
-        try { await apiPost(`/reseller-bots/${bot.id}/web-panel/disable`); toast('پنل وب غیرفعال شد.'); close(); renderResellers(); }
-        catch (e) { handleErr(e); }
-      });
-      const onBtn = $('#rb-wp-on', body);
-      if (onBtn) onBtn.addEventListener('click', async () => {
-        try {
-          const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/enable`);
-          toast(r.sent_to_owner ? 'پنل وب فعال شد و لینک راه‌اندازی برای نماینده ارسال شد.' : 'پنل وب فعال شد ولی ارسال لینک ناموفق بود.');
-          close(); renderResellers();
-        } catch (e) { handleErr(e); }
-      });
-    }
+    const regenBtn = $('#rb-wp-regen', body);
+    if (regenBtn) regenBtn.addEventListener('click', async () => {
+      try {
+        const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/regenerate`);
+        toast(r.sent_to_owner ? 'لینک جدید ساخته و برای نماینده ارسال شد.' : 'لینک ساخته شد ولی ارسال به نماینده ناموفق بود.');
+      } catch (e) { handleErr(e); }
+    });
+    const offBtn = $('#rb-wp-off', body);
+    if (offBtn) offBtn.addEventListener('click', async () => {
+      try { await apiPost(`/reseller-bots/${bot.id}/web-panel/disable`); toast('پنل وب غیرفعال شد.'); close(); renderResellers(); }
+      catch (e) { handleErr(e); }
+    });
+    const onBtn = $('#rb-wp-on', body);
+    if (onBtn) onBtn.addEventListener('click', async () => {
+      try {
+        const r = await apiPost(`/reseller-bots/${bot.id}/web-panel/enable`);
+        toast(r.sent_to_owner ? 'پنل وب فعال شد و لینک راه‌اندازی برای نماینده ارسال شد.' : 'پنل وب فعال شد ولی ارسال لینک ناموفق بود.');
+        close(); renderResellers();
+      } catch (e) { handleErr(e); }
+    });
+
     $('#rb-delete', body).addEventListener('click', () => {
       openModal('حذف نماینده', `
         <div class="form-grid">
@@ -5105,7 +5070,7 @@ async function renderResellersCreditTab() {
     <div class="card" style="padding:18px 20px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
         <div style="min-width:240px">
-          <h3 style="margin:0 0 6px">نمایندگی اعتباری (سطح ۲)</h3>
+          <h3 style="margin:0 0 6px">نمایندگی اعتباری</h3>
           <span class="card-sub">کاربرانی که بدون داشتن بات یا پنل مستقل، از یک «اعتبار حجمی» (گیگ) که خودت بهشون تخصیص می‌دی، داخل همین بات برای مشتری‌های خودشون کانفیگ می‌سازن. هر کانفیگ به‌اندازه‌ی حجمش از اعتبارشون کم می‌شه — پول این فروش‌ها بین خودشون و مشتری‌هاشونه و توی این بات ثبت نمی‌شه، فقط حجم فروخته‌شده قابل ردیابیه.</span>
         </div>
         <button class="btn btn-primary btn-sm" id="cres-add" style="white-space:nowrap">🔍 جستجو / فعال‌سازی نماینده با آیدی</button>
@@ -5165,7 +5130,7 @@ async function renderResellersCreditTab() {
             <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? '⛔️ غیرفعال' : '✅ فعال'}</button>
             <button class="btn btn-sm" data-log="${r.telegram_id}">📜 تاریخچه</button>
           </div></td>
-        </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>نماینده‌ی سطح ۲ ثبت نشده</div></td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>نماینده ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
   `;
@@ -5181,7 +5146,7 @@ async function renderResellersCreditTab() {
 
   $('#cres-add', content()).addEventListener('click', openResellerFindModal);
 
-  $$('[data-manage-l2]', content()).forEach(b => b.addEventListener('click', () => openLevel2ResellerManageModal(Number(b.dataset.manageL2))));
+  $$('[data-manage-l2]', content()).forEach(b => b.addEventListener('click', () => openResellerManageModal(Number(b.dataset.manageL2))));
 
   $$('[data-credit]', content()).forEach(b =>
     b.addEventListener('click', () => openResellerCreditModal(b.dataset.credit)));
@@ -5396,12 +5361,12 @@ function openCommissionResellerDirectModal() {
   });
 }
 
-async function openLevel2ResellerManageModal(tgId) {
+async function openResellerManageModal(tgId) {
   try {
     const m = await apiGet(`/resellers/${tgId}/manage`);
     const u=m.user, supply=m.supply, inventory=m.inventory||[];
     const products=await apiGet('/reseller-fixed-products');
-    openModal(`مدیریت کامل نماینده سطح ۲ #${tgId}`, `
+    openModal(`مدیریت کامل نماینده #${tgId}`, `
       <div class="form-grid">
         <div><b>کاربر:</b> ${esc(u.username ? '@'+u.username : (u.first_name || '—'))} <span class="mono">${tgId}</span></div>
         <input class="input" id="l2-owner-name" value="${esc(u.first_name || '')}" placeholder="نام نماینده">
@@ -5421,8 +5386,8 @@ async function openLevel2ResellerManageModal(tgId) {
       $('#l2-panel',body).insertAdjacentHTML('beforeend',panels.map(x=>`<option value="${x.id}" ${Number(x.id)===Number(u.reseller_panel_id)?'selected':''}>${esc(x.name)}</option>`).join(''));
       const sync=()=>$('#l2-fixed-wrap',body).style.display=$('#l2-model',body).value==='fixed_product'?'':'none'; sync(); $('#l2-model',body).onchange=sync;
       $('#l2-save',body).onclick=async()=>{ try { const model=$('#l2-model',body).value; const selected=$$('.l2-product-check',body).filter(x=>x.checked).map(ch=>({product_id:Number(ch.dataset.productId),qty:Number($$(`.l2-product-qty[data-product-id="${ch.dataset.productId}"]`,body)[0]?.value||0)})).filter(x=>x.qty>0); if(model==='fixed_product'&&!selected.length){toast('حداقل یک محصول را انتخاب کنید.',true);return;} await api(`/resellers/${tgId}`,{method:"PATCH",body:{owner_name:$('#l2-owner-name',body).value.trim()||null,enabled:$('#l2-enabled',body).checked,supply_model:model,supply_products:model==='fixed_product'?selected:null,panel_server_id:$('#l2-panel',body).value?Number($('#l2-panel',body).value):null}}); toast('ذخیره شد.'); close(); renderResellers(); } catch(e){handleErr(e);} };
-      $$('[data-l2-inv]',body).forEach(btn=>btn.onclick=async()=>{try{await apiPost(`/resellers/${tgId}/products/${btn.dataset.l2Inv}/inventory`,{delta:Number(btn.dataset.delta),reason:'تنظیم از پنل مدیریت'}); toast('موجودی به‌روزرسانی شد.'); close(); openLevel2ResellerManageModal(tgId);}catch(e){handleErr(e);}});
-      $('#l2-add',body).onclick=async()=>{try{const q=Number($('#l2-add-qty',body).value); if(!q||q<1)throw Error('تعداد نامعتبر است.'); await apiPost(`/resellers/${tgId}/products/${$('#l2-add-product',body).value}/inventory`,{delta:q,reason:'شارژ محصول از پنل مدیریت'}); toast('موجودی شارژ شد.'); close(); openLevel2ResellerManageModal(tgId);}catch(e){handleErr(e);}};
+      $$('[data-l2-inv]',body).forEach(btn=>btn.onclick=async()=>{try{await apiPost(`/resellers/${tgId}/products/${btn.dataset.l2Inv}/inventory`,{delta:Number(btn.dataset.delta),reason:'تنظیم از پنل مدیریت'}); toast('موجودی به‌روزرسانی شد.'); close(); openResellerManageModal(tgId);}catch(e){handleErr(e);}});
+      $('#l2-add',body).onclick=async()=>{try{const q=Number($('#l2-add-qty',body).value); if(!q||q<1)throw Error('تعداد نامعتبر است.'); await apiPost(`/resellers/${tgId}/products/${$('#l2-add-product',body).value}/inventory`,{delta:q,reason:'شارژ محصول از پنل مدیریت'}); toast('موجودی شارژ شد.'); close(); openResellerManageModal(tgId);}catch(e){handleErr(e);}};
       $('#l2-delete',body).onclick=async()=>{if(!confirm('حذف کامل این نماینده و موجودی‌هایش انجام شود؟'))return; try{await apiDelete(`/resellers/${tgId}`);toast('نمایندگی حذف شد.');close();renderResellers();}catch(e){handleErr(e);}};
     }, {wide:true});
   } catch(e){handleErr(e);}
