@@ -101,6 +101,12 @@ SETTINGS_FORM_SECTIONS = [
         "title": "⚙️ سرویس‌های ویژه",
         "groups": [
             {
+                "title": "🛒 سقف تعداد خرید در هر سفارش",
+                "fields": [
+                    {"key": "auto_provision_max_qty", "label": "حداکثر تعداد محصولات خودکار در هر سفارش (۰=نامحدود)", "type": "number"},
+                ],
+            },
+            {
                 "title": "کانفیگ شخصی/سفارشی",
                 "fields": [
                     {"key": "custom_config_enabled", "label": "فعال بودن ساخت کانفیگ شخصی", "type": "bool"},
