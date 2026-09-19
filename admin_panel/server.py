@@ -1107,6 +1107,78 @@ def api_app_config(admin=Depends(get_current_admin)):
             "id": "resellers", "title": "نمایندگی‌ها", "icon": "groups", "screen": "resellers",
             "section": "شبکه و همکاران", "source": "/api/resellers", "search": True,
         })
+    if allowed("resellers"):
+        tabs.append({
+            "id": "reseller_tiers", "title": "سطوح نمایندگی", "icon": "groups", "screen": "list",
+            "section": "شبکه و همکاران",
+            "source": "/api/reseller-tiers", "item_id_field": "id",
+            "fields": [
+                {"key": "title", "label": "سطح", "type": "title"},
+                {"key": "model_label", "label": "مدل", "type": "badge"},
+                {"key": "members_count", "label": "اعضا", "type": "text"},
+                {"key": "is_enabled", "label": "فعال", "type": "toggle",
+                 "toggle_endpoint": "/api/reseller-tiers/{id}/toggle"},
+            ],
+            "edit_form": {
+                "title": "ویرایش سطح نمایندگی",
+                "submit_url": "/api/reseller-tiers/{id}",
+                "method": "PUT",
+                "fields": [
+                    {"key": "title", "label": "عنوان سطح", "type": "text"},
+                    {"key": "icon", "label": "ایموجی", "type": "text"},
+                    {"key": "summary", "label": "توضیح کوتاه (داخل لیست سطح‌ها)", "type": "text"},
+                    {"key": "description", "label": "توضیح کامل (کارت جزئیات)", "type": "text"},
+                    {"key": "sort_order", "label": "ترتیب نمایش", "type": "number"},
+                    {"key": "commission_min", "label": "حداقل درصد کمیسیون (خالی=بدون محدودیت)", "type": "number", "nullable": True},
+                    {"key": "commission_max", "label": "حداکثر درصد کمیسیون (خالی=بدون محدودیت)", "type": "number", "nullable": True},
+                    {"key": "permanent_discount_percent", "label": "تخفیف دائمی٪ (سطح تخفیفی)", "type": "number", "nullable": True},
+                    {"key": "min_qty", "label": "حداقل تعداد خرید (خرید عمده محصول)", "type": "number", "nullable": True},
+                    {"key": "min_volume_gb", "label": "حداقل حجم خرید به گیگ (اعتبار حجمی)", "type": "number", "nullable": True},
+                    {"key": "has_miniapp", "label": "مینی‌اپ اختصاصی", "type": "bool"},
+                    {"key": "has_web_panel", "label": "پنل وب", "type": "bool"},
+                    {"key": "has_dedicated_bot", "label": "بات مستقل", "type": "bool"},
+                    {"key": "auto_approve", "label": "تایید خودکار (سطح تخفیفی)", "type": "bool"},
+                ],
+            },
+        })
+        tabs.append({
+            "id": "reseller_tier_qty", "title": "پلکان تخفیف نقره‌ای", "icon": "discount", "screen": "list",
+            "section": "شبکه و همکاران",
+            "source": "/api/reseller-tiers/silver/qty-discounts", "item_id_field": "id",
+            "fields": [
+                {"key": "min_qty", "label": "از تعداد", "type": "title"},
+                {"key": "discount_percent", "label": "درصد تخفیف", "type": "text"},
+            ],
+            "actions": [
+                {"id": "delete", "label": "حذف", "method": "DELETE",
+                 "endpoint": "/api/reseller-tiers/qty-discounts/{id}", "style": "danger", "confirm": True},
+            ],
+            "create_form": {
+                "title": "افزودن پله‌ی تخفیف",
+                "submit_url": "/api/reseller-tiers/silver/qty-discounts",
+                "method": "POST",
+                "fields": [
+                    {"key": "min_qty", "label": "حداقل تعداد خرید یک‌جا", "type": "number"},
+                    {"key": "discount_percent", "label": "درصد تخفیف", "type": "number"},
+                ],
+            },
+        })
+        tabs.append({
+            "id": "reseller_tier_requests", "title": "درخواست‌های سطح", "icon": "groups", "screen": "list",
+            "section": "شبکه و همکاران",
+            "source": "/api/reseller-tier-requests?status=pending", "item_id_field": "id",
+            "fields": [
+                {"key": "tier_title", "label": "سطح", "type": "title"},
+                {"key": "first_name", "label": "نام", "type": "text"},
+                {"key": "username", "label": "یوزرنیم", "type": "text"},
+            ],
+            "actions": [
+                {"id": "approve", "label": "تایید", "method": "POST",
+                 "endpoint": "/api/reseller-tier-requests/{id}/approve", "style": "default", "confirm": True},
+                {"id": "reject", "label": "رد", "method": "POST",
+                 "endpoint": "/api/reseller-tier-requests/{id}/reject", "style": "danger", "confirm": True},
+            ],
+        })
     if allowed("panels"):
         tabs.append({
             "id": "panels", "title": "پنل‌های VPN", "icon": "dns", "screen": "list",
@@ -3708,6 +3780,173 @@ def api_resellers(admin=Depends(require_permission("resellers"))):
     return rows
 
 
+TIER_MODEL_LABELS = {
+    "commission": "کمیسیون",
+    "discount": "تخفیف دائمی و خرید عمده",
+    "fixed_product": "خرید عمده محصول",
+    "volume_credit": "خرید عمده حجم",
+}
+TIER_FLAG_KEYS = ("is_enabled", "has_miniapp", "has_web_panel", "has_dedicated_bot", "auto_approve")
+
+
+class TierBody(BaseModel):
+    title: Optional[str] = None
+    icon: Optional[str] = None
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    sort_order: Optional[int] = None
+    commission_min: Optional[int] = None
+    commission_max: Optional[int] = None
+    permanent_discount_percent: Optional[int] = None
+    min_qty: Optional[int] = None
+    min_volume_gb: Optional[int] = None
+    has_miniapp: Optional[bool] = None
+    has_web_panel: Optional[bool] = None
+    has_dedicated_bot: Optional[bool] = None
+    auto_approve: Optional[bool] = None
+
+
+class TierQtyDiscountBody(BaseModel):
+    min_qty: int
+    discount_percent: int
+
+
+def _tier_view(row):
+    d = row_to_dict(row)
+    d["id"] = d["code"]
+    d["model_label"] = TIER_MODEL_LABELS.get(d["model"], d["model"])
+    for key in TIER_FLAG_KEYS:
+        d[key] = bool(d[key])
+    return d
+
+
+def _tier_or_404(code: str):
+    row = db.get_reseller_tier(code)
+    if not row:
+        raise HTTPException(status_code=404, detail="سطح پیدا نشد.")
+    return row
+
+
+@app.get("/api/reseller-tiers")
+def api_reseller_tiers(admin=Depends(require_permission("resellers"))):
+    out = []
+    for row in db.list_reseller_tiers():
+        d = _tier_view(row)
+        d["qty_discounts"] = rows_to_list(db.list_tier_qty_discounts(row["code"]))
+        d["members_count"] = len(db.list_tier_members(row["code"]))
+        out.append(d)
+    return out
+
+
+@app.put("/api/reseller-tiers/{code}")
+def api_update_reseller_tier(code: str, body: TierBody, admin=Depends(require_permission("resellers"))):
+    _tier_or_404(code)
+    nullable = set(Database.RESELLER_TIER_NULLABLE_FIELDS)
+    fields = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None or k in nullable}
+    if "title" in fields and not str(fields["title"]).strip():
+        raise HTTPException(status_code=400, detail="عنوان سطح نمی‌تواند خالی باشد.")
+    try:
+        db.update_reseller_tier(code, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.log_admin_action(admin["id"], "reseller_tier_update", code, "reseller_tier", None)
+    return {"ok": True}
+
+
+@app.post("/api/reseller-tiers/{code}/toggle")
+def api_toggle_reseller_tier(code: str, admin=Depends(require_permission("resellers"))):
+    row = _tier_or_404(code)
+    db.update_reseller_tier(code, is_enabled=0 if row["is_enabled"] else 1)
+    db.log_admin_action(admin["id"], "reseller_tier_toggle", code, "reseller_tier", None)
+    return {"ok": True}
+
+
+@app.get("/api/reseller-tiers/{code}/qty-discounts")
+def api_tier_qty_discounts(code: str, admin=Depends(require_permission("resellers"))):
+    _tier_or_404(code)
+    return rows_to_list(db.list_tier_qty_discounts(code))
+
+
+@app.post("/api/reseller-tiers/{code}/qty-discounts")
+def api_add_tier_qty_discount(code: str, body: TierQtyDiscountBody, admin=Depends(require_permission("resellers"))):
+    _tier_or_404(code)
+    try:
+        discount_id = db.set_tier_qty_discount(code, body.min_qty, body.discount_percent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.log_admin_action(admin["id"], "reseller_tier_qty_discount", f"{code}: {body.min_qty}+ = {body.discount_percent}%", "reseller_tier", None)
+    return {"id": discount_id}
+
+
+@app.delete("/api/reseller-tiers/qty-discounts/{discount_id}")
+def api_delete_tier_qty_discount(discount_id: int, admin=Depends(require_permission("resellers"))):
+    if not db.delete_tier_qty_discount(discount_id):
+        raise HTTPException(status_code=404, detail="ردیف پیدا نشد.")
+    db.log_admin_action(admin["id"], "reseller_tier_qty_discount_delete", str(discount_id), "reseller_tier", None)
+    return {"ok": True}
+
+
+@app.get("/api/reseller-tiers/{code}/members")
+def api_tier_members(code: str, admin=Depends(require_permission("resellers"))):
+    _tier_or_404(code)
+    return rows_to_list(db.list_tier_members(code))
+
+
+@app.delete("/api/reseller-tiers/{code}/members/{user_id}")
+def api_remove_tier_member(code: str, user_id: int, admin=Depends(require_permission("resellers"))):
+    _tier_or_404(code)
+    if db.get_user_reseller_tier(user_id) != code:
+        raise HTTPException(status_code=404, detail="این کاربر عضو این سطح نیست.")
+    db.set_user_reseller_tier(user_id, None)
+    db.log_admin_action(admin["id"], "reseller_tier_member_remove", f"{code}: {user_id}", "user", user_id)
+    return {"ok": True}
+
+
+@app.get("/api/reseller-tier-requests")
+def api_tier_requests(status: Optional[str] = "pending", admin=Depends(require_permission("resellers"))):
+    out = []
+    for req in rows_to_list(db.list_tier_requests(status or None)):
+        user = row_to_dict(db.get_user(req["user_id"])) or {}
+        tier = db.get_reseller_tier(req["tier_code"])
+        req["tier_title"] = tier["title"] if tier else req["tier_code"]
+        req["username"] = user.get("username")
+        req["first_name"] = user.get("first_name")
+        out.append(req)
+    return out
+
+
+async def _decide_tier_request_web(request_id: int, admin, approve: bool):
+    req = db.get_tier_request(request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="درخواست پیدا نشد.")
+    done = db.approve_tier_request(request_id, 0) if approve else db.reject_tier_request(request_id, 0)
+    if not done:
+        raise HTTPException(status_code=409, detail="این درخواست دیگر در انتظار بررسی نیست.")
+    tier = db.get_reseller_tier(req["tier_code"])
+    label = f"{tier['icon']} {tier['title']}" if tier else req["tier_code"]
+    db.log_admin_action(
+        admin["id"], "tier_request_approve" if approve else "tier_request_reject",
+        f"درخواست #{request_id} | کاربر {req['user_id']} | سطح {req['tier_code']}", "user", req["user_id"],
+    )
+    text = (
+        f"✅ درخواست شما برای سطح {label} تایید شد. تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود."
+        if approve else f"❌ متاسفانه درخواست شما برای سطح {label} رد شد."
+    )
+    await tg_send(_bot_token(), req["user_id"], text)
+    return {"ok": True}
+
+
+@app.post("/api/reseller-tier-requests/{request_id}/approve")
+async def api_approve_tier_request(request_id: int, admin=Depends(require_permission("resellers"))):
+    return await _decide_tier_request_web(request_id, admin, True)
+
+
+@app.post("/api/reseller-tier-requests/{request_id}/reject")
+async def api_reject_tier_request(request_id: int, admin=Depends(require_permission("resellers"))):
+    return await _decide_tier_request_web(request_id, admin, False)
+
+
 class ResellerCreditBody(BaseModel):
     delta_gb: int
     reason: Optional[str] = None
@@ -4727,6 +4966,32 @@ def api_payment_methods(admin=Depends(require_any_permission("settings", "catalo
     مبلغ هرکدام؛ منبع همان db.get_payment_methods_catalog است که بات و
     مینی‌اپ هم موقع چک‌اوت از آن می‌خوانند - برای نمایش/ویرایش یک‌جا در پنل."""
     return db.get_payment_methods_catalog()
+
+
+@app.get("/api/wallet/payment-methods")
+def api_get_wallet_payment_methods(admin=Depends(require_any_permission("settings", "catalog"))):
+    """None/[] یعنی «همه‌ی روش‌ها مجازند» (بدون محدودیت). دقیقاً معادل
+    /api/products/{id}/payment-methods اما مستقل از محصول - فقط روی
+    شارژ کیف پول اثر دارد."""
+    return {"allowed": db.get_wallet_topup_payment_methods()}
+
+
+class WalletPaymentMethodsBody(BaseModel):
+    methods: Optional[List[str]] = None
+
+
+@app.post("/api/wallet/payment-methods")
+def api_set_wallet_payment_methods(body: WalletPaymentMethodsBody,
+                                    admin=Depends(require_permission("settings"))):
+    """محدودسازی این‌که شارژ کیف پول با کدام روش‌های پرداخت (کارت/آبان‌گیت‌وی/
+    کریپتو/بلوپال/نوآپی/درگاه سفارشی) ممکن باشد. methods=null یا [] یعنی حذف
+    محدودیت (همه‌ی روش‌های فعال مجازند) - دقیقاً همان چیزی که بات از منوی
+    خودش می‌سازد."""
+    db.set_wallet_topup_payment_methods(body.methods or None)
+    db.log_admin_action(admin["id"], "wallet_payment_methods",
+                         f"{body.methods or 'همه'} (پنل وب - {admin['username']})",
+                         "setting", "wallet_topup_payment_methods")
+    return {"ok": True}
 
 
 class PaymentMethodMinAmountBody(BaseModel):
