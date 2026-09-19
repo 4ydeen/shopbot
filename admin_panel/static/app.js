@@ -382,6 +382,15 @@ function canSee(navRole) {
   const rp = ME?.reseller_profile;
   if (navRole === 'reseller-self') return !!(ME?.tenant && rp);
   if (ME?.tenant && rp) {
+    const tier = String(rp.tier_code || '').toLowerCase();
+    if (!['gold','vip'].includes(tier)) {
+      if (navRole === 'reseller-self') return true;
+      if (navRole === 'resellers' || navRole === 'reseller_tiers') return false;
+      return navRole === 'any' ? true : hasPerm(navRole);
+    }
+    if (navRole === 'analytics') return tier === 'vip';
+    if (navRole === 'discounts' || navRole === 'banners') return tier === 'vip';
+    if (navRole === 'catalog') return true;
     // سطح ۲ فقط ابزارهای عملیاتی خودش را می‌بیند؛ کاتالوگ/پنل/تنظیمات
     // مدیریتی عمداً از منو حذف شده‌اند و backend هم همان‌ها را 403 می‌کند.
     if (navRole === 'any') {
@@ -401,6 +410,18 @@ const ROLE_LABEL = { owner: 'مالک', admin: 'مدیر کامل', mid: 'ادم
 
 /* ==================================================== live notifications === */
 let NOTIF_COUNTS = {};
+
+function applyResellerTierChrome() {
+  const p = ME?.reseller_profile;
+  const root = document.documentElement;
+  root.classList.remove('tenant-reseller', 'tier-gold', 'tier-vip');
+  if (!ME?.tenant || !p) return;
+  root.classList.add('tenant-reseller', String(p.tier_code || 'gold').toLowerCase() === 'vip' ? 'tier-vip' : 'tier-gold');
+  const title = $('#page-title');
+  if (title && CURRENT_TAB === 'dashboard') title.textContent = `${p.tier_icon || '🥇'} پنل ${p.tier_title || 'نمایندگی'}`;
+  const brand = $('.sidebar-brand .brand-text');
+  if (brand) brand.innerHTML = `<strong>${esc(p.tier_title || 'نمایندگی')}</strong><span>پنل اختصاصی ShopVPN</span>`;
+}
 
 function renderNav() {
   const el = $('#nav-tunnel');
@@ -491,6 +512,7 @@ async function boot() {
   if (location.pathname === '/setup') return boot_setup();
   try {
     ME = await apiGet('/me');
+    applyResellerTierChrome();
     showApp();
   } catch (e) {
     showLogin();
@@ -795,11 +817,13 @@ $('#login-form').addEventListener('submit', async e => {
   errBox.hidden = true;
   btn.disabled = true; btn.textContent = 'در حال ورود...';
   try {
-    ME = await apiPost('/login', {
+    await apiPost('/login', {
       username: $('#login-username').value.trim(),
       password: $('#login-password').value,
       b: tenantParam(),
     });
+    ME = await apiGet('/me');
+    applyResellerTierChrome();
     showApp();
   } catch (e) {
     errBox.textContent = e.message;
@@ -1009,7 +1033,72 @@ function wireDashRangeBar(onChange) {
     refresh();
   });
 }
+function resellerTierMeta() {
+  const p = ME?.reseller_profile;
+  if (!p) return null;
+  const vip = String(p.tier_code || '').toLowerCase() === 'vip';
+  return {
+    code: vip ? 'vip' : 'gold',
+    title: p.tier_title || (vip ? 'VIP' : 'طلایی'),
+    icon: p.tier_icon || (vip ? '💎' : '🥇'),
+    subtitle: vip ? 'مرکز فرماندهی فروش و اعتبار VIP' : 'مرکز عملیات فروش نمایندگی طلایی',
+  };
+}
+
+function renderResellerTierDashboard() {
+  const p = ME.reseller_profile || {};
+  const meta = resellerTierMeta();
+  const vip = meta.code === 'vip';
+  const supplyText = p.supply_model === 'fixed_product' ? 'محصول آماده' : 'اعتبار حجمی';
+  const heroClass = vip ? 'reseller-tier-hero vip' : 'reseller-tier-hero gold';
+  setContent(`
+    <div class="${heroClass}">
+      <div class="reseller-tier-orb">${meta.icon}</div>
+      <div class="reseller-tier-copy">
+        <span class="reseller-tier-kicker">SHOPVPN · ${vip ? 'VIP COMMAND' : 'GOLD OPERATIONS'}</span>
+        <h2>${meta.icon} پنل نمایندگی ${esc(meta.title)}</h2>
+        <p>${meta.subtitle}</p>
+      </div>
+      <div class="reseller-tier-chip">${supplyText}</div>
+    </div>
+    <div class="grid grid-4 reseller-kpi-grid">
+      <div class="card reseller-kpi"><span>فروش تاییدشده</span><strong>${fmt(p.revenue_toman)} <small>تومان</small></strong><em>از سفارش‌های این پنل</em></div>
+      <div class="card reseller-kpi"><span>سفارش موفق</span><strong>${fmt(p.paid_orders)}</strong><em>پرداخت‌های تاییدشده</em></div>
+      <div class="card reseller-kpi"><span>سرویس ساخته‌شده</span><strong>${fmt(p.configs_created)}</strong><em>از اعتبار نمایندگی</em></div>
+      <div class="card reseller-kpi"><span>${vip ? 'حجم مصرف‌شده' : 'وضعیت تامین'}</span><strong>${vip ? fmt(p.volume_sold_gb) + ' <small>GB</small>' : esc(supplyText)}</strong><em>${vip ? 'حجم سرویس‌های ساخته‌شده' : 'موجودی بر اساس محصول منتخب'}</em></div>
+    </div>
+    <div class="grid grid-2 reseller-command-grid">
+      <div class="card reseller-command-card">
+        <div class="card-head"><h3>⚡ عملیات سریع</h3><span class="card-sub">${vip ? 'ابزارهای حرفه‌ای VIP' : 'ابزارهای روزانه نماینده'}</span></div>
+        <div class="reseller-action-grid">
+          <button class="reseller-action" data-go="reseller-self">🧰 <b>نمایندگی من</b><small>اعتبار، موجودی و سرویس‌ها</small></button>
+          <button class="reseller-action" data-go="orders">🧾 <b>سفارش‌ها</b><small>آخرین فروش‌ها و پرداخت‌ها</small></button>
+          <button class="reseller-action" data-go="users">👥 <b>مشتری‌ها</b><small>مدیریت مشتریان پنل</small></button>
+          <button class="reseller-action" data-go="catalog">📦 <b>محصولات</b><small>کاتالوگ و بانک سرویس</small></button>
+        </div>
+      </div>
+      <div class="card reseller-command-card">
+        <div class="card-head"><h3>${vip ? '💎 مزیت‌های VIP' : '🥇 وضعیت Gold'}</h3><span class="card-sub">سطح فعال حساب</span></div>
+        <div class="reseller-feature-list">
+          ${vip ? `
+            <div>📊 <b>گزارش حرفه‌ای</b><span>تحلیل فروش و مصرف اعتبار در یک نگاه</span></div>
+            <div>🚀 <b>عملیات سریع</b><span>دسترسی کوتاه به ساخت و مدیریت سرویس</span></div>
+            <div>🛡️ <b>کنترل کامل‌تر</b><span>ابزارهای بیشتر بدون نمایش گزینه‌های نامرتبط</span></div>` : `
+            <div>📦 <b>فروش محصولی</b><span>تمرکز پنل روی فروش و موجودی محصول آماده</span></div>
+            <div>⚡ <b>عملیات سریع</b><span>ساخت و مدیریت سرویس بدون شلوغی پنل</span></div>
+            <div>🛡️ <b>محیط اختصاصی</b><span>فقط ابزارهایی که برای Gold لازم است</span></div>`}
+        </div>
+      </div>
+    </div>
+  `);
+  $$('[data-go]', content()).forEach(b => b.onclick = () => goTo(b.dataset.go));
+}
+
 async function renderDashboard() {
+  if (ME?.tenant && ['gold','vip'].includes(String(ME?.reseller_profile?.tier_code || '').toLowerCase())) {
+    renderResellerTierDashboard();
+    return;
+  }
   const range = getDashRange();
   const q = range ? `?start=${range.start}&end=${range.end}` : '';
   const s = await apiGet('/dashboard' + q);
@@ -3660,17 +3749,17 @@ function openTierEditor(t, reload) {
   });
 }
 async function renderResellerTiers() {
-  const [tiers, requests] = await Promise.all([apiGet('/reseller-tiers'), apiGet('/reseller-tier-requests?status=pending')]);
+  const [tiers, requests] = await Promise.all([apiGet('/reseller-tiers'), apiGet('/reseller-requests?status=pending_review')]);
   const members = {};
   await Promise.all(tiers.filter(t => t.model === 'discount').map(async t => { members[t.code] = await apiGet(`/reseller-tiers/${t.code}/members`); }));
   const requestsHtml = requests.length ? `
-    <div class="card"><h3 style="margin:12px">درخواست‌های در انتظار</h3><div class="table-wrap"><table>
+    <div class="card"><h3 style="margin:12px">درخواست‌های جدید نمایندگی</h3><div class="table-wrap"><table>
       <thead><tr><th>سطح</th><th>کاربر</th><th>آیدی</th><th>عملیات</th></tr></thead>
       <tbody>${requests.map(r => `<tr>
-        <td>${esc(r.tier_title)}</td><td>${esc(r.first_name || '')} ${r.username ? '@' + esc(r.username) : ''}</td>
+        <td>${esc(r.tier_title || r.tier_code || '—')}</td><td>${esc(r.first_name || '')} ${r.username ? '@' + esc(r.username) : ''}</td>
         <td class="mono">${r.user_id}</td>
-        <td><button class="btn btn-primary btn-sm" data-approve="${r.id}">تایید</button>
-        <button class="btn btn-danger btn-sm" data-reject="${r.id}">رد</button></td>
+        <td><button class="btn btn-primary btn-sm" data-quote-tier="${r.id}">💰 بررسی و قیمت‌گذاری</button>
+        <button class="btn btn-danger btn-sm" data-reject-tier="${r.id}">رد</button></td>
       </tr>`).join('')}</tbody></table></div></div>` : '';
   const tierCards = tiers.map(t => `
     <div class="card" style="margin-top:12px">
@@ -3683,6 +3772,7 @@ async function renderResellerTiers() {
         <button class="btn btn-primary btn-sm" data-tier-edit="${t.code}">ویرایش</button>
       </div>
       <p style="margin:0 12px 12px;font-size:13px">${esc(t.summary)}<br><span style="color:var(--muted,#888)">${tierSummaryLine(t)}</span></p>
+      <div class="toolbar" style="margin:0 12px 12px"><button class="btn btn-sm" data-paycfg="${t.code}">💳 درگاه‌های هزینه نمایندگی</button></div>
       ${t.model === 'discount' && !t.permanent_discount_percent && !t.qty_discounts.length ? '<p style="margin:0 12px 12px;font-size:13px;color:var(--danger,#d33)">⚠️ هنوز هیچ تخفیفی (دائمی یا پلکانی) برای این سطح تنظیم نشده؛ تا آن موقع خریدها بدون تخفیف ثبت می‌شوند.</p>' : ''}
       ${t.model === 'discount' ? `
         <div style="margin:0 12px 12px">
@@ -3705,12 +3795,24 @@ async function renderResellerTiers() {
   $$('[data-tier-toggle]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiPost(`/reseller-tiers/${b.dataset.tierToggle}/toggle`); reload(); } catch (e) { handleErr(e); }
   }));
-  $$('[data-approve]', content()).forEach(b => b.addEventListener('click', async () => {
-    try { await apiPost(`/reseller-tier-requests/${b.dataset.approve}/approve`); toast('تایید شد.'); reload(); } catch (e) { handleErr(e); }
+  $$('[data-quote-tier]', content()).forEach(b => b.addEventListener('click', () => {
+    const req = requests.find(x => String(x.id) === String(b.dataset.quoteTier));
+    if (req) openResellerRequestModal(req);
   }));
-  $$('[data-reject]', content()).forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('درخواست رد شود؟')) return;
-    try { await apiPost(`/reseller-tier-requests/${b.dataset.reject}/reject`); toast('رد شد.'); reload(); } catch (e) { handleErr(e); }
+  $$('[data-reject-tier]', content()).forEach(b => b.addEventListener('click', () => openResellerRequestRejectModal(Number(b.dataset.rejectTier), 'rejected', null)));
+  $$('[data-paycfg]', content()).forEach(b => b.addEventListener('click', async () => {
+    const code = b.dataset.paycfg;
+    try {
+      const data = await apiGet(`/reseller-tiers/${code}/payment-methods`);
+      const checks = data.methods.map(m => `<label class="field"><span><input type="checkbox" data-pm="${esc(m.key)}" ${data.selected.includes(m.key) ? 'checked' : ''}> ${esc(m.label)}</span></label>`).join('');
+      openModal('درگاه‌های هزینه نمایندگی', `<div class="form-grid">${checks}<button class="btn btn-primary" id="save-reseller-pm">ذخیره</button></div>`, (body, close) => {
+        $('#save-reseller-pm', body).addEventListener('click', async () => {
+          const methods = $$('[data-pm]', body).filter(x => x.checked).map(x => x.dataset.pm);
+          if (!methods.length) { toast('حداقل یک درگاه را انتخاب کنید.', true); return; }
+          try { await apiPut(`/reseller-tiers/${code}/payment-methods`, {methods}); toast('ذخیره شد.'); close(); } catch(e) { handleErr(e); }
+        });
+      });
+    } catch(e) { handleErr(e); }
   }));
   $$('[data-qty-del]', content()).forEach(b => b.addEventListener('click', async () => {
     try { await apiDelete(`/reseller-tiers/qty-discounts/${b.dataset.qtyDel}`); reload(); } catch (e) { handleErr(e); }
@@ -5155,7 +5257,7 @@ async function renderResellersCreditTab() {
             <button class="btn btn-sm" data-toggle-status="${r.telegram_id}" data-cur="${r.is_reseller ? 1 : 0}">${r.is_reseller ? '⛔️ غیرفعال' : '✅ فعال'}</button>
             <button class="btn btn-sm" data-log="${r.telegram_id}">📜 تاریخچه</button>
           </div></td>
-        </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>نماینده ثبت نشده</div></td></tr>`}</tbody>
+        </tr>`).join('') || `<tr><td colspan="8" class="empty-state">${svg('empty')}<div>نماینده ثبت نشده</div></td></tr>`}</tbody>
       </table></div>
     </div>
   `;
@@ -5501,16 +5603,17 @@ async function renderResellersRequestsTab() {
         `<button class="tab-btn ${v === resellerReqFilter ? 'active' : ''}" data-rf="${v}">${l}</button>`).join('')}
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>کاربر</th><th>حجم</th><th>هزینه</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+      <thead><tr><th>#</th><th>سطح</th><th>کاربر</th><th>حجم</th><th>هزینه</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>
       <tbody>${filtered.map(r => `<tr>
         <td class="mono">#${r.id}</td>
+        <td>${esc(r.tier_title || r.tier_code || '—')}</td>
         <td>${esc(r.username ? '@' + r.username : ('#' + r.user_id))}</td>
         <td class="mono">${fmt(r.volume_gb)} گیگ</td>
         <td class="mono">${r.price_toman ? fmt(r.price_toman) + ' تومان' : '—'}</td>
         <td><span class="badge ${RESELLER_REQ_STATUS_BADGE[r.status] || ''}">${RESELLER_REQ_STATUS_LABEL[r.status] || r.status}</span></td>
         <td class="mono">${fmtDate(r.created_at)}</td>
         <td><button class="btn btn-sm" data-req="${r.id}">مدیریت</button></td>
-      </tr>`).join('') || `<tr><td colspan="7" class="empty-state">${svg('empty')}<div>درخواستی در این وضعیت نیست</div></td></tr>`}</tbody>
+      </tr>`).join('') || `<tr><td colspan="8" class="empty-state">${svg('empty')}<div>درخواستی در این وضعیت نیست</div></td></tr>`}</tbody>
     </table></div></div>
   `);
   bindResellersSubtabs(content());
@@ -5528,6 +5631,7 @@ function openResellerRequestModal(req) {
     actionsHtml = `
       <div><b>هزینه‌ی نمایندگی (تومان)</b></div>
       <input class="input" id="rq-price" type="number" placeholder="مبلغ به تومان">
+      ${req.tier_code === 'bronze' ? `<div><b>درصد کمیسیون برنزی</b></div><input class="input" id="rq-percent" type="number" min="1" max="100" placeholder="درصد کمیسیون">` : ''}
       <div><b>پنل اختصاصی (اختیاری)</b></div>
       <select class="input" id="rq-panel"><option value="">پیش‌فرض خودکار</option></select>
       <button class="btn btn-primary" id="rq-quote">✅ تایید و ارسال هزینه به کاربر</button>
@@ -5565,7 +5669,8 @@ function openResellerRequestModal(req) {
         const panelVal = $('#rq-panel', body).value;
         if (!price_toman || price_toman <= 0) { toast('مبلغ نامعتبر است.', true); return; }
         try {
-          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null });
+          const commission_percent = $('#rq-percent', body) ? Number($('#rq-percent', body).value) || null : null;
+          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null, commission_percent });
           toast('هزینه برای کاربر ارسال شد.'); close(); renderResellers();
         } catch (e) { handleErr(e); }
       });

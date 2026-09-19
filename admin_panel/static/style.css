@@ -2300,3 +2300,43 @@ html[data-theme="android"] .and-rank{
   html[data-theme="android"] .and-grid{ grid-template-columns:repeat(2,1fr); }
   html[data-theme="android"] .and-row{ grid-template-columns:1fr; }
 }
+
+/* ========================================================= reseller tiers === */
+html.tenant-reseller .sidebar-brand .brand-mark { border-radius: 12px; }
+html.tier-gold { --brand: #d6a84f; --brand-2: #f4d77a; }
+html.tier-vip { --brand: #9b7cff; --brand-2: #d7ccff; }
+html.tier-gold .sidebar-brand .brand-mark { background: linear-gradient(135deg,#9b6b22,#f6df86); color:#23180a; box-shadow:0 0 24px rgba(214,168,79,.24); }
+html.tier-vip .sidebar-brand .brand-mark { background: linear-gradient(135deg,#5b3cc4,#bdaaff); color:#160d31; box-shadow:0 0 28px rgba(155,124,255,.28); }
+.reseller-tier-hero { position:relative; overflow:hidden; display:flex; align-items:center; gap:18px; padding:24px; margin-bottom:16px; border-radius:24px; border:1px solid var(--border); background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.025)); box-shadow:0 18px 50px rgba(0,0,0,.12); }
+.reseller-tier-hero::after { content:""; position:absolute; width:240px; height:240px; border-radius:50%; left:-70px; top:-120px; filter:blur(12px); opacity:.22; }
+.reseller-tier-hero.gold { border-color:rgba(214,168,79,.45); }
+.reseller-tier-hero.gold::after { background:#d6a84f; }
+.reseller-tier-hero.vip { border-color:rgba(155,124,255,.45); }
+.reseller-tier-hero.vip::after { background:#9b7cff; }
+.reseller-tier-orb { width:68px; height:68px; flex:0 0 68px; display:grid; place-items:center; border-radius:20px; font-size:32px; background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.13); z-index:1; }
+.reseller-tier-copy { flex:1; min-width:0; z-index:1; }
+.reseller-tier-kicker { font:700 10px/1.2 var(--font-mono,monospace); letter-spacing:1.8px; opacity:.58; }
+.reseller-tier-copy h2 { margin:7px 0 4px; font-size:22px; }
+.reseller-tier-copy p { margin:0; color:var(--text-muted); }
+.reseller-tier-chip { z-index:1; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid var(--border); font-size:12px; white-space:nowrap; }
+.reseller-kpi-grid { margin-bottom:16px; }
+.reseller-kpi { min-height:122px; display:flex; flex-direction:column; justify-content:space-between; }
+.reseller-kpi > span { color:var(--text-muted); font-size:12px; }
+.reseller-kpi strong { font-size:24px; margin-top:8px; }
+.reseller-kpi strong small { font-size:11px; font-weight:700; }
+.reseller-kpi em { font-style:normal; color:var(--text-muted); font-size:10.5px; margin-top:6px; }
+.reseller-command-grid { align-items:stretch; }
+.reseller-action-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.reseller-action { text-align:right; padding:14px; border:1px solid var(--border); border-radius:14px; background:rgba(255,255,255,.035); color:inherit; cursor:pointer; transition:.16s ease; }
+.reseller-action:hover { transform:translateY(-2px); border-color:var(--brand); background:rgba(255,255,255,.06); }
+.reseller-action b,.reseller-action small { display:block; }
+.reseller-action small { margin-top:4px; color:var(--text-muted); font-size:10.5px; }
+.reseller-feature-list { display:flex; flex-direction:column; gap:12px; }
+.reseller-feature-list > div { display:grid; grid-template-columns:26px 1fr; column-gap:8px; padding:11px 0; border-bottom:1px solid var(--border); }
+.reseller-feature-list > div:last-child { border-bottom:0; }
+.reseller-feature-list b,.reseller-feature-list span { grid-column:2; }
+.reseller-feature-list > div:first-child { grid-template-columns:26px 1fr; }
+.reseller-feature-list > div { font-size:14px; }
+.reseller-feature-list > div::first-letter { font-size:18px; }
+.reseller-feature-list span { color:var(--text-muted); font-size:11px; margin-top:3px; }
+@media (max-width:760px){ .reseller-tier-hero{padding:18px;align-items:flex-start}.reseller-tier-chip{display:none}.reseller-action-grid{grid-template-columns:1fr 1fr}.reseller-kpi-grid{grid-template-columns:1fr 1fr}.reseller-tier-copy h2{font-size:18px} }
