@@ -97,21 +97,20 @@ def create_full_backup(main_db, main_db_path: str, output_dir: str, keep: int = 
         resellers = main_db.list_reseller_bots(active_only=False)
         for row in resellers:
             reseller_db_path = resolve_db_path(row["db_path"])
-            level = row["reseller_level"] if "reseller_level" in row.keys() else 2
             active = "فعال" if row["is_active"] else "غیرفعال"
-            safe_name = f"reseller_{row['id']}_level{level}.db"
+            safe_name = f"reseller_{row['id']}.db"
             if os.path.exists(reseller_db_path):
                 try:
                     _sqlite_safe_copy(reseller_db_path, os.path.join(tmp_dir, safe_name))
                     manifest_lines.append(
                         f"{safe_name}  <-  {reseller_db_path}  "
-                        f"(owner_id={row['owner_telegram_id']}, سطح {level}, {active})"
+                        f"(owner_id={row['owner_telegram_id']}, {active})"
                     )
                 except Exception:
                     logger.exception("بکاپ‌گرفتن از دیتابیس نماینده %s ناموفق بود.", reseller_db_path)
                     manifest_lines.append(f"{safe_name}  <-  {reseller_db_path}  [ناموفق - رد شد]")
             else:
-                manifest_lines.append(f"[فایل پیدا نشد - رد شد]  <-  {reseller_db_path}  (owner_id={row['owner_telegram_id']}, سطح {level})")
+                manifest_lines.append(f"[فایل پیدا نشد - رد شد]  <-  {reseller_db_path}  (owner_id={row['owner_telegram_id']})")
 
         manifest_path = os.path.join(tmp_dir, "manifest.txt")
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -162,7 +161,7 @@ def restore_full_backup(main_db, main_db_path: str, zip_path: str) -> dict:
        می‌کند - از طریق خود `main_db.replace_file()` (همان مسیر امن/قفل‌دار
        بازیابی معمولی، تا اتصال persistent درست بسته و بازسازی شود).
     ۲) بعد، چون جدول reseller_bots حالا از روی همان دیتابیسِ تازه‌بازیابی‌شده
-       خوانده می‌شود، فایل هر `reseller_<id>_level<N>.db` داخل zip را با شناسه‌ی
+       خوانده می‌شود، فایل هر `reseller_<id>.db` (یا قالب قدیمی `reseller_<id>_level<N>.db`) داخل zip را با شناسه‌ی
        داخل نامش به یک ردیف واقعی از reseller_bots وصل می‌کند و مستقیماً در
        مسیر دیتابیس همان نماینده (`resolve_db_path`) جایگزین می‌کند.
 
@@ -210,7 +209,7 @@ def restore_full_backup(main_db, main_db_path: str, zip_path: str) -> dict:
         for name in sorted(os.listdir(tmp_dir)):
             if not (name.startswith("reseller_") and name.endswith(".db")):
                 continue
-            # قالب نام: reseller_<id>_level<N>.db
+            # قالب نام: reseller_<id>.db یا (بکاپ‌های قدیمی) reseller_<id>_level<N>.db
             try:
                 middle = name[len("reseller_"):-len(".db")]
                 id_part = middle.split("_level")[0]

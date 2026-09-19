@@ -108,7 +108,7 @@ class _MessageCall:
 
 
 def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router:
-    # نمایندگی سطح ۲ در بات‌های مستقل، دیتابیس محلی جدا دارد؛ اعتبار، مدل تامین و
+    # نمایندگی در بات‌های مستقل، دیتابیس محلی جدا دارد؛ اعتبار، مدل تامین و
     # پنل واقعی اما در دیتابیس اصلی نگهداری می‌شوند. این backend مشترک جلوی اختلاف
     # رفتار «بات اصلی» و «بات نماینده» را می‌گیرد.
     reseller_backend = db if is_main_bot else Database(DB_PATH)
@@ -386,7 +386,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # پردازش پارامتر دیپ‌لینک: /start <param>
         # چند بخش با "-" قابل ترکیب هستند، مثلاً: nofj-disc_SUMMER10
         #   ref<id>     زیرمجموعه‌گیری (منطق قبلی، بدون تغییر)
-        #   resref_<id> مشتریِ نماینده‌ی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
+        #   resref_<id> مشتریِ نماینده با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
         #   disc_CODE   اعمال خودکار کد تخفیف در اولین خرید
         #   test        باز کردن مستقیم فلوی کانفیگ تست
         #   wheel       باز کردن مستقیم گردونه شانس
@@ -405,7 +405,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         for token in filter(None, start_param.split("-")):
             if token.startswith("resref_"):
-                # نماینده‌ی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک) —
+                # نماینده با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک) —
                 # کاملاً مستقل از سیستم زیرمجموعه‌گیری ref<id> زیر.
                 owner_part = token[len("resref_"):]
                 if owner_part.isdigit() and int(owner_part) != message.from_user.id:
@@ -583,7 +583,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.callback_query(F.data == "custom_config_start")
     async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
         await call.answer()
-        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
+        if not is_main_bot:
             return
         try:
             await call.message.delete()
@@ -1590,7 +1590,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         return "\n".join(lines)
 
     async def custom_config_start(message: Message, state: FSMContext):
-        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
+        if not is_main_bot:
             await message.answer("این بخش در حال حاضر غیرفعال است.")
             return
         products = (await asyncio.to_thread(db.get_custom_config_products, True))
@@ -2174,7 +2174,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 )
             return
 
-        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
+        if not is_main_bot:
             await message.answer("در حال حاضر هیچ پلن کانفیگ تستی تعریف نشده است؛ با پشتیبانی تماس بگیرید.")
             return
 
@@ -2212,8 +2212,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.")
             return
 
-        if not (await asyncio.to_thread(db.is_full_access_bot, is_main_bot)):
-            # نماینده سطح ۲: همیشه از پنل اعتباری خودش و اعتبار حجمی‌اش ساخته می‌شود
+        if not is_main_bot:
+            # نماینده: همیشه از پنل اعتباری خودش و اعتبار حجمی‌اش ساخته می‌شود
             try:
                 result = await provision_test_config(db, plan, user_id=message.from_user.id)
             except ProvisionError as e:
@@ -3940,7 +3940,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await message.answer("\n".join(lines))
 
     # -----------------------------------------------------------------------
-    # لینک نمایندگی سطح ۲ - «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
+    # لینک نمایندگی - «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
     # -----------------------------------------------------------------------
 
     @router.message(Command("reseller_link"))
@@ -3961,19 +3961,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
 
     # -----------------------------------------------------------------------
-    # درخواست نمایندگی کمیسیونی (مستقل کامل از نمایندگی سطح ۲ حجمی؛ بدون حجم،
+    # درخواست نمایندگی کمیسیونی (مستقل کامل از نمایندگی حجمی؛ بدون حجم،
     # بدون محصول آماده - فقط یک درصد کمیسیون که ادمین تایید/رد می‌کند و در
     # صورت تایید، تا وقتی ادمین غیرفعالش نکند روی همه‌ی خریدهای بعدی می‌ماند)
     # -----------------------------------------------------------------------
 
-    @router.message(F.text.func(lambda t: t == db.get_setting(
-        "btn_commission_reseller_request", "💼 درخواست نمایندگی کمیسیونی"
-    )))
     async def commission_reseller_request_start(message: Message, state: FSMContext):
         if not is_main_bot:
-            return
-        if (await asyncio.to_thread(db.get_setting, "commission_reseller_request_enabled", "1")) != "1":
-            await message.answer("در حال حاضر امکان درخواست نمایندگی کمیسیونی غیرفعال است.")
             return
         if (await asyncio.to_thread(db.is_inline_reseller, message.from_user.id)):
             await message.answer(
@@ -4500,9 +4494,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await message.answer("✅ درخواست شما ثبت شد. بعد از تایید ادمین، نتیجه به شما اطلاع داده می‌شود.")
 
     async def _start_tier_request(message: Message, state: FSMContext, tier):
-        if (await asyncio.to_thread(db.owns_full_access_reseller, message.from_user.id)):
-            await message.answer("حساب شما نمایندگی کامل است و از این مسیر سطحش قابل تغییر نیست.")
-            return
         if tier["model"] == "commission":
             await commission_reseller_request_start(message, state)
         elif tier["model"] == "discount":
@@ -4512,11 +4503,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         else:
             await message.answer("ثبت درخواست برای این سطح هنوز فعال نشده است.")
 
-    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_tiers", "🤝 نمایندگی")))
+    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_tiers", "🤝 درخواست نمایندگی")))
     async def reseller_tiers_menu(message: Message):
         if not is_main_bot:
             return
-        if (await asyncio.to_thread(db.get_setting, "reseller_tiers_menu_enabled", "0")) != "1":
+        if (await asyncio.to_thread(db.get_setting, "reseller_request_enabled", "1")) != "1":
+            await message.answer("در حال حاضر امکان درخواست نمایندگی غیرفعال است.")
             return
         await _show_tiers_menu(message)
 
@@ -4525,7 +4517,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await call.answer()
         if not is_main_bot:
             return
-        if (await asyncio.to_thread(db.get_setting, "reseller_tiers_menu_enabled", "0")) != "1":
+        if (await asyncio.to_thread(db.get_setting, "reseller_request_enabled", "1")) != "1":
             return
         parts = call.data.split(":")
         action = parts[1] if len(parts) > 1 else ""
@@ -4552,10 +4544,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         if action == "go":
             current_code = await asyncio.to_thread(db.get_agent_tier, call.from_user.id)
-            if (
-                current_code and current_code != tier["code"]
-                and not (await asyncio.to_thread(db.owns_full_access_reseller, call.from_user.id))
-            ):
+            if current_code and current_code != tier["code"]:
                 current_tier = await asyncio.to_thread(db.get_reseller_tier, current_code)
                 current_label = f"{current_tier['icon']} {current_tier['title']}" if current_tier else current_code
                 await _safe_edit(
@@ -4575,18 +4564,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await _start_tier_request(fake_message, state, tier)
 
     # -----------------------------------------------------------------------
-    # درخواست خودکار نمایندگی سطح ۲
+    # درخواست خودکار نمایندگی
     # -----------------------------------------------------------------------
 
     def _senior_admin_ids():
         return [a["telegram_id"] for a in db.list_admins_with_roles() if a["role"] in ("owner", "admin")]
 
-    @router.message(F.text.func(lambda t: t == db.get_setting("btn_reseller_request", "🏪 درخواست نمایندگی سطح ۲")))
     async def reseller_request_start(message: Message, state: FSMContext, tier=None):
         if not is_main_bot:
             return
         if (await asyncio.to_thread(db.get_setting, "reseller_request_enabled", "1")) != "1":
-            await message.answer("در حال حاضر امکان درخواست نمایندگی سطح ۲ غیرفعال است.")
+            await message.answer("در حال حاضر امکان درخواست نمایندگی غیرفعال است.")
             return
         if (await asyncio.to_thread(db.is_reseller, message.from_user.id)):
             current_tier = await asyncio.to_thread(db.get_agent_tier, message.from_user.id)
@@ -4602,7 +4590,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await _resreq_after_basics(message, state)
             return
         await state.set_state(ResellerRequestFlow.waiting_volume)
-        title = f"{tier['icon']} درخواست نمایندگی {tier['title']}" if tier else "🏪 درخواست نمایندگی سطح ۲"
+        title = f"{tier['icon']} درخواست نمایندگی {tier['title']}" if tier else "🏪 درخواست نمایندگی"
         min_hint = f"\nحداقل خرید این سطح: {tier['min_volume_gb']:,} گیگ" if tier and tier["min_volume_gb"] else ""
         await message.answer(
             f"{title}\n\n"
@@ -4751,7 +4739,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # توجه: سوال «کاستوم‌سازی کانفیگ» عمداً از فرم حذف شد. این قابلیت (ساخت کانفیگ شخصی
     # مشتری) روی طرف بات فقط از یک پنل VPN «شخصیِ» خودِ همان بات تامین می‌شود
     # (panel_servers محلی با used_for_custom_config=1) و is_full_access_bot هم آن را
-    # قفل می‌کند؛ نمایندگی سطح ۲ نه پنل شخصی دارد و نه اجازه‌ی ساختش را (طبق ممیزی
+    # قفل می‌کند؛ نمایندگی نه پنل شخصی دارد و نه اجازه‌ی ساختش را (طبق ممیزی
     # امنیتی بند ۳.۲). یعنی حتی با روشن‌کردن این تاگل، فیچر عملاً کار نمی‌کرد. برای
     # اینکه یک گزینه‌ی ظاهراً فعال ولی درعمل بی‌اثر به نماینده نشان داده نشود، این مرحله
     # حذف و wants_custom_config همیشه ۰ ثبت می‌شود.
@@ -4776,7 +4764,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         volume_missing = volume_gb is None or (supply_model != "fixed_product" and not volume_gb)
         if volume_missing or request_text is None:
-            await _resreq_notify(event, "⚠️ این درخواست منقضی شده. لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.")
+            await _resreq_notify(event, "⚠️ این درخواست منقضی شده. لطفاً دوباره روی «درخواست نمایندگی» بزنید.")
             return
 
         try:
@@ -4802,7 +4790,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     tier_line += warning.lstrip("\n") + "\n"
             volume_line = "" if supply_model == "fixed_product" and not volume_gb else f"📦 حجم درخواستی: {volume_gb:,} گیگ\n"
             caption = (
-                f"🏪 درخواست نمایندگی سطح ۲ #{request_id}\n"
+                f"🏪 درخواست نمایندگی #{request_id}\n"
                 f"{tier_line}"
                 f"👤 کاربر: {first_name} (@{username})\n"
                 f"🆔 آیدی عددی: {user_id}\n"
@@ -4823,7 +4811,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             target_msg = event.message if isinstance(event, CallbackQuery) else event
             await _send_inline_main_menu(target_msg, user_id)
         except Exception:
-            logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی سطح ۲ کاربر %s", user_id)
+            logging.getLogger(__name__).exception("خطا در ثبت درخواست نمایندگی کاربر %s", user_id)
             await _resreq_notify(event, "⚠️ در ثبت درخواست خطایی رخ داد. لطفاً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.")
 
     @router.message(ResellerRequestFlow.waiting_text)
@@ -4844,7 +4832,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             await message.answer(
                 "⚠️ مشکلی در ثبت درخواست پیش آمد (احتمالاً به‌دلیل گذشت زمان زیاد). "
-                "لطفاً دوباره روی «درخواست نمایندگی سطح ۲» بزنید.",
+                "لطفاً دوباره روی «درخواست نمایندگی» بزنید.",
                 reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
             )
             await _send_inline_main_menu(message, message.from_user.id)
@@ -5229,7 +5217,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         owner_name = (await asyncio.to_thread(db.get_reseller_owner_display_name, owner_id))
         try:
             reseller_bot_id = (await asyncio.to_thread(
-                db.register_reseller_bot, token, username, owner_id, owner_name, db_path, reseller_level=2
+                db.register_reseller_bot, token, username, owner_id, owner_name, db_path
             ))
         except DuplicateBotTokenError:
             # رفع باگ: قبلاً این استثنا کنترل‌نشده تا بیرونِ هندلر بالا می‌رفت. این
@@ -5270,7 +5258,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (await asyncio.to_thread(reseller_db.init_db, owner_id=owner_id))
         if req["wants_miniapp"]:
             (await asyncio.to_thread(reseller_db.set_setting, "miniapp_tenant_id", str(reseller_bot_id)))
-        (await asyncio.to_thread(reseller_db.set_setting, "reseller_level", "2"))
         wants_custom_config = "1" if req["wants_custom_config"] else "0"
         (await asyncio.to_thread(reseller_db.set_setting, "custom_config_enabled", wants_custom_config))
 
@@ -5357,7 +5344,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             try:
                 await bot.send_message(
                     requester_id,
-                    f"✅ آیدی {owner_id} مالکیت نمایندگی سطح ۲ #{req['id']} شما را تایید کرد و راه‌اندازی تکمیل شد.\n"
+                    f"✅ آیدی {owner_id} مالکیت نمایندگی #{req['id']} شما را تایید کرد و راه‌اندازی تکمیل شد.\n"
                     f"🤖 بات: @{username}",
                 )
             except Exception:
@@ -5366,7 +5353,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             for admin_id in _senior_admin_ids():
                 await bot.send_message(
                     admin_id,
-                    f"✅ نمایندگی سطح ۲ #{req['id']} تکمیل شد.\n🤖 بات: @{username}\n👤 مالک: {owner_id}",
+                    f"✅ نمایندگی #{req['id']} تکمیل شد.\n🤖 بات: @{username}\n👤 مالک: {owner_id}",
                 )
         except Exception:
             pass
@@ -6210,8 +6197,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await reseller_panel_open(fake_message, state)
         elif key == "btn_reseller_tiers":
             await reseller_tiers_menu(fake_message)
-        elif key == "btn_reseller_request":
-            await reseller_request_start(fake_message, state)
         # کلید "btn_admin_panel" در handlers_admin.py مدیریت می‌شود چون هندلر
         # اصلی آن (open_admin_panel) در همان روتر تعریف شده است.
 

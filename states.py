@@ -222,7 +222,6 @@ class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
     waiting_owner_name = State()
-    waiting_level = State()
 
 
 class AdminSetPanelDomain(StatesGroup):

@@ -224,7 +224,7 @@ async def provision_auto_config(
 
 
 async def provision_test_config(local_db: Database, plan, user_id: int = None) -> dict:
-    """کانفیگ تست برای نماینده‌ی سطح ۲: حجم/مدت/پیشوند نام از پلن انتخاب‌شده
+    """کانفیگ تست برای نماینده: حجم/مدت/پیشوند نام از پلن انتخاب‌شده
     (test_config_plans محلی همان بات نمایندگی) خوانده می‌شود؛ پنل همیشه همان
     پنل اعتبار حجمی نماینده است (فیلد panel_server_id خود پلن نادیده گرفته
     می‌شود چون نماینده فقط به یک پنل اعتباری دسترسی دارد). این هم مثل بقیه‌ی
@@ -241,7 +241,7 @@ async def provision_test_config(local_db: Database, plan, user_id: int = None) -
 
 async def provision_reseller_fixed_product(main_db: Database, owner_id: int, product_id: int,
                                            quantity: int = 1, username_prefix: str = "r", username: str = None) -> list:
-    """ساخت مستقیم یک محصول آماده برای نماینده سطح ۲ از بات اصلی.
+    """ساخت مستقیم یک محصول آماده برای نماینده از بات اصلی.
     موجودی بر اساس تعداد محصول، نه گیگ، مصرف می‌شود."""
     if not isinstance(quantity, int) or quantity < 1:
         raise ProvisionError("تعداد درخواستی نامعتبر است.")

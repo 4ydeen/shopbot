@@ -157,10 +157,6 @@ DEFAULT_SETTINGS = {
     # به کیف پول خودِ نماینده تعلق می‌گیرد.
     "reseller_inline_commission_enabled": "1",
     "reseller_inline_commission_percent": "10",  # فقط fallback برای نماینده‌های قدیمی بدون درصد اختصاصی
-    # دکمه‌ی درخواست نمایندگی کمیسیونی (مستقل از نمایندگی سطح ۲ حجمی؛ بدون حجم،
-    # بدون محصول آماده - فقط یک درصد کمیسیون پیشنهادی که ادمین تایید/رد می‌کند)
-    "commission_reseller_request_enabled": "1",
-    "reseller_tiers_menu_enabled": "0",
     # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
     "referral_free_config_threshold": "10",  # تعداد دعوت لازم
@@ -266,7 +262,7 @@ DEFAULT_SETTINGS = {
     "menu_order": '["miniapp","btn_buy","btn_test","btn_my_orders","btn_referral","btn_wheel","btn_contact","btn_admin_panel"]',
     "miniapp_enabled": "1",
     "reseller_request_enabled": "1",
-    # روشن/خاموش سراسری هرکدام از ۵ محور فرم درخواست نمایندگی سطح ۲ (بند ۶ اسپک).
+    # روشن/خاموش سراسری هرکدام از ۵ محور فرم درخواست نمایندگی (بند ۶ اسپک).
     # اگر مالک بخواهد یک محور را کلاً از فرم درخواست حذف کند (نه فقط رد کردنش توسط
     # کاربر)، همین کلیدها را از پنل ادمین (API) به "0" تغییر می‌دهد.
     "reseller_axis_bot_dedicated_enabled": "1",
@@ -323,9 +319,7 @@ MENU_BUTTON_META = {
     # داده می‌شود، نه با یک toggle سراسری؛ به همین دلیل toggle_key ندارد ولی مثل
     # بقیه‌ی دکمه‌ها متن/رنگ قابل تنظیم و در چیدمان منو قابل جابجایی است.
     "btn_reseller_panel": {"label": "دکمه پنل نمایندگی", "toggle_key": None, "admin_only": False, "has_text": True, "has_style": True, "default_text": "🧑‍💼 پنل نمایندگی"},
-    "btn_reseller_request": {"label": "دکمه درخواست نمایندگی سطح ۲", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🏪 درخواست نمایندگی سطح ۲"},
-    "btn_commission_reseller_request": {"label": "دکمه درخواست نمایندگی کمیسیونی", "toggle_key": "commission_reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "💼 درخواست نمایندگی کمیسیونی"},
-    "btn_reseller_tiers": {"label": "دکمه انتخاب سطح نمایندگی (جایگزین دو دکمه‌ی درخواست)", "toggle_key": "reseller_tiers_menu_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🤝 نمایندگی"},
+    "btn_reseller_tiers": {"label": "دکمه درخواست نمایندگی", "toggle_key": "reseller_request_enabled", "admin_only": False, "has_text": True, "has_style": True, "default_text": "🤝 درخواست نمایندگی"},
 }
 # دکمه‌های داخل «حساب کاربری» و صفحه‌ی جزئیات هر سرویس: هرکدام با یک تنظیم
 # جدا فعال/غیرفعال می‌شوند (پیش‌فرض همه فعال). کلید -> (برچسب برای ادمین، مقدار پیش‌فرض)
@@ -391,7 +385,7 @@ BUYFLOW_STYLE_ONLY_META = {
 DEFAULT_SETTINGS.update({key: default for key, _label, default in ACCOUNT_TOGGLE_KEYS})
 
 DEFAULT_MENU_ORDER = [
-    "miniapp", "btn_reseller_panel", "btn_reseller_tiers", "btn_reseller_request", "btn_commission_reseller_request", "btn_buy", "btn_test",
+    "miniapp", "btn_reseller_panel", "btn_reseller_tiers", "btn_buy", "btn_test",
     "btn_my_orders", "btn_referral", "btn_wheel", "btn_contact", "btn_admin_panel",
 ]
 
@@ -1375,7 +1369,6 @@ class Database:
             ("orders", "config_name", "TEXT"),
             ("configs", "order_id", "INTEGER"),
             ("reseller_bots", "link_slug", "TEXT"),
-            ("reseller_bots", "reseller_level", "INTEGER DEFAULT 2"),
             ("reseller_bots", "web_panel_enabled", "INTEGER DEFAULT 0"),
             ("reseller_bots", "web_panel_setup_token", "TEXT"),
             ("reseller_bots", "web_panel_setup_token_created_at", "TEXT"),
@@ -1819,12 +1812,6 @@ class Database:
             return "bronze"
         return None
 
-    def owns_full_access_reseller(self, user_tg_id: int) -> bool:
-        with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT 1 FROM reseller_bots WHERE owner_telegram_id=? AND reseller_level=1 LIMIT 1", (user_tg_id,)
-            ).fetchone() is not None
-
     @staticmethod
     def _remove_reseller_db_files(path: str) -> bool:
         removed_all = True
@@ -1866,8 +1853,6 @@ class Database:
         current = self.get_agent_tier(user_tg_id)
         if current is None or current == new_code:
             return {"changed": False, "previous": current}
-        if self.owns_full_access_reseller(user_tg_id):
-            return {"changed": False, "previous": current, "skipped": "full_access"}
         result = self.wipe_agent_state(user_tg_id)
         result.update(changed=True, previous=current)
         return result
@@ -2287,14 +2272,6 @@ class Database:
         with self._get_conn() as conn:
             row = conn.execute("SELECT telegram_id FROM admins WHERE role='owner' LIMIT 1").fetchone()
             return row["telegram_id"] if row else None
-
-    def is_full_access_bot(self, is_main_bot: bool) -> bool:
-        """بات اصلی و نماینده‌ی «سطح ۱ (کامل)» به همه‌ی امکانات (پنل VPN شخصی، ساخت
-        کانفیگ دستی، بانک لینک برای محصولات) دسترسی دارند. نماینده‌ی «سطح ۲» فقط
-        می‌تواند محصولات خودکار-از-اعتبار-حجمی بفروشد و به پنل/کانفیگ دستی دسترسی ندارد."""
-        if is_main_bot:
-            return True
-        return self.get_setting("reseller_level", "2") == "1"
 
     def get_admin_role(self, tg_id: int):
         """نقش ادمین را برمی‌گرداند: 'owner' | 'admin' | 'mid' | 'support' | None (اگر ادمین نباشد)."""
@@ -2771,7 +2748,7 @@ class Database:
             ).fetchall()
 
     def get_reseller_fixed_products(self):
-        """محصولات مجاز برای مدل تامین «محصول آماده» در فرم درخواست نمایندگی سطح ۲
+        """محصولات مجاز برای مدل تامین «محصول آماده» در فرم درخواست نمایندگی
         (بند ۶ اسپک)؛ اگر ادمین لیستی انتخاب نکرده باشد (تنظیم خالی)، همه‌ی محصولات فعال برگردانده می‌شوند."""
         raw = (self.get_setting("reseller_fixed_product_ids", "") or "").strip()
         products = [p for p in self.get_all_products() if p["is_active"] and p["is_auto_provision"]]
@@ -3986,7 +3963,7 @@ class Database:
                     )
 
     # -------------------------------------------------------------------
-    # نمایندگی سطح ۲ با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
+    # نمایندگی با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
     # -------------------------------------------------------------------
 
     def enable_inline_reseller(self, owner_tg_id: int, percent: int = None):
@@ -4627,13 +4604,13 @@ class Database:
         return f"کاربر {tg_id}"
 
     def register_reseller_bot(self, bot_token: str, bot_username: str, owner_telegram_id: int, owner_name: str,
-                               db_path: str, reseller_level: int = 2, has_live_bot: int = 1) -> int:
+                               db_path: str, has_live_bot: int = 1) -> int:
         with self._get_conn() as conn:
             try:
                 cur = conn.execute(
-                    "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level, has_live_bot) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (bot_token, bot_username, owner_telegram_id, owner_name, db_path, reseller_level, 1 if has_live_bot else 0),
+                    "INSERT INTO reseller_bots (bot_token, bot_username, owner_telegram_id, owner_name, db_path, has_live_bot) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (bot_token, bot_username, owner_telegram_id, owner_name, db_path, 1 if has_live_bot else 0),
                 )
             except sqlite3.IntegrityError:
                 # رفع باگ: قبلاً این استثنا کنترل‌نشده تا هندلر بالا می‌رفت. چون چکِ
@@ -4666,7 +4643,7 @@ class Database:
         return {"revenue_toman": row["revenue"] or 0, "paid_orders": row["cnt"] or 0}
 
     def get_reseller_sales_map(self):
-        """برای هر نماینده‌ی اعتباری (سطح ۲)، تعداد و مجموع حجم کانفیگ‌هایی که از اعتبار
+        """برای هر نماینده‌ی اعتباری، تعداد و مجموع حجم کانفیگ‌هایی که از اعتبار
         حجمی خودش برای مشتری‌هایش ساخته (source='reseller' در custom_configs)."""
         with self._get_conn() as conn:
             rows = conn.execute(
@@ -4678,10 +4655,6 @@ class Database:
     def get_reseller_bot(self, bot_id: int):
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM reseller_bots WHERE id=?", (bot_id,)).fetchone()
-
-    def set_reseller_level(self, bot_id: int, level: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE reseller_bots SET reseller_level=? WHERE id=?", (level, bot_id))
 
     def get_reseller_bot_by_slug(self, slug: str):
         with self._get_conn() as conn:
@@ -7430,7 +7403,7 @@ class Database:
         return self.get_panel_server_for_usage("reseller")
 
     # -----------------------------------------------------------------------
-    # درخواست خودکار نمایندگی سطح ۲ (ثبت، تایید هزینه، پرداخت، تحویل)
+    # درخواست خودکار نمایندگی (ثبت، تایید هزینه، پرداخت، تحویل)
     # -----------------------------------------------------------------------
 
     _RESELLER_REQUEST_OPEN_STATUSES = (
