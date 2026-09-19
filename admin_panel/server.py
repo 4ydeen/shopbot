@@ -3861,6 +3861,33 @@ def api_tier_members(code: str, admin=Depends(require_permission("resellers"))):
     return rows_to_list(db.list_tier_members(code))
 
 
+class TierMemberBody(BaseModel):
+    telegram_id: int
+
+
+@app.post("/api/reseller-tiers/{code}/members")
+async def api_add_tier_member(code: str, body: TierMemberBody, admin=Depends(require_permission("resellers"))):
+    tier = _tier_or_404(code)
+    if tier["model"] != "discount":
+        raise HTTPException(status_code=400, detail="افزودن مستقیم عضو فقط برای سطح‌های تخفیفی ممکن است.")
+    tg_id = body.telegram_id
+    if not (await asyncio.to_thread(db.get_user, tg_id)):
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
+    current = await asyncio.to_thread(db.get_agent_tier, tg_id)
+    if current == code:
+        raise HTTPException(status_code=400, detail="این کاربر همین الان عضو این سطح است.")
+    if current:
+        raise HTTPException(status_code=400, detail="این کاربر همین الان نماینده‌ی سطح دیگری است.")
+    await asyncio.to_thread(db.set_user_reseller_tier, tg_id, code)
+    await asyncio.to_thread(db.log_admin_action, admin["id"], "reseller_tier_member_add", f"{code}: {tg_id}", "user", tg_id)
+    await notify_user(
+        tg_id,
+        f"✅ شما توسط مدیریت در سطح {tier['icon']} {tier['title']} قرار گرفتید. "
+        "تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود.",
+    )
+    return {"ok": True}
+
+
 @app.delete("/api/reseller-tiers/{code}/members/{user_id}")
 def api_remove_tier_member(code: str, user_id: int, admin=Depends(require_permission("resellers"))):
     _tier_or_404(code)
