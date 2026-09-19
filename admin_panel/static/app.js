@@ -2856,6 +2856,12 @@ function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
         <input class="input" id="mr-percent" type="number" min="1" max="100" placeholder="مثلاً 10">
       </div>
 
+      <div id="mr-discount-wrap" style="display:none">
+        <div><b>درصد تخفیف نقره‌ای</b></div>
+        <div class="hint-text">این درصد به‌صورت اختصاصی برای همین نماینده ثبت می‌شود. تخفیف پلکانی خرید عمده می‌تواند آن را بیشتر کند.</div>
+        <input class="input" id="mr-discount" type="number" min="1" max="100" placeholder="مثلاً 15">
+      </div>
+
       <div id="mr-volume-wrap" style="display:none">
         <div><b>حجم اعتبار اولیه (گیگ)</b></div>
         <input class="input" id="mr-volume" type="number" placeholder="مثلاً 500">
@@ -2890,6 +2896,7 @@ function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
       const features = [t.has_dedicated_bot && 'بات مستقل', t.has_web_panel && 'پنل وب', t.has_miniapp && 'مینی‌اپ'].filter(Boolean);
       $('#mr-tier-info', body).textContent = [t.summary, features.length ? `امکانات: ${features.join('، ')}` : ''].filter(Boolean).join(' | ');
       show('#mr-percent-wrap', t.model === 'commission');
+      show('#mr-discount-wrap', t.model === 'discount' && t.code === 'silver');
       show('#mr-volume-wrap', t.model === 'volume_credit');
       show('#mr-fixed-wrap', t.model === 'fixed_product');
       show('#mr-panel-wrap', t.model === 'volume_credit' || t.model === 'fixed_product');
@@ -2932,6 +2939,10 @@ function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
         const high = t.commission_max || 100;
         if (!percent || percent < low || percent > high) { toast(`درصد کمیسیون باید بین ${low} تا ${high} باشد.`, true); return; }
         payload.percent = percent;
+      } else if (t.model === 'discount') {
+        const discount = Number($('#mr-discount', body).value);
+        if (!discount || discount < 1 || discount > 100) { toast('درصد تخفیف نقره‌ای باید بین ۱ تا ۱۰۰ باشد.', true); return; }
+        payload.discount_percent = discount;
       } else if (t.model === 'fixed_product') {
         const items = $$('.mr-product-check', body).filter(x => x.checked).map(ch => {
           const qtyEl = $$(`.mr-product-qty[data-product-id="${ch.dataset.productId}"]`, body)[0];
@@ -3783,10 +3794,11 @@ async function renderResellerTiers() {
             <td><button class="btn btn-danger btn-sm" data-qty-del="${q.id}">حذف</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">پله‌ای ثبت نشده</td></tr>'}</tbody></table></div>
           <div class="toolbar" style="margin-top:8px"><strong style="font-size:13px">اعضا (${fmt(t.members_count)})</strong>
             <button class="btn btn-sm" data-member-add="${t.code}">+ عضو</button></div>
-          <div class="table-wrap"><table><thead><tr><th>نام</th><th>آیدی</th><th></th></tr></thead>
+          <div class="table-wrap"><table><thead><tr><th>نام</th><th>آیدی</th><th>تخفیف</th><th></th></tr></thead>
           <tbody>${(members[t.code] || []).map(m => `<tr><td>${esc(m.first_name || '')} ${m.username ? '@' + esc(m.username) : ''}</td>
             <td class="mono">${m.telegram_id}</td>
-            <td><button class="btn btn-danger btn-sm" data-member-del="${t.code}:${m.telegram_id}">حذف عضویت</button></td></tr>`).join('') || '<tr><td colspan="3" class="empty-state">عضوی ندارد</td></tr>'}</tbody></table></div>
+            <td class="mono">${m.reseller_discount_percent ? fmt(m.reseller_discount_percent) + '٪' : '—'}</td>
+            <td><button class="btn btn-danger btn-sm" data-member-del="${t.code}:${m.telegram_id}">حذف عضویت</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty-state">عضوی ندارد</td></tr>'}</tbody></table></div>
         </div>` : ''}
     </div>`).join('');
   setContent(requestsHtml + tierCards);
@@ -3822,18 +3834,30 @@ async function renderResellerTiers() {
     const [code, uid] = b.dataset.memberDel.split(':');
     try { await apiDelete(`/reseller-tiers/${code}/members/${uid}`); toast('حذف شد.'); reload(); } catch (e) { handleErr(e); }
   }));
-  $$('[data-member-add]', content()).forEach(b => b.addEventListener('click', () => openModal('افزودن عضو به سطح', `
+  $$('[data-member-add]', content()).forEach(b => b.addEventListener('click', () => {
+    const code = b.dataset.memberAdd;
+    const isSilver = code === 'silver';
+    openModal(isSilver ? 'افزودن نماینده نقره‌ای' : 'افزودن عضو به سطح', `
     <div class="form-grid">
+      <div style="opacity:.72;font-size:12.5px">آیدی عددی تلگرام کاربر را وارد کنید.</div>
       <input class="input" id="member-tgid" type="number" min="1" placeholder="آیدی عددی تلگرام کاربر">
-      <button class="btn btn-primary" id="member-save">افزودن</button>
+      ${isSilver ? `<label class="field"><span>درصد تخفیف اختصاصی این نماینده</span><input class="input" id="member-discount" type="number" min="1" max="100" placeholder="مثلاً 15"></label><div style="opacity:.65;font-size:12px">این درصد فقط برای همین نماینده است؛ پلکان خرید عمده می‌تواند تخفیف را بیشتر کند.</div>` : ''}
+      <button class="btn btn-primary" id="member-save">${isSilver ? 'ثبت نماینده نقره‌ای' : 'افزودن'}</button>
     </div>`, (m, close) => {
     $('#member-save', m).addEventListener('click', async () => {
+      const telegram_id = Number($('#member-tgid', m).value);
+      const payload = { telegram_id };
+      if (isSilver) payload.discount_percent = Number($('#member-discount', m).value);
+      if (!telegram_id || (isSilver && (!payload.discount_percent || payload.discount_percent < 1 || payload.discount_percent > 100))) {
+        toast(isSilver ? 'آیدی و درصد تخفیف ۱ تا ۱۰۰ را وارد کنید.' : 'آیدی نامعتبر است.', true); return;
+      }
       try {
-        await apiPost(`/reseller-tiers/${b.dataset.memberAdd}/members`, { telegram_id: Number($('#member-tgid', m).value) });
-        toast('عضو اضافه شد.'); close(); reload();
+        await apiPost(`/reseller-tiers/${code}/members`, payload);
+        toast(isSilver ? `نماینده نقره‌ای با تخفیف ${payload.discount_percent}٪ ثبت شد.` : 'عضو اضافه شد.'); close(); reload();
       } catch (e) { handleErr(e); }
     });
-  })));
+  });
+  }));
   $$('[data-qty-add]', content()).forEach(b => b.addEventListener('click', () => openModal('پله‌ی جدید تخفیف', `
     <div class="form-grid">
       <input class="input" id="qty-min" type="number" min="2" placeholder="حداقل تعداد خرید یک‌جا (مثلا ۱۰)">
@@ -5632,6 +5656,7 @@ function openResellerRequestModal(req) {
       <div><b>هزینه‌ی نمایندگی (تومان)</b></div>
       <input class="input" id="rq-price" type="number" placeholder="مبلغ به تومان">
       ${req.tier_code === 'bronze' ? `<div><b>درصد کمیسیون برنزی</b></div><input class="input" id="rq-percent" type="number" min="1" max="100" placeholder="درصد کمیسیون">` : ''}
+      ${req.tier_code === 'silver' ? `<div><b>درصد تخفیف نقره‌ای</b></div><input class="input" id="rq-discount" type="number" min="1" max="100" placeholder="مثلاً 15٪"><div style="opacity:.65;font-size:12px">این درصد برای همین نماینده ثبت می‌شود؛ پلکان خرید عمده می‌تواند تخفیف را بیشتر کند.</div>` : ''}
       <div><b>پنل اختصاصی (اختیاری)</b></div>
       <select class="input" id="rq-panel"><option value="">پیش‌فرض خودکار</option></select>
       <button class="btn btn-primary" id="rq-quote">✅ تایید و ارسال هزینه به کاربر</button>
@@ -5670,7 +5695,9 @@ function openResellerRequestModal(req) {
         if (!price_toman || price_toman <= 0) { toast('مبلغ نامعتبر است.', true); return; }
         try {
           const commission_percent = $('#rq-percent', body) ? Number($('#rq-percent', body).value) || null : null;
-          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null, commission_percent });
+          const discount_percent = $('#rq-discount', body) ? Number($('#rq-discount', body).value) || null : null;
+          if (req.tier_code === 'silver' && (!discount_percent || discount_percent < 1 || discount_percent > 100)) { toast('درصد تخفیف نقره‌ای را بین ۱ تا ۱۰۰ وارد کنید.', true); return; }
+          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null, commission_percent, discount_percent });
           toast('هزینه برای کاربر ارسال شد.'); close(); renderResellers();
         } catch (e) { handleErr(e); }
       });
