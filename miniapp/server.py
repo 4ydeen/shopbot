@@ -1578,6 +1578,15 @@ class TopupCreate(BaseModel):
     amount: int
 
 
+@app.get("/api/tier-quote")
+def api_tier_quote(product_id: int, quantity: int = 1, auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    product = db.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="محصول یافت نشد.")
+    return db.get_tier_price_info(tg_id, product["price"], max(1, quantity))
+
+
 @app.post("/api/orders")
 async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     tg_id, db, tenant = auth
@@ -1597,7 +1606,8 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
         if quantity > stock:
             raise HTTPException(status_code=400, detail=f"موجودی کافی نیست. فقط {stock} عدد موجود است.")
 
-    total_price = product["price"] * quantity
+    tier_info = db.get_tier_price_info(tg_id, product["price"], quantity)
+    total_price = tier_info["total_after"]
     discount_code_id = None
     discount_amount = 0
     if body.discount_code:
@@ -1620,7 +1630,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     order_id = db.create_order(
         tg_id, body.product_id, base_price=total_price,
         wallet_used=wallet_used, discount_code_id=discount_code_id, discount_amount=discount_amount,
-        quantity=quantity,
+        quantity=quantity, tier_discount_amount=tier_info["amount"],
     )
     order = db.get_order(order_id)
 
