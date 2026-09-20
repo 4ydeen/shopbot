@@ -138,7 +138,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         در غیر این صورت None (یعنی مجاز است). این یک لایه‌ی دفاعی اضافه روی
         فیلترشدن دکمه‌ها در payment_choice_kb است."""
         product_id = order["product_id"] if "product_id" in order.keys() else None
-        if product_id and not (await asyncio.to_thread(db.product_allows_payment_method, product_id, method_key)):
+        if "is_custom_config" in order.keys() and order["is_custom_config"]:
+            if not (await asyncio.to_thread(db.custom_config_allows_payment_method, order["custom_product_id"], method_key)):
+                return "⛔️ این روش پرداخت برای ساخت کانفیگ شخصی مجاز نیست."
+        elif product_id and not (await asyncio.to_thread(db.product_allows_payment_method, product_id, method_key)):
             return "⛔️ این روش پرداخت برای این محصول مجاز نیست."
         min_amt = await asyncio.to_thread(db.get_payment_method_min_amount, method_key)
         if min_amt and order["final_price"] < min_amt:
@@ -1803,7 +1806,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         tier_info = await _tier_info(message.from_user.id, price, 1)
         price = tier_info["total_after"]
-        wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id))
+        allowed_methods = await asyncio.to_thread(db.get_effective_custom_config_payment_methods, product_id)
+        wallet_allowed = allowed_methods is None or "wallet" in allowed_methods
+        wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id)) if wallet_allowed else 0
         wallet_used = min(wallet_credit, price)
 
         if wallet_used > 0:
@@ -1855,10 +1860,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 return
 
             remaining_amount = order["final_price"]
-            allowed_methods = (
-                (await asyncio.to_thread(db.get_custom_config_product_payment_methods, product_id))
-                if product_id else None
-            )
             if not (await asyncio.to_thread(db.has_any_payable_method, remaining_amount, allowed_methods)):
                 # reject_order خودش مبلغ order["wallet_used"] را برمی‌گرداند؛ برگرداندن
                 # دستی اضافه‌ی قبلی این‌جا حذف شد چون باعث بازگشت دوبرابری می‌شد.
@@ -1923,6 +1924,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
             return
+        err = await _order_payment_method_error(order, "card")
+        if err:
+            await call.answer(err, show_alert=True)
+            return
         await call.answer()
         duration_days = order["custom_duration_days"]
         if duration_days is None:
@@ -1947,6 +1952,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
             return
+        err = await _order_payment_method_error(order, "card_auto")
+        if err:
+            await call.answer(err, show_alert=True)
+            return
         await call.answer()
         duration_days = order["custom_duration_days"]
         if duration_days is None:
@@ -1969,6 +1978,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        err = await _order_payment_method_error(order, "crypto")
+        if err:
+            await call.answer(err, show_alert=True)
             return
         await call.answer("در حال ساخت فاکتور...")
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
@@ -1996,6 +2009,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        err = await _order_payment_method_error(order, "abangateway")
+        if err:
+            await call.answer(err, show_alert=True)
             return
         await call.answer("در حال ساخت فاکتور...")
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
@@ -2026,6 +2043,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
             return
+        err = await _order_payment_method_error(order, "blupal")
+        if err:
+            await call.answer(err, show_alert=True)
+            return
         await call.answer("در حال ساخت فاکتور...")
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
         try:
@@ -2054,6 +2075,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
         if not order or order["status"] != "pending":
             await call.answer("سفارش معتبر یافت نشد.", show_alert=True)
+            return
+        err = await _order_payment_method_error(order, "noapay")
+        if err:
+            await call.answer(err, show_alert=True)
             return
         await call.answer("در حال ساخت فاکتور...")
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
@@ -2087,6 +2112,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         gw_row = (await asyncio.to_thread(db.get_custom_gateway, int(call.data.split(":", 1)[1])))
         if not gw_row or not gw_row["enabled"]:
             await call.answer("این درگاه در دسترس نیست.", show_alert=True)
+            return
+        err = await _order_payment_method_error(order, f"custom:{gw_row['gateway_key']}")
+        if err:
+            await call.answer(err, show_alert=True)
             return
         await call.answer("در حال ساخت فاکتور...")
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))

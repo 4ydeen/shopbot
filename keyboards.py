@@ -1034,6 +1034,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
     ("adm_wallet_paymethods", "👛 روش‌های پرداخت شارژ کیف پول", "adm_wallet_paymethods"),
+    ("adm_cc_paymethods", "🛠 روش‌های پرداخت کانفیگ شخصی", "adm_cc_paymethods"),
     ("adm_edit_welcome", "📝 ویرایش پیام خوش‌آمد", "adm_edit_welcome"),
     ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
@@ -1102,6 +1103,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_custom_gateways",
         "adm_min_amount_settings",
         "adm_wallet_paymethods",
+        "adm_cc_paymethods",
     ]),
     ("alerts", "🔔 یادآوری‌ها و هشدارها", [
         "adm_renewal_settings",
@@ -1781,6 +1783,29 @@ def admin_wallet_payment_methods_kb(db) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(
             text=f"{icon} {item['label']}{suffix}",
             callback_data=f"adm_walletpm_tgl:{item['key']}",
+        )])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_custom_config_payment_methods_kb(db) -> InlineKeyboardMarkup:
+    """چندانتخابی روش‌های پرداخت مجاز سراسری برای «ساخت کانفیگ شخصی»؛ پلنی که
+    محدودیت خودش را دارد بر این تنظیم اولویت دارد."""
+    allowed = db.get_custom_config_payment_methods()
+    all_allowed = allowed is None
+    catalog = db.get_payment_methods_catalog()
+
+    rows = [[InlineKeyboardButton(
+        text=f"{'✅' if all_allowed else '⬜️'} همه‌ی روش‌ها فعال باشند",
+        callback_data="adm_ccpm_all",
+    )]]
+    for item in catalog:
+        checked = all_allowed or (item["key"] in (allowed or []))
+        icon = "✅" if checked else "⬜️"
+        suffix = "" if item["enabled"] else " (غیرفعال)"
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {item['label']}{suffix}",
+            callback_data=f"adm_ccpm_tgl:{item['key']}",
         )])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -5601,6 +5601,35 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE custom_config_products SET payment_methods=? WHERE id=?", (value, product_id))
 
+    def get_custom_config_payment_methods(self):
+        """روش‌های پرداخت مجاز سراسری برای «ساخت کانفیگ شخصی» (مسیر مینی‌اپ/پنل وب و
+        مسیر بدون محصول در بات). None = همه مجازند."""
+        raw = self.get_setting("custom_config_payment_methods", "")
+        if not raw:
+            return None
+        try:
+            methods = json.loads(raw)
+        except Exception:
+            return None
+        return methods or None
+
+    def set_custom_config_payment_methods(self, methods):
+        """methods=None یا [] یعنی «همه‌ی روش‌ها مجاز» (حذف محدودیت)."""
+        value = json.dumps(methods, ensure_ascii=False) if methods else ""
+        self.set_setting("custom_config_payment_methods", value)
+
+    def get_effective_custom_config_payment_methods(self, custom_product_id: int = None):
+        """محدودیت خودِ پلن (در صورت تنظیم) بر محدودیت سراسری اولویت دارد."""
+        if custom_product_id:
+            methods = self.get_custom_config_product_payment_methods(custom_product_id)
+            if methods is not None:
+                return methods
+        return self.get_custom_config_payment_methods()
+
+    def custom_config_allows_payment_method(self, custom_product_id, method_key: str) -> bool:
+        allowed = self.get_effective_custom_config_payment_methods(custom_product_id)
+        return allowed is None or method_key in allowed
+
     def product_allows_payment_method(self, product_id: int, method_key: str) -> bool:
         allowed = self.get_product_payment_methods(product_id)
         if allowed is None:

@@ -973,6 +973,61 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
         await call.answer()
 
+    @router.callback_query(F.data == "adm_cc_paymethods")
+    async def cb_admin_cc_paymethods(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await replace_admin_view(call, 
+            "🛠 روش‌های پرداخت مجاز برای «ساخت کانفیگ شخصی»:\n\n"
+            "با لمس هر گزینه، فعال/غیرفعال می‌شود. اگر «همه‌ی روش‌ها» تیک بخورد، ساخت کانفیگ شخصی از هر روش "
+            "پرداخت فعالی ممکن است. پلنی که محدودیت خودش را دارد بر این تنظیم اولویت دارد.",
+            reply_markup=kb.admin_custom_config_payment_methods_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ccpm_all")
+    async def cb_admin_ccpm_all(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        (await asyncio.to_thread(db.set_custom_config_payment_methods, None))
+        await safe_edit(call, 
+            "🛠 روش‌های پرداخت مجاز برای ساخت کانفیگ شخصی:",
+            reply_markup=kb.admin_custom_config_payment_methods_kb(db),
+        )
+        await call.answer("همه‌ی روش‌ها فعال شدند.")
+
+    @router.callback_query(F.data.startswith("adm_ccpm_tgl:"))
+    async def cb_admin_ccpm_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            method_key = call.data.split(":", 1)[1]
+        except IndexError:
+            return await call.answer("❌ درخواست نامعتبر است.", show_alert=True)
+
+        catalog_keys = [item["key"] for item in (await asyncio.to_thread(db.get_payment_methods_catalog))]
+        allowed = (await asyncio.to_thread(db.get_custom_config_payment_methods))
+        current = set(catalog_keys) if allowed is None else set(allowed)
+
+        if method_key in current:
+            current.discard(method_key)
+        else:
+            current.add(method_key)
+
+        if not current:
+            return await call.answer("⚠️ حداقل یک روش پرداخت باید برای ساخت کانفیگ شخصی فعال بماند.", show_alert=True)
+
+        if current == set(catalog_keys):
+            (await asyncio.to_thread(db.set_custom_config_payment_methods, None))
+        else:
+            (await asyncio.to_thread(db.set_custom_config_payment_methods, sorted(current)))
+
+        await safe_edit(call, 
+            "🛠 روش‌های پرداخت مجاز برای ساخت کانفیگ شخصی:",
+            reply_markup=kb.admin_custom_config_payment_methods_kb(db),
+        )
+        await call.answer()
+
     @router.callback_query(F.data == "adm_prod_add")
     async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
