@@ -68,9 +68,15 @@ GATEWAYS = {
         "ttl_minutes": 65,
         "needs_base_url": False,
         "fields": [
-            {"setting": "tgstars_rate_toman_per_star", "label": "نرخ هر استارز به تومان", "secret": False, "required": True, "numeric": True},
+            {"setting": "tgstars_rate_toman_per_star", "label": "نرخ دستی هر استارز (تومان) - ۰ یعنی خودکار", "secret": False, "required": False, "numeric": True},
+            {"setting": "tgstars_usd_per_star", "label": "ارزش هر استارز به دلار (نرخ خودکار)", "secret": False, "required": False, "numeric": True, "default": "0.013"},
+            {"setting": "tgstars_margin_percent", "label": "درصد حاشیه سود روی نرخ خودکار", "secret": False, "required": False, "numeric": True},
         ],
-        "help": "پرداخت مستقیم داخل خود تلگرام با Telegram Stars. تعداد استارز = مبلغ تقسیم بر نرخ هر استارز (رو به بالا).",
+        "help": (
+            "پرداخت مستقیم داخل خود تلگرام با Telegram Stars. تعداد استارز = مبلغ تقسیم بر نرخ هر استارز (رو به بالا).\n"
+            "حالت خودکار (پیش‌فرض، وقتی «نرخ دستی» صفر باشد): نرخ لحظه‌ای دلار × ارزش هر استارز به دلار × (۱ + حاشیه سود٪) "
+            "هنگام ساخت هر فاکتور محاسبه می‌شود. اگر یک عدد بزرگ‌تر از صفر در «نرخ دستی» بگذاری، همان ثابت استفاده می‌شود."
+        ),
     },
 }
 
@@ -88,7 +94,7 @@ def default_settings() -> dict:
     for key in GATEWAY_ORDER:
         out[enable_setting(key)] = "0"
         for field in GATEWAYS[key]["fields"]:
-            out[field["setting"]] = "0" if field["numeric"] else ""
+            out[field["setting"]] = field.get("default", "0" if field["numeric"] else "")
         out[min_amount_setting(key)] = "0"
     return out
 

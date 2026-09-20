@@ -4,12 +4,14 @@
 import asyncio
 import json
 import logging
+import math
 import secrets
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import abangateway_payment
 import crypto_payment
+import exchange_rate
 import extra_gateway_clients as clients
 import extra_gateway_registry as registry
 from config import API_BASE_URL
@@ -90,11 +92,46 @@ def _order_number(kind: str, ref_id: int) -> str:
     return f"{code}{ref_id}x{secrets.token_hex(4)}"
 
 
-def stars_for_amount(db, amount_toman: int) -> int:
-    rate = _to_float(db.get_setting("tgstars_rate_toman_per_star", "0"))
+STAR_USD_DEFAULT = 0.013  # مبلغی که توسعه‌دهنده بابت هر استارز دریافت می‌کند (دلار)
+
+
+async def resolve_star_rate(db) -> float:
+    """نرخ هر ۱ استارز به تومان.
+    ۱) اگر «نرخ دستی» (tgstars_rate_toman_per_star) بزرگ‌تر از صفر باشد همان ثابت استفاده می‌شود.
+    ۲) وگرنه: نرخ لحظه‌ای دلار × ارزش هر استارز به دلار × (۱ + حاشیه سود٪).
+    ۳) اگر دریافت نرخ دلار کاملاً شکست بخورد، آخرین نرخ خودکار موفق استفاده می‌شود."""
+    manual = _to_float(db.get_setting("tgstars_rate_toman_per_star", "0"))
+    if manual > 0:
+        return manual
+    usd_per_star = _to_float(db.get_setting("tgstars_usd_per_star", str(STAR_USD_DEFAULT))) or STAR_USD_DEFAULT
+    margin = max(0.0, _to_float(db.get_setting("tgstars_margin_percent", "0")))
+    fallback = (
+        _to_float(db.get_setting("manual_usd_rate_toman", "0"))
+        or _to_float(db.get_setting("usd_to_toman_rate", "0"))
+    )
+    try:
+        usd_rate = await exchange_rate.get_usd_to_toman_rate(manual_fallback=fallback or None)
+    except Exception as e:
+        last = _to_float(db.get_setting("tgstars_last_auto_rate", "0"))
+        if last > 0:
+            logger.warning("دریافت نرخ دلار برای استارز ناموفق بود؛ استفاده از آخرین نرخ ذخیره‌شده (%s): %s", last, e)
+            return last
+        logger.error("دریافت نرخ دلار برای استارز ناموفق بود: %s", e)
+        raise ExtraGatewayError(
+            "دریافت خودکار نرخ استارز ناموفق بود. ادمین می‌تواند «نرخ دستی هر استارز» را در تنظیمات همین درگاه وارد کند."
+        )
+    rate = usd_rate * usd_per_star * (1 + margin / 100)
     if rate <= 0:
-        raise ExtraGatewayError("نرخ استارز تنظیم نشده است.")
-    return max(1, int(-(-int(amount_toman) // rate)))
+        raise ExtraGatewayError("نرخ استارز نامعتبر است.")
+    rate = round(rate, 2)
+    if abs(rate - _to_float(db.get_setting("tgstars_last_auto_rate", "0"))) >= 0.01:
+        await asyncio.to_thread(db.set_setting, "tgstars_last_auto_rate", str(rate))
+    return rate
+
+
+async def stars_for_amount(db, amount_toman: int) -> int:
+    rate = await resolve_star_rate(db)
+    return max(1, math.ceil(int(amount_toman) / rate))
 
 
 def cubepay_payable(db, amount_toman: int) -> int:
@@ -117,7 +154,7 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, gateway: str, kind:
     payable = amount_toman
     try:
         if gateway == "tgstars":
-            payable = stars_for_amount(db, amount_toman)
+            payable = await stars_for_amount(db, amount_toman)
             created = {"remote_id": None, "payment_url": None, "meta": {}}
         elif gateway == "zarinpal":
             created = await clients.zarinpal_create(
