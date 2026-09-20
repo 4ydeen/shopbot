@@ -261,6 +261,10 @@ class AdminSetPanelDomain(StatesGroup):
     waiting_url = State()
 
 
+class AdminSetPanelCapacity(StatesGroup):
+    waiting_limit = State()
+
+
 class AdminWheelSettings(StatesGroup):
     waiting_win_percent = State()
     waiting_lottery_prizes = State()
