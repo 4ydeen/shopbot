@@ -110,6 +110,27 @@ SETTINGS_FORM_SECTIONS = [
                 ],
             },
             {
+                "title": "📊 گزارش روزانه‌ی فروش",
+                "fields": [
+                    {"key": "daily_report_enabled", "label": "ارسال گزارش روزانه‌ی فروش به مدیران", "type": "bool"},
+                    {"key": "daily_report_time", "label": "ساعت ارسال به وقت تهران (مثل 23:45)", "type": "text"},
+                ],
+            },
+            {
+                "title": "🩺 پایش سلامت پنل‌های VPN",
+                "fields": [
+                    {"key": "panel_health_enabled", "label": "هشدار قطعی و بازیابی پنل‌ها به مدیران (بررسی هر ۵ دقیقه)", "type": "bool"},
+                ],
+            },
+            {
+                "title": "🛡 ضداسپم کاربران",
+                "fields": [
+                    {"key": "spam_guard_enabled", "label": "فعال بودن ضداسپم (هشدار و سپس مسدودسازی خودکار)", "type": "bool"},
+                    {"key": "spam_limit", "label": "حداکثر تعداد درخواست در بازه‌ی زمانی", "type": "number"},
+                    {"key": "spam_window", "label": "بازه‌ی زمانی (ثانیه)", "type": "number"},
+                ],
+            },
+            {
                 "title": "کانفیگ شخصی/سفارشی",
                 "fields": [
                     {"key": "custom_config_enabled", "label": "فعال بودن ساخت کانفیگ شخصی", "type": "bool"},

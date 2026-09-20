@@ -3956,7 +3956,16 @@ function discountExtraFieldsHtml(categories, products) {
         ${categories.length ? `<optgroup label="فقط یک دسته‌بندی خاص">${categories.map(c => `<option value="cat:${c.id}">📁 ${esc(c.name)}</option>`).join('')}</optgroup>` : ''}
         ${products.length ? `<optgroup label="فقط یک محصول خاص">${products.map(p => `<option value="prod:${p.id}">📦 ${esc(p.name)}</option>`).join('')}</optgroup>` : ''}
       </select>
-      <label class="field"><span>تاریخ انقضا (اختیاری)</span><input class="input" id="code-expires" type="date"></label>`;
+      <label class="field"><span>تاریخ انقضا (اختیاری)</span><input class="input" id="code-expires" type="date"></label>
+      <div class="form-row">
+        <input class="input" id="code-peruser" type="number" min="0" placeholder="سقف استفاده‌ی هر کاربر (خالی=نامحدود)">
+        <select class="input" id="code-audience">
+          <option value="all">👥 همه‌ی کاربران</option>
+          <option value="normal">🙂 فقط کاربران عادی</option>
+          <option value="reseller">🤝 فقط نمایندگان</option>
+        </select>
+      </div>
+      <label class="field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="code-firstonly"><span>فقط برای اولین خرید کاربر</span></label>`;
 }
 function discountExtraFieldsPayload(b) {
   const scope = $('#code-scope', b).value;
@@ -3969,6 +3978,9 @@ function discountExtraFieldsPayload(b) {
     max_purchase: Number($('#code-maxpurchase', b).value) || null,
     product_id, category_id,
     expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null,
+    per_user_limit: Number($('#code-peruser', b).value) || null,
+    first_purchase_only: $('#code-firstonly', b).checked,
+    audience: $('#code-audience', b).value,
   };
 }
 function discountConstraintsLine(c, categories, products) {
@@ -3977,6 +3989,10 @@ function discountConstraintsLine(c, categories, products) {
   if (c.max_purchase) parts.push(`حداکثر خرید ${fmt(c.max_purchase)}ت`);
   if (c.product_id) { const p = products.find(x => x.id === c.product_id); parts.push(`مخصوص محصول: ${p ? esc(p.name) : '#' + c.product_id}`); }
   else if (c.category_id) { const cat = categories.find(x => x.id === c.category_id); parts.push(`مخصوص دسته: ${cat ? esc(cat.name) : '#' + c.category_id}`); }
+  if (c.per_user_limit) parts.push(`هر کاربر ${c.per_user_limit} بار`);
+  if (c.first_purchase_only) parts.push('فقط خرید اول');
+  if (c.audience === 'normal') parts.push('فقط کاربران عادی');
+  else if (c.audience === 'reseller') parts.push('فقط نمایندگان');
   if (c.expires_at) parts.push(`انقضا: ${String(c.expires_at).slice(0, 10)}`);
   return parts.join(' · ');
 }
@@ -6074,6 +6090,15 @@ function wirePanelDeleteButtons() {
   }));
 }
 
+function panelHealthHtml(s) {
+  if (!s.is_active || !s.health_status) return '';
+  const down = s.health_status === 'down';
+  const when = s.health_last_check
+    ? new Date(s.health_last_check).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '';
+  const tip = down && s.health_error ? ` title="${esc(s.health_error)}"` : '';
+  return `<div${tip} style="font-size:11px;margin-top:4px;color:${down ? '#FB7185' : '#34D399'}">${down ? '🔴 قطع' : '🟢 آنلاین'}${when ? ' · آخرین بررسی ' + when : ''}</div>`;
+}
+
 async function renderPanels() {
   const servers = await apiGet('/panel-servers');
   if (loadTheme().theme === 'brutalist') return renderPanelsBrutalist(servers);
@@ -6087,6 +6112,7 @@ async function renderPanels() {
         <td>
           <button class="btn btn-sm ${s.is_active ? '' : 'btn-danger'}" data-toggle-active="${s.id}">${s.is_active ? '✅ فعال' : '⛔️ غیرفعال'}</button>
           ${s.is_configured ? '' : '<div style="font-size:11px;color:#FB7185;margin-top:4px">⚠️ تکمیل‌نشده</div>'}
+          ${panelHealthHtml(s)}
         </td>
         <td>
           <label style="display:flex;gap:4px;align-items:center;font-size:12px"><input type="checkbox" data-usage="custom" data-usage-id="${s.id}" ${s.used_for_custom_config ? 'checked' : ''}> کانفیگ شخصی</label>
@@ -6195,6 +6221,7 @@ function renderPanelsBento(servers) {
           </div>
           <div class="bn-row-sub">${esc(s.type_label)}</div>
           <div class="bn-row-sub mono" style="direction:ltr;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.api_url)}</div>
+          ${panelHealthHtml(s)}
           <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
             <button class="bn-btn bn-btn-ghost" data-test="${s.id}">تست اتصال</button>
             <button class="bn-btn bn-btn-ghost" data-edit="${s.id}">ویرایش</button>
@@ -6261,6 +6288,7 @@ function renderPanelsBrutalist(servers) {
           </div>
           <div class="bru-coupon-row"><span>نوع</span><b>${esc(s.type_label)}</b></div>
           <div class="bru-server-url mono">${esc(s.api_url)}</div>
+          ${panelHealthHtml(s)}
           <div class="bru-coupon-actions" style="padding:0;border:none;margin-top:8px;flex-wrap:wrap">
             <button class="btn btn-sm" data-test="${s.id}">تست اتصال</button>
             <button class="btn btn-sm" data-edit="${s.id}">ویرایش</button>
@@ -6408,6 +6436,18 @@ const SETTINGS_GROUPS = [
   // ------------------------------------------------------ سرویس‌های ویژه
   { tab: 'services', title: '🛒 سقف تعداد خرید در هر سفارش', fields: [
     { key: 'auto_provision_max_qty', label: 'حداکثر تعداد محصولات خودکار در هر سفارش (۰=نامحدود)', type: 'number' },
+  ] },
+  { tab: 'services', title: '📊 گزارش روزانه‌ی فروش', fields: [
+    { key: 'daily_report_enabled', label: 'ارسال گزارش روزانه‌ی فروش به مدیران', type: 'bool' },
+    { key: 'daily_report_time', label: 'ساعت ارسال به وقت تهران (مثل 23:45)', type: 'text' },
+  ] },
+  { tab: 'services', title: '🩺 پایش سلامت پنل‌های VPN', fields: [
+    { key: 'panel_health_enabled', label: 'هشدار قطعی و بازیابی پنل‌ها به مدیران (بررسی هر ۵ دقیقه)', type: 'bool' },
+  ] },
+  { tab: 'services', title: '🛡 ضداسپم کاربران', fields: [
+    { key: 'spam_guard_enabled', label: 'فعال بودن ضداسپم (هشدار و سپس مسدودسازی خودکار)', type: 'bool' },
+    { key: 'spam_limit', label: 'حداکثر تعداد درخواست در بازه‌ی زمانی', type: 'number' },
+    { key: 'spam_window', label: 'بازه‌ی زمانی (ثانیه)', type: 'number' },
   ] },
   { tab: 'services', title: 'کانفیگ شخصی/سفارشی', fields: [
     { key: 'custom_config_enabled', label: 'فعال بودن ساخت کانفیگ شخصی', type: 'bool' },
