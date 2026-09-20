@@ -2254,25 +2254,36 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # -------------------------------------------------------------------
 
     @router.callback_query(F.data == "adm_set_abangateway")
-    async def cb_admin_set_abangateway(call: CallbackQuery, state: FSMContext):
+    async def cb_admin_set_abangateway(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        current = (await asyncio.to_thread(db.get_setting, "abangateway_api_key", ""))
-        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         source = abangateway_payment.resolve_api_key_source(db)
         source_note = {
             "db": "✅ از همین پنل بات خوانده می‌شود (بات و مینی‌اپ هر دو همین را می‌بینند، بدون نیاز به ری‌استارت).",
             "env": "⚠️ فقط از فایل .env این پروسه خوانده می‌شود. اگر بات و مینی‌اپ را جدا ری‌استارت نکرده باشی ممکن است این دو با هم ناهماهنگ باشند. پیشنهاد: همینجا دوباره ثبتش کن تا مطمئن بشی.",
             "none": "❌ هیچ کلیدی (نه در دیتابیس، نه در .env) تنظیم نشده.",
         }[source]
+        await replace_admin_view(
+            call,
+            "💳 تنظیم درگاه آبان گیت وی (پرداخت کارتی/آنلاین)\n\n"
+            f"منبع کلید: {source_note}",
+            reply_markup=kb.abangateway_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_abangateway_set_key")
+    async def cb_admin_abangateway_set_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "abangateway_api_key", ""))
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         await state.set_state(AdminSetAbanGateway.waiting_key)
         await safe_edit(
             call,
             f"💳 API Key حساب آبان گیت وی را ارسال کن (از abangateway.ir → تنظیمات API).\n"
-            f"وضعیت فعلی: {masked}\n"
-            f"منبع کلید: {source_note}\n\n"
+            f"وضعیت فعلی: {masked}\n\n"
             f"برای غیرفعال‌کردن، عبارت «حذف» را بفرست.",
-            reply_markup=kb.admin_back_kb("adm_cat:finance"),
+            reply_markup=kb.admin_back_kb("adm_set_abangateway"),
         )
         await call.answer()
 
@@ -2283,15 +2294,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if text in ("حذف", "/حذف", "-"):
             (await asyncio.to_thread(db.set_setting, "abangateway_api_key", ""))
             (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "abangateway_key_change", "API Key آبان گیت وی حذف شد."))
-            await message.answer("✅ API Key آبان گیت وی حذف شد و درگاه غیرفعال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            await message.answer("✅ API Key آبان گیت وی حذف شد و درگاه غیرفعال شد.", reply_markup=kb.abangateway_settings_kb(db))
             return
         (await asyncio.to_thread(db.set_setting, "abangateway_api_key", text))
         (await asyncio.to_thread(db.set_setting, "abangateway_payment_enabled", "1"))
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "abangateway_key_change", "API Key آبان گیت وی تغییر کرد."))
         await message.answer(
-            "✅ API Key آبان گیت وی ذخیره شد و درگاه فعال شد.\n"
-            "برای غیرفعال‌کردن، دوباره وارد همین بخش شو و «حذف» را بفرست.",
-            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            "✅ API Key آبان گیت وی ذخیره شد و درگاه فعال شد.",
+            reply_markup=kb.abangateway_settings_kb(db),
         )
 
     # -------------------------------------------------------------------
@@ -2420,11 +2430,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # -------------------------------------------------------------------
 
     @router.callback_query(F.data == "adm_set_blupal")
-    async def cb_admin_set_blupal(call: CallbackQuery, state: FSMContext):
+    async def cb_admin_set_blupal(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        current = (await asyncio.to_thread(db.get_setting, "blupal_api_key", ""))
-        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         source = blupal_payment.resolve_api_key_source(db)
         source_note = {
             "db": "✅ از همین پنل بات خوانده می‌شود (بات و مینی‌اپ هر دو همین را می‌بینند، بدون نیاز به ری‌استارت).",
@@ -2438,15 +2446,28 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if webhook_hint else
             "\n\n⚠️ آدرس مینی‌اپ (MINIAPP_URL) روی سرور تنظیم نشده؛ بدون آن نمی‌توانی آدرس وب‌هوک بسازی (بررسی دستی وضعیت هنوز کار می‌کند)."
         )
+        await replace_admin_view(
+            call,
+            "💳 تنظیم درگاه بلوپال (پرداخت کارتی/آنلاین)\n\n"
+            f"منبع کلید: {source_note}"
+            f"{webhook_note}",
+            reply_markup=kb.blupal_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_blupal_set_key")
+    async def cb_admin_blupal_set_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "blupal_api_key", ""))
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         await state.set_state(AdminSetBlupal.waiting_key)
         await safe_edit(
             call,
             f"💳 API Key حساب بلوپال را ارسال کن (از blupal.net → مدیریت API Key).\n"
-            f"وضعیت فعلی: {masked}\n"
-            f"منبع کلید: {source_note}"
-            f"{webhook_note}\n\n"
+            f"وضعیت فعلی: {masked}\n\n"
             f"برای غیرفعال‌کردن، عبارت «حذف» را بفرست.",
-            reply_markup=kb.admin_back_kb("adm_cat:finance"),
+            reply_markup=kb.admin_back_kb("adm_set_blupal"),
         )
         await call.answer()
 
@@ -2457,16 +2478,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if text in ("حذف", "/حذف", "-"):
             (await asyncio.to_thread(db.set_setting, "blupal_api_key", ""))
             (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "blupal_key_change", "API Key بلوپال حذف شد."))
-            await message.answer("✅ API Key بلوپال حذف شد و درگاه غیرفعال شد.", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+            await message.answer("✅ API Key بلوپال حذف شد و درگاه غیرفعال شد.", reply_markup=kb.blupal_settings_kb(db))
             return
         (await asyncio.to_thread(db.set_setting, "blupal_api_key", text))
         (await asyncio.to_thread(db.set_setting, "blupal_payment_enabled", "1"))
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "blupal_key_change", "API Key بلوپال تغییر کرد."))
         await message.answer(
             "✅ API Key بلوپال ذخیره شد و درگاه فعال شد.\n"
-            "یادت نره آدرس وب‌هوک را هم در داشبورد بلوپال ثبت کنی (در همین صفحه نمایش داده شد).\n"
-            "برای غیرفعال‌کردن، دوباره وارد همین بخش شو و «حذف» را بفرست.",
-            reply_markup=kb.admin_panel_kb(db, is_main_bot),
+            "یادت نره آدرس وب‌هوک را هم در داشبورد بلوپال ثبت کنی (در همین صفحه نمایش داده شد).",
+            reply_markup=kb.blupal_settings_kb(db),
         )
 
 
@@ -7153,25 +7173,37 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # -------------------------------------------------------------------
 
     @router.callback_query(F.data == "adm_set_plisio")
-    async def cb_admin_set_plisio(call: CallbackQuery, state: FSMContext):
+    async def cb_admin_set_plisio(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        current = (await asyncio.to_thread(db.get_setting, "plisio_api_key", ""))
-        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         source = crypto_payment.resolve_plisio_key_source(db)
         source_note = {
             "db": "✅ از همین پنل بات خوانده می‌شود (بات و مینی‌اپ هر دو همین را می‌بینند، بدون نیاز به ری‌استارت).",
             "env": "⚠️ فقط از فایل .env این پروسه خوانده می‌شود. اگر بات و مینی‌اپ را جدا ری‌استارت نکرده باشی ممکن است این دو با هم ناهماهنگ باشند. پیشنهاد: همینجا دوباره ثبتش کن تا مطمئن بشی.",
             "none": "❌ هیچ کلیدی (نه در دیتابیس، نه در .env) تنظیم نشده.",
         }[source]
+        await replace_admin_view(
+            call,
+            "🪙 تنظیم درگاه پرداخت کریپتو (Plisio)\n\n"
+            f"منبع کلید: {source_note}\n\n"
+            "بعد از تنظیم کلید، از مینی‌اپ → مدیریت → فروش → «پرداخت کریپتو» فعالش کن.",
+            reply_markup=kb.plisio_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_plisio_set_key")
+    async def cb_admin_plisio_set_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "plisio_api_key", ""))
+        masked = f"...{current[-4:]}" if current else "❌ تنظیم نشده"
         await state.set_state(AdminSetPlisio.waiting_key)
         await safe_edit(
             call,
             f"🪙 API Key حساب Plisio را ارسال کن (از plisio.net → API Settings).\n"
-            f"وضعیت فعلی: {masked}\n"
-            f"منبع کلید: {source_note}\n\n"
+            f"وضعیت فعلی: {masked}\n\n"
             f"برای غیرفعال‌کردن، عبارت «حذف» را بفرست.",
-            reply_markup=kb.admin_back_kb("adm_cat:finance"),
+            reply_markup=kb.admin_back_kb("adm_set_plisio"),
         )
         await call.answer()
 
@@ -7182,14 +7214,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if text in ("حذف", "/حذف", "-"):
             (await asyncio.to_thread(db.set_setting, "plisio_api_key", ""))
             (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "plisio_key_change", "API Key کریپتو حذف شد."))
-            await message.answer("✅ API Key کریپتو حذف شد و درگاه غیرفعال شد.", reply_markup=kb.admin_category_kb(db, is_main_bot, "finance"))
+            await message.answer("✅ API Key کریپتو حذف شد و درگاه غیرفعال شد.", reply_markup=kb.plisio_settings_kb(db))
             return
         (await asyncio.to_thread(db.set_setting, "plisio_api_key", text))
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "plisio_key_change", "API Key کریپتو تغییر کرد."))
         await message.answer(
             "✅ API Key کریپتو ذخیره شد.\n"
             "الان از مینی‌اپ → مدیریت → فروش → «پرداخت کریپتو» فعالش کن.",
-            reply_markup=kb.admin_category_kb(db, is_main_bot, "finance"),
+            reply_markup=kb.plisio_settings_kb(db),
         )
 
     # -------------------------------------------------------------------

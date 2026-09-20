@@ -2207,6 +2207,64 @@ def noapay_invoices_kb(invoices) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def blupal_settings_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات درگاه بلوپال: وضعیت و کلید API (هم‌شکل با noapay_settings_kb)."""
+    api_key = db.get_setting("blupal_api_key", "")
+    enabled = db.get_setting("blupal_payment_enabled", "0") == "1" and bool(api_key)
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"💳 کلید API: {'✅ تنظیم شده' if api_key else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_blupal_set_key",
+        )],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def blupal_settings_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات درگاه بلوپال: وضعیت و کلید API (هم‌شکل با noapay_settings_kb)."""
+    api_key = db.get_setting("blupal_api_key", "")
+    enabled = db.get_setting("blupal_payment_enabled", "0") == "1" and bool(api_key)
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"💳 کلید API: {'✅ تنظیم شده' if api_key else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_blupal_set_key",
+        )],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def abangateway_settings_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات آبان گیت وی: وضعیت و کلید API (هم‌شکل با noapay_settings_kb)."""
+    api_key = db.get_setting("abangateway_api_key", "")
+    enabled = db.get_setting("abangateway_payment_enabled", "0") == "1" and bool(api_key)
+    rows = [
+        [InlineKeyboardButton(text=f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}", callback_data="noop")],
+        [InlineKeyboardButton(
+            text=f"💳 کلید API: {'✅ تنظیم شده' if api_key else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_abangateway_set_key",
+        )],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def plisio_settings_kb(db) -> InlineKeyboardMarkup:
+    """منوی تنظیمات Plisio: وضعیت و کلید API (هم‌شکل با noapay_settings_kb)."""
+    api_key = db.get_setting("plisio_api_key", "")
+    rows = [
+        [InlineKeyboardButton(
+            text=f"🪙 کلید API: {'✅ تنظیم شده' if api_key else '❌ تنظیم نشده'} (تغییر)",
+            callback_data="adm_plisio_set_key",
+        )],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def noapay_settings_kb(db) -> InlineKeyboardMarkup:
     """منوی تنظیمات درگاه NoapayBot: وضعیت، کلید API، رمز وب‌هوک، نرخ تبدیل."""
     enabled = db.get_setting("noapay_payment_enabled", "0") == "1"
