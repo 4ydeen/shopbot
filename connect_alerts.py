@@ -69,6 +69,23 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
     used_bytes = (info.get("upload") or 0) + (info.get("download") or 0)
     used_gb = used_bytes / (1024 ** 3)
 
+    if is_custom and row["start_on_first_use"] and used_bytes > 0:
+        try:
+            server = await _db(db.get_panel_server, row["panel_server_id"])
+            if server:
+                from panel_providers import get_provider
+                provider = get_provider(server)
+                panel_info = await provider.get_user_usage(row["username"])
+                panel_expiry = panel_info.get("expires_at")
+                if panel_expiry:
+                    if isinstance(panel_expiry, (int, float)):
+                        expiry_dt = datetime.fromtimestamp(float(panel_expiry), tz=timezone.utc).isoformat()
+                    else:
+                        expiry_dt = str(panel_expiry).replace("Z", "+00:00")
+                    await _db(db.sync_custom_config_expiry, config_id, expiry_dt)
+        except Exception:
+            logger.debug("همگام‌سازی انقضای On-hold برای config=%s ناموفق بود.", config_id, exc_info=True)
+
     connect_sent = False
     no_connect_sent = False
 
@@ -112,9 +129,43 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
     return connect_sent, no_connect_sent
 
 
+async def sync_onhold_expiries(db) -> int:
+    """حتی وقتی هشدار اتصال خاموش است، اولین مصرف را برای سرویس‌های On-hold
+    پیدا می‌کند و تاریخ واقعی انقضا را از پنل در DB ذخیره می‌کند."""
+    try:
+        rows = await _db(db.get_custom_configs_due_for_onhold_sync)
+    except Exception:
+        logger.exception("دریافت سرویس‌های On-hold برای sync ناموفق بود")
+        return 0
+    synced = 0
+    for row in rows:
+        try:
+            server = await _db(db.get_panel_server, row["panel_server_id"])
+            if not server:
+                continue
+            from panel_providers import get_provider
+            provider = get_provider(server)
+            usage = await provider.get_user_usage(row["username"])
+            if not ((usage.get("used_bytes") or 0) > 0):
+                continue
+            expiry = usage.get("expires_at")
+            if not expiry:
+                continue
+            if isinstance(expiry, (int, float)):
+                expiry = datetime.fromtimestamp(float(expiry), tz=timezone.utc).isoformat()
+            else:
+                expiry = str(expiry).replace("Z", "+00:00")
+            if await _db(db.sync_custom_config_expiry, row["config_id"], expiry):
+                synced += 1
+        except Exception:
+            logger.debug("sync On-hold برای config=%s ناموفق بود.", row["config_id"], exc_info=True)
+    return synced
+
+
 async def check_and_send_connect_alerts(bot, db) -> tuple:
     """یک بار همه‌ی سرویس‌های فعال (انبار کانفیگ + کانفیگ‌های پنلی) را بررسی
     می‌کند. خروجی: (تعداد هشدار اتصال ارسال‌شده, تعداد هشدار عدم‌اتصال ارسال‌شده)"""
+    await sync_onhold_expiries(db)
     settings = await _db(db.get_connect_alert_settings)
     if not (settings["connect_enabled"] or settings["no_connect_enabled"]):
         return 0, 0

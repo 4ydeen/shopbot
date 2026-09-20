@@ -19,6 +19,8 @@ import zipfile
 from datetime import datetime
 from typing import Optional
 
+import report_router
+
 logger = logging.getLogger(__name__)
 
 
@@ -304,6 +306,7 @@ async def backup_and_notify(bot, db, db_path: str, backup_dir: str, keep: int = 
             await bot.send_document(admin_id, FSInputFile(backup_path), caption=caption)
         except Exception:
             logger.warning("ارسال بکاپ به ادمین %s ناموفق بود.", admin_id)
+    await report_router.send_text(bot, db, "backup", caption + "\n📨 فایل برای مدیران ارسال شد.")
 
     # کپی جانبی: ارسال به یک چت تلگرام دوم (مثلاً ادمین/کانال روی سرور دوم)
     secondary_chat_id = (await _db(db.get_setting, "backup_secondary_chat_id", "") or "").strip()

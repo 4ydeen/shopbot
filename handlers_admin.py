@@ -9,6 +9,7 @@
 import os
 import re
 import secrets
+import hashlib
 import asyncio
 from datetime import date, datetime, timedelta
 import tempfile
@@ -40,6 +41,8 @@ import blupal_payment
 import noapay_payment
 import extra_gateway_admin
 import ai_support
+import bulk_gifts
+import report_router
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
@@ -50,13 +53,14 @@ from direct_panel_provision import provision_direct, ProvisionError as DirectPro
 from renewal_engine import execute_renewal, RenewalError
 from states import (
     AdminCreateDiscount,
+    AdminCreateWalletGift,
     AdminAddCategory,
     AdminAddProduct,
     AdminEditProduct,
     AdminAddConfigs,
     AdminAddTestConfigs,
     AdminAddTestPlan,
-    AdminEditTestPlan,
+    AdminEditTestPlan, AdminCleanupSettings,
     AdminForceJoin,
     AdminEditButton,
     AdminSetCard,
@@ -67,6 +71,8 @@ from states import (
     AdminC2CCard,
     AdminC2CSettings,
     AdminBroadcast,
+    AdminBulkGift,
+    AdminBulkPrice,
     AdminDeepLinkTools,
     AdminChannelButton,
     AdminAddAdmin,
@@ -76,12 +82,15 @@ from states import (
     AdminReplyFlow,
     AdminTicketReplyFlow,
     AdminCommissionResellerFlow,
+    AdminResellerMembership,
+    AdminSetPanelCapacity,
     AdminSetSupportContact,
     AdminAIFaqAdd,
     AdminSetGeminiKey,
     AdminSetGroqKey,
     AdminSetOpenRouterKey,
     AdminReferralPercent,
+    AdminReferralMultilevel,
     AdminReferralCommissionMax,
     AdminReferralFreeConfigThreshold,
     AdminReferralInviteBonusAmount,
@@ -101,10 +110,13 @@ from states import (
     AdminRestoreFullBackup,
     AdminBackupInterval,
     AdminBackupSecondaryChat,
+    AdminReportGroup,
     AdminBackupSftp,
     AdminFactoryReset,
     AdminAddPanelServer,
     AdminSetPanelTemplate,
+    AdminPanelServerTransfer,
+    AdminLocationTransferSettings,
     AdminSetPanelSubUrl,
     AdminAddPricingTier,
     AdminCustomConfigSettings,
@@ -640,6 +652,99 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await message.answer(
             f"✅ مقدار روی {int(text):,} تومان تنظیم شد.", reply_markup=kb.min_amount_settings_kb(db)
         )
+
+    # -------------------------------------------------------------------
+    # F12 — ویرایش گروهی قیمت محصولات
+    # -------------------------------------------------------------------
+    @router.callback_query(F.data == "adm_bulk_price")
+    async def cb_bulk_price(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        cats=await asyncio.to_thread(db.get_categories, active_only=False)
+        await state.clear(); await state.set_state(AdminBulkPrice.waiting_category)
+        await safe_edit(call, "💰 ویرایش گروهی قیمت\n\nابتدا محدوده‌ی دسته‌بندی را انتخاب کنید:", reply_markup=kb.admin_bulk_price_scope_kb(cats, []))
+        await call.answer()
+
+    @router.callback_query(AdminBulkPrice.waiting_category, F.data.startswith("adm_bprice_cat:"))
+    async def cb_bulk_price_category(call: CallbackQuery, state: FSMContext):
+        val=call.data.split(":",1)[1]
+        await state.update_data(category_id=None if val=="all" else int(val))
+        panels=await asyncio.to_thread(db.get_panel_servers, active_only=True)
+        await state.set_state(AdminBulkPrice.waiting_panel)
+        await safe_edit(call,"🖥 محدوده‌ی پنل را انتخاب کنید:",reply_markup=kb.admin_bulk_price_panel_kb(panels)); await call.answer()
+
+    @router.callback_query(AdminBulkPrice.waiting_panel, F.data.startswith("adm_bprice_panel:"))
+    async def cb_bulk_price_panel(call: CallbackQuery, state: FSMContext):
+        val=call.data.split(":",1)[1]
+        await state.update_data(panel_server_id=None if val=="all" else int(val))
+        await state.set_state(AdminBulkPrice.waiting_mode)
+        await safe_edit(call,"نوع تغییر قیمت را انتخاب کنید:",reply_markup=kb.admin_bulk_price_mode_kb()); await call.answer()
+
+    @router.callback_query(AdminBulkPrice.waiting_mode, F.data.startswith("adm_bprice_mode:"))
+    async def cb_bulk_price_mode(call: CallbackQuery, state: FSMContext):
+        mode=call.data.split(":",1)[1]
+        await state.update_data(mode=mode); await state.set_state(AdminBulkPrice.waiting_value)
+        prompt="درصد تغییر را وارد کنید. برای کاهش، عدد منفی بفرستید؛ مثال: 10 یا -10" if mode=="percent" else "مبلغ تغییر را به تومان وارد کنید. برای کاهش، عدد منفی بفرستید؛ مثال: 50000 یا -50000"
+        await safe_edit(call,prompt,reply_markup=kb.admin_back_kb("adm_bulk_price")); await call.answer()
+
+    @router.message(AdminBulkPrice.waiting_value)
+    async def msg_bulk_price_value(message: Message, state: FSMContext):
+        raw=(message.text or "").replace(",","").replace("٬","").strip()
+        try: value=float(raw)
+        except ValueError:
+            return await message.answer("❌ مقدار نامعتبر است.")
+        data=await state.get_data()
+        if data.get("mode")=="percent" and (value <= -100 or value > 1000):
+            return await message.answer("❌ درصد باید بیشتر از ۱۰۰- و حداکثر ۱۰۰۰ باشد.")
+        if data.get("mode")=="fixed" and abs(value)>10_000_000_000:
+            return await message.answer("❌ مبلغ تغییر بیش از حد مجاز است.")
+        await state.update_data(value=value); await state.set_state(AdminBulkPrice.waiting_rounding)
+        await message.answer("گرد کردن قیمت نهایی را انتخاب کنید:",reply_markup=kb.admin_bulk_price_rounding_kb())
+
+    @router.callback_query(AdminBulkPrice.waiting_rounding, F.data.startswith("adm_bprice_round:"))
+    async def cb_bulk_price_round(call: CallbackQuery, state: FSMContext):
+        rounding=int(call.data.split(":",1)[1]); data=await state.get_data(); data["rounding"]=rounding
+        changes=await asyncio.to_thread(db.preview_bulk_price_change,data.get("category_id"),data.get("panel_server_id"),data.get("mode"),data.get("value"),rounding)
+        if not changes:
+            await state.clear(); return await call.answer("محصولی با این فیلترها پیدا نشد.",show_alert=True)
+        invalid=[c for c in changes if int(c["new_price"]) <= 0]
+        if invalid:
+            await state.clear()
+            return await call.answer(f"❌ تغییر باعث قیمت صفر/منفی برای {len(invalid)} محصول می‌شود؛ عملیات انجام نشد.",show_alert=True)
+        # جلوگیری از قیمت‌های صفر/منفی در اجرای نهایی.
+        preview=changes[:20]
+        lines=[f"💰 پیش‌نمایش تغییر قیمت — {len(changes)} محصول",""]
+        for c in preview: lines.append(f"• {c['name']}: {c['old_price']:,} ← {c['new_price']:,} تومان")
+        if len(changes)>20: lines.append(f"… و {len(changes)-20} محصول دیگر")
+        lines.append("\nبا تأیید، تغییرات در یک تراکنش اعمال و snapshot قبلی برای Undo ذخیره می‌شود.")
+        await state.update_data(changes=changes); await state.set_state(AdminBulkPrice.waiting_confirm)
+        await safe_edit(call,"\n".join(lines),reply_markup=kb.admin_bulk_price_confirm_kb()); await call.answer()
+
+    @router.callback_query(AdminBulkPrice.waiting_confirm, F.data == "adm_bprice_confirm")
+    async def cb_bulk_price_confirm(call: CallbackQuery, state: FSMContext):
+        data=await state.get_data(); changes=data.get("changes") or []
+        log_id=await asyncio.to_thread(db.apply_bulk_price_change,changes,"products")
+        await asyncio.to_thread(db.log_admin_action,call.from_user.id,"bulk_price_change",f"F12 | {len(changes)} محصول | log={log_id}")
+        await state.clear(); await safe_edit(call,f"✅ قیمت {len(changes)} محصول با موفقیت تغییر کرد.\nشناسه تغییر: #{log_id}\nبرای بازگردانی از «Undo قیمت‌ها» استفاده کن.",reply_markup=kb.admin_back_kb("adm_products")); await call.answer()
+
+    @router.callback_query(AdminBulkPrice.waiting_confirm, F.data == "adm_bprice_cancel")
+    async def cb_bulk_price_cancel(call: CallbackQuery, state: FSMContext):
+        await state.clear(); await safe_edit(call,"❌ تغییر قیمت لغو شد.",reply_markup=kb.admin_back_kb("adm_products")); await call.answer()
+
+    @router.callback_query(F.data == "adm_bulk_price_undo")
+    async def cb_bulk_price_undo_menu(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        logs=await asyncio.to_thread(db.list_price_change_logs,10)
+        await safe_edit(call,"↩️ بازگردانی تغییرات قیمت:",reply_markup=kb.admin_bulk_price_undo_kb(logs)); await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_bprice_undo:"))
+    async def cb_bulk_price_undo(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        log_id=int(call.data.split(":",1)[1]); ok=await asyncio.to_thread(db.undo_bulk_price_change,log_id)
+        if not ok: return await call.answer("این تغییر قبلاً بازگردانی شده یا وجود ندارد.",show_alert=True)
+        await asyncio.to_thread(db.log_admin_action,call.from_user.id,"bulk_price_undo",f"F12 | log={log_id}")
+        await call.answer("✅ قیمت‌ها بازگردانی شدند.",show_alert=True)
+        logs=await asyncio.to_thread(db.list_price_change_logs,10)
+        await safe_edit(call,"↩️ بازگردانی تغییرات قیمت:",reply_markup=kb.admin_bulk_price_undo_kb(logs))
 
     # -------------------------------------------------------------------
     # مدیریت محصولات
@@ -1412,6 +1517,96 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await replace_admin_view(call, "🧪 مدیریت کانفیگ تست:", reply_markup=kb.admin_test_menu_kb(db, is_main_bot))
         await call.answer()
 
+    @router.callback_query(F.data == "adm_cleanup_settings")
+    async def cb_admin_cleanup_settings(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        text = (
+            "🧹 پاکسازی خودکار سرویس‌های منقضی\n\n"
+            "۰ یعنی خاموش. در حالت dry-run هیچ سرویس روی پنل تغییر یا حذف نمی‌شود و فقط نامزدها به ادمین گزارش می‌شوند.\n\n"
+            f"📦 مهلت سرویس: {await asyncio.to_thread(db.get_setting, 'expired_delete_days', '0')} روز\n"
+            f"🧪 مهلت تست: {await asyncio.to_thread(db.get_setting, 'test_delete_days', '0')} روز\n"
+            f"⚠️ هشدار: {await asyncio.to_thread(db.get_setting, 'expired_cleanup_warning_days', '3')} روز"
+        )
+        await replace_admin_view(call, text, reply_markup=kb.admin_cleanup_settings_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_cleanup_dryrun")
+    async def cb_admin_cleanup_dryrun(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        cur = await asyncio.to_thread(db.get_setting, "expired_cleanup_dry_run", "1")
+        await asyncio.to_thread(db.set_setting, "expired_cleanup_dry_run", "0" if cur == "1" else "1")
+        await safe_edit(call, "🧹 پاکسازی خودکار سرویس‌های منقضی:", reply_markup=kb.admin_cleanup_settings_kb(db))
+        await call.answer("حالت dry-run تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_cleanup_expired")
+    async def cb_admin_cleanup_expired(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminCleanupSettings.waiting_expired_days)
+        await safe_edit(call, "📦 تعداد روز مهلت حذف سرویس پس از انقضا را بفرستید. ۰ یعنی خاموش.", reply_markup=kb.admin_back_kb("adm_cleanup_settings"))
+        await call.answer()
+
+    @router.message(AdminCleanupSettings.waiting_expired_days)
+    async def msg_admin_cleanup_expired(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        try:
+            value = int(message.text.strip())
+            if value < 0 or value > 3650:
+                raise ValueError
+        except Exception:
+            return await message.answer("❌ عددی بین ۰ تا ۳۶۵۰ بفرستید.")
+        await asyncio.to_thread(db.set_setting, "expired_delete_days", str(value))
+        await state.clear()
+        await message.answer("✅ مهلت حذف سرویس ذخیره شد.", reply_markup=kb.admin_cleanup_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_cleanup_test")
+    async def cb_admin_cleanup_test(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminCleanupSettings.waiting_test_days)
+        await safe_edit(call, "🧪 تعداد روز مهلت حذف تست پس از انقضا را بفرستید. ۰ یعنی خاموش.", reply_markup=kb.admin_back_kb("adm_cleanup_settings"))
+        await call.answer()
+
+    @router.message(AdminCleanupSettings.waiting_test_days)
+    async def msg_admin_cleanup_test(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        try:
+            value = int(message.text.strip())
+            if value < 0 or value > 3650:
+                raise ValueError
+        except Exception:
+            return await message.answer("❌ عددی بین ۰ تا ۳۶۵۰ بفرستید.")
+        await asyncio.to_thread(db.set_setting, "test_delete_days", str(value))
+        await state.clear()
+        await message.answer("✅ مهلت حذف تست ذخیره شد.", reply_markup=kb.admin_cleanup_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_cleanup_warning")
+    async def cb_admin_cleanup_warning(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminCleanupSettings.waiting_warning_days)
+        await safe_edit(call, "⚠️ چند روز قبل از انقضا هشدار ارسال شود؟ عدد ۰ یعنی بدون هشدار.", reply_markup=kb.admin_back_kb("adm_cleanup_settings"))
+        await call.answer()
+
+    @router.message(AdminCleanupSettings.waiting_warning_days)
+    async def msg_admin_cleanup_warning(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        try:
+            value = int(message.text.strip())
+            if value < 0 or value > 365:
+                raise ValueError
+        except Exception:
+            return await message.answer("❌ عددی بین ۰ تا ۳۶۵ بفرستید.")
+        await asyncio.to_thread(db.set_setting, "expired_cleanup_warning_days", str(value))
+        await state.clear()
+        await message.answer("✅ مدت هشدار ذخیره شد.", reply_markup=kb.admin_cleanup_settings_kb(db))
+
     @router.callback_query(F.data == "adm_test_toggle")
     async def cb_admin_test_toggle(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
@@ -1831,6 +2026,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             duration_days = order["custom_duration_days"]
             if duration_days is None:
                 duration_days = (await asyncio.to_thread(db.get_custom_config_settings))["duration_days"]
+            if not await asyncio.to_thread(db.panel_has_capacity, server["id"], 1):
+                await asyncio.to_thread(db.release_order_claim, order_id)
+                cap = await asyncio.to_thread(db.get_panel_capacity_info, server["id"])
+                await call.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]}).", show_alert=True)
+                return
             try:
                 provider = get_provider(server)
                 result = await provider.create_user(
@@ -1934,7 +2134,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             call.from_user.id, "order_approve",
             f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» | مبلغ: {(order['final_price'] or (product['price'] if product else 0)):,}",
         ))
-        await check_and_notify_low_stock(bot.send_message, db, order["product_id"])
+        await check_and_notify_low_stock(bot.send_message, db, order["product_id"], bot_token=bot.token)
 
         reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, order["user_id"], order["final_price"] or product["price"]))
         if reward_info:
@@ -3084,10 +3284,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         ))
 
         try:
+            cashback_amount = await asyncio.to_thread(db.get_topup_cashback, topup_id)
+            cashback_line = f"🎁 کش‌بک شارژ: {cashback_amount:,} تومان\n" if cashback_amount else ""
             await bot.send_message(
                 topup["user_id"],
                 f"✅ شارژ کیف پول شما تایید شد!\n💰 مبلغ {topup['amount']:,} تومان اضافه شد.\n"
-                f"👛 موجودی فعلی کیف پول شما: {new_balance:,} تومان",
+                f"{cashback_line}👛 موجودی فعلی کیف پول شما: {new_balance:,} تومان",
             )
             await _notify_user_inline_menu(bot, topup["user_id"])
         except Exception:
@@ -3331,17 +3533,123 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         days = int(message.text.strip())
         expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat() if days > 0 else None
+        await state.update_data(disc_expires_at=expires_at)
+        await state.set_state(AdminCreateDiscount.waiting_per_user)
+        await message.answer("هر کاربر حداکثر چند بار می‌تواند از این کد استفاده کند؟ (برای نامحدود عدد 0 را بفرست)")
+
+    @router.message(AdminCreateDiscount.waiting_per_user)
+    async def process_disc_per_user(message: Message, state: FSMContext):
+        if not message.text.strip().isdigit():
+            await message.answer("لطفاً فقط عدد ارسال کنید (0 برای نامحدود).")
+            return
+        await state.update_data(disc_per_user_limit=int(message.text.strip()) or None)
+        await state.set_state(AdminCreateDiscount.waiting_first_only)
+        await message.answer("این کد برای چه خریدهایی معتبر باشد؟", reply_markup=kb.discount_first_purchase_kb())
+
+    @router.callback_query(AdminCreateDiscount.waiting_first_only, F.data.startswith("adm_disc_first:"))
+    async def process_disc_first_only(call: CallbackQuery, state: FSMContext):
+        await state.update_data(disc_first_only=call.data.split(":", 1)[1] == "1")
+        await state.set_state(AdminCreateDiscount.waiting_audience)
+        await safe_edit(call, "این کد برای چه کاربرانی قابل استفاده باشد؟", reply_markup=kb.discount_audience_kb())
+        await call.answer()
+
+    @router.callback_query(AdminCreateDiscount.waiting_audience, F.data.startswith("adm_disc_aud:"))
+    async def process_disc_audience(call: CallbackQuery, state: FSMContext):
+        audience = call.data.split(":", 1)[1]
+        if audience not in ("all", "normal", "reseller"):
+            audience = "all"
         data = await state.get_data()
         (await asyncio.to_thread(db.create_discount_code,
             data["disc_code"], percent=data.get("disc_percent"), fixed_amount=data.get("disc_fixed"),
-            max_uses=data.get("disc_maxuses", 0), expires_at=expires_at,
+            max_uses=data.get("disc_maxuses", 0), expires_at=data.get("disc_expires_at"),
             min_purchase=data.get("disc_min_purchase"), max_purchase=data.get("disc_max_purchase"),
             product_id=data.get("disc_product_id"), category_id=data.get("disc_category_id"),
+            per_user_limit=data.get("disc_per_user_limit"),
+            first_purchase_only=bool(data.get("disc_first_only")), audience=audience,
         ))
-        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "discount_add", f"کد «{data['disc_code']}»"))
+        (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_add", f"کد «{data['disc_code']}»"))
         await state.clear()
         codes = (await asyncio.to_thread(db.list_discount_codes))
-        await message.answer(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد.", reply_markup=kb.discount_codes_kb(codes))
+        await call.message.answer(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد.", reply_markup=kb.discount_codes_kb(codes))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_gift_menu")
+    async def cb_admin_gift_menu(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        codes = await asyncio.to_thread(db.list_wallet_gift_codes)
+        await safe_edit(call, "🎁 مدیریت گیفت‌کدهای شارژ کیف پول:", reply_markup=kb.wallet_gift_codes_kb(codes))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_gift_toggle:"))
+    async def cb_admin_gift_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        code_id = callback_id(call.data, "adm_gift_toggle")
+        if code_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True); return
+        await asyncio.to_thread(db.toggle_wallet_gift_code, code_id)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "wallet_gift_toggle", f"گیفت‌کد #{code_id}")
+        await safe_edit(call, "🎁 مدیریت گیفت‌کدهای شارژ کیف پول:", reply_markup=kb.wallet_gift_codes_kb(await asyncio.to_thread(db.list_wallet_gift_codes)))
+        await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data.startswith("adm_gift_del:"))
+    async def cb_admin_gift_del(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        code_id = callback_id(call.data, "adm_gift_del")
+        if code_id is None:
+            await call.answer("❌ درخواست نامعتبر است.", show_alert=True); return
+        await asyncio.to_thread(db.delete_wallet_gift_code, code_id)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "wallet_gift_delete", f"گیفت‌کد #{code_id}")
+        await safe_edit(call, "🎁 مدیریت گیفت‌کدهای شارژ کیف پول:", reply_markup=kb.wallet_gift_codes_kb(await asyncio.to_thread(db.list_wallet_gift_codes)))
+        await call.answer("گیفت‌کد حذف شد.")
+
+    @router.callback_query(F.data == "adm_gift_add")
+    async def cb_admin_gift_add(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminCreateWalletGift.waiting_amount)
+        await safe_edit(call, "مبلغ هر گیفت‌کد چقدر باشد؟ (تومان، فقط عدد)", reply_markup=kb.admin_back_kb("adm_gift_menu"))
+        await call.answer()
+
+    @router.message(AdminCreateWalletGift.waiting_amount)
+    async def process_gift_amount(message: Message, state: FSMContext):
+        text = (message.text or "").strip().replace(",", "")
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ مبلغ باید یک عدد بزرگ‌تر از صفر باشد."); return
+        await state.update_data(gift_amount=int(text))
+        await state.set_state(AdminCreateWalletGift.waiting_maxuses)
+        await message.answer("این گیفت‌کد چند بار قابل استفاده باشد؟ (حداقل 1)")
+
+    @router.message(AdminCreateWalletGift.waiting_maxuses)
+    async def process_gift_maxuses(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("❌ تعداد استفاده باید حداقل 1 باشد."); return
+        await state.update_data(gift_maxuses=int(text))
+        await state.set_state(AdminCreateWalletGift.waiting_expiry)
+        await message.answer("چند ساعت اعتبار داشته باشد؟ (0 یعنی بدون انقضا)")
+
+    @router.message(AdminCreateWalletGift.waiting_expiry)
+    async def process_gift_expiry(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("❌ فقط عدد ارسال کن. 0 یعنی بدون انقضا."); return
+        hours = int(text); data = await state.get_data()
+        import secrets
+        from datetime import datetime, timezone, timedelta
+        code = "GIFT-" + secrets.token_urlsafe(18).replace("-", "").replace("_", "").upper()
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat() if hours > 0 else None
+        try:
+            await asyncio.to_thread(db.create_wallet_gift_code, code, data["gift_amount"], data["gift_maxuses"], expires_at, message.from_user.id)
+        except Exception:
+            await state.clear(); logging.getLogger("handlers_admin").exception("خطا در ساخت گیفت‌کد توسط ادمین %s", message.from_user.id)
+            await message.answer("❌ ساخت گیفت‌کد ناموفق بود. دوباره تلاش کن."); return
+        await state.clear()
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "wallet_gift_add", f"گیفت‌کد شارژ {data['gift_amount']} تومان")
+        expiry_text = f"{hours} ساعت" if hours else "بدون انقضا"
+        await message.answer("✅ گیفت‌کد ساخته شد.\n\n" f"🎁 کد: <code>{code}</code>\n" f"💰 مبلغ: {data['gift_amount']:,} تومان\n" f"🔢 تعداد استفاده: {data['gift_maxuses']}\n" f"⏳ اعتبار: {expiry_text}\n\n⚠️ کد خام فقط همین‌جا نمایش داده می‌شود؛ آن را امن نگه دار.", parse_mode="HTML", reply_markup=kb.wallet_gift_codes_kb(await asyncio.to_thread(db.list_wallet_gift_codes)))
 
     # -------------------------------------------------------------------
     # تنظیمات زیرمجموعه‌گیری
@@ -3362,6 +3670,33 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "referral_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_referral_multilevel_toggle")
+    async def cb_admin_referral_multilevel_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        cur = await asyncio.to_thread(db.get_setting, "referral_multilevel_enabled", "0")
+        await asyncio.to_thread(db.set_setting, "referral_multilevel_enabled", "0" if cur == "1" else "1")
+        await safe_edit(call, "🤝 تنظیمات زیرمجموعه‌گیری:", reply_markup=kb.referral_settings_kb(db)); await call.answer("وضعیت رفرال چندمرحله‌ای تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_referral_multilevel_info")
+    async def cb_admin_referral_multilevel_info(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        en = await asyncio.to_thread(db.get_setting, "referral_multilevel_enabled", "0"); l2 = await asyncio.to_thread(db.get_setting, "referral_level2_percent", "3"); l3 = await asyncio.to_thread(db.get_setting, "referral_level3_percent", "1")
+        await call.answer(f"سطح ۲: {l2}% | سطح ۳: {l3}% | {'فعال' if en == '1' else 'غیرفعال'}", show_alert=True)
+
+    @router.callback_query(F.data == "adm_referral_multilevel_edit")
+    async def cb_admin_referral_multilevel_edit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id): return await deny_mid(call)
+        await state.set_state(AdminReferralMultilevel.waiting_value)
+        await safe_edit(call, "درصدها را به شکل «سطح۲،سطح۳» وارد کنید؛ مثال: 3,1", reply_markup=kb.admin_back_kb("adm_referral_settings")); await call.answer()
+
+    @router.message(AdminReferralMultilevel.waiting_value)
+    async def process_referral_multilevel(message: Message, state: FSMContext):
+        parts=[x.strip() for x in (message.text or "").replace("٪", "").split(",")]
+        if len(parts)!=2 or any(not x.isdigit() or not (0<=int(x)<=100) for x in parts):
+            await message.answer("فرمت صحیح: 3,1 و هر درصد باید بین ۰ تا ۱۰۰ باشد."); return
+        await asyncio.to_thread(db.set_setting,"referral_level2_percent",parts[0]); await asyncio.to_thread(db.set_setting,"referral_level3_percent",parts[1]); await state.clear()
+        await message.answer(f"✅ سطح ۲ = {parts[0]}٪، سطح ۳ = {parts[1]}٪", reply_markup=kb.referral_settings_kb(db))
 
     @router.callback_query(F.data == "adm_referral_percent_edit")
     async def cb_admin_referral_percent_edit(call: CallbackQuery, state: FSMContext):
@@ -3547,6 +3882,111 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await safe_edit(call, "🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
 
+    @router.callback_query(F.data == "adm_lottery_settings")
+    async def cb_admin_lottery_settings(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        s = await asyncio.to_thread(db.get_lottery_settings)
+        prize_label = "کیف پول" if s["prize_type"] == "wallet" else "کد تخفیف"
+        text = (
+            "🏆 مدیریت امتیاز و قرعه‌کشی شبانه\n\n"
+            f"امتیاز: {'🟢 فعال' if s['score_enabled'] else '🔴 غیرفعال'}\n"
+            f"قرعه‌کشی: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}\n"
+            f"شمول نماینده‌ها: {'🟢 بله' if s['agent_enabled'] else '🔴 خیر'}\n"
+            f"نوع جایزه: {prize_label}\n"
+            f"جوایز رتبه‌ها: {', '.join(map(str, s['prizes']))}\n"
+            f"گزارش: {s['report_chat_id'] or 'ادمین‌ها'}"
+        )
+        buttons = [
+            [InlineKeyboardButton(text="🔄 روشن/خاموش امتیاز", callback_data="adm_lottery_score_toggle")],
+            [InlineKeyboardButton(text="🎲 روشن/خاموش قرعه‌کشی", callback_data="adm_lottery_toggle")],
+            [InlineKeyboardButton(text="👥 شمول نماینده‌ها", callback_data="adm_lottery_agent_toggle")],
+            [InlineKeyboardButton(text="💰/🎟 تغییر نوع جایزه", callback_data="adm_lottery_prize_type")],
+            [InlineKeyboardButton(text="✏️ تغییر جوایز رتبه ۱،۲،۳", callback_data="adm_lottery_prizes")],
+            [InlineKeyboardButton(text="📣 تغییر آیدی گروه گزارش", callback_data="adm_lottery_report_chat")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_wheel_settings")],
+        ]
+        await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await call.answer()
+
+    async def _edit_lottery_view(call):
+        s = await asyncio.to_thread(db.get_lottery_settings)
+        prize_label = "کیف پول" if s["prize_type"] == "wallet" else "کد تخفیف"
+        text = (f"🏆 مدیریت امتیاز و قرعه‌کشی شبانه\n\nامتیاز: {'🟢 فعال' if s['score_enabled'] else '🔴 غیرفعال'}\n"
+                f"قرعه‌کشی: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}\n"
+                f"شمول نماینده‌ها: {'🟢 بله' if s['agent_enabled'] else '🔴 خیر'}\nنوع جایزه: {prize_label}\n"
+                f"جوایز: {', '.join(map(str, s['prizes']))}\nگزارش: {s['report_chat_id'] or 'ادمین‌ها'}")
+        buttons = [
+            [InlineKeyboardButton(text="🔄 روشن/خاموش امتیاز", callback_data="adm_lottery_score_toggle")],
+            [InlineKeyboardButton(text="🎲 روشن/خاموش قرعه‌کشی", callback_data="adm_lottery_toggle")],
+            [InlineKeyboardButton(text="👥 شمول نماینده‌ها", callback_data="adm_lottery_agent_toggle")],
+            [InlineKeyboardButton(text="💰/🎟 تغییر نوع جایزه", callback_data="adm_lottery_prize_type")],
+            [InlineKeyboardButton(text="✏️ تغییر جوایز رتبه ۱،۲،۳", callback_data="adm_lottery_prizes")],
+            [InlineKeyboardButton(text="📣 تغییر آیدی گروه گزارش", callback_data="adm_lottery_report_chat")],
+            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_wheel_settings")],
+        ]
+        await safe_edit(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+    @router.callback_query(F.data.in_({"adm_lottery_score_toggle", "adm_lottery_toggle", "adm_lottery_agent_toggle", "adm_lottery_prize_type"}))
+    async def cb_admin_lottery_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        mapping = {"adm_lottery_score_toggle": "score_enabled", "adm_lottery_toggle": "lottery_enabled", "adm_lottery_agent_toggle": "lottery_agent_enabled"}
+        if call.data == "adm_lottery_prize_type":
+            cur = await asyncio.to_thread(db.get_setting, "lottery_prize_type", "wallet")
+            await asyncio.to_thread(db.set_setting, "lottery_prize_type", "discount" if cur == "wallet" else "wallet")
+        else:
+            key = mapping[call.data]
+            cur = await asyncio.to_thread(db.get_setting, key, "1")
+            await asyncio.to_thread(db.set_setting, key, "0" if cur == "1" else "1")
+        await _edit_lottery_view(call)
+        await call.answer("تنظیم ذخیره شد.")
+
+    @router.callback_query(F.data == "adm_lottery_prizes")
+    async def cb_admin_lottery_prizes(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminWheelSettings.waiting_lottery_prizes)
+        await safe_edit(call, "سه جایزه رتبه‌های ۱، ۲ و ۳ را با کاما وارد کنید.\nکیف پول: تومان؛ کد تخفیف: درصد. مثال: 50000,30000,20000", reply_markup=kb.admin_back_kb("adm_lottery_settings"))
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_lottery_prizes)
+    async def process_lottery_prizes(message: Message, state: FSMContext):
+        parts = [p.strip() for p in (message.text or "").split(",")]
+        if len(parts) != 3 or not all(p.isdigit() and 0 < int(p) <= 1000000000 for p in parts):
+            await message.answer("لطفاً دقیقاً سه عدد مثبت وارد کنید؛ مثال: 50000,30000,20000")
+            return
+        if (await asyncio.to_thread(db.get_setting, "lottery_prize_type", "wallet")) == "discount" and any(int(p) > 100 for p in parts):
+            await message.answer("در حالت کد تخفیف، هر جایزه باید بین 1 تا 100 درصد باشد.")
+            return
+        await asyncio.to_thread(db.set_setting, "lottery_prizes", ",".join(parts))
+        await state.clear()
+        await message.answer("✅ جوایز قرعه‌کشی ذخیره شد.")
+
+    @router.callback_query(F.data == "adm_lottery_report_chat")
+    async def cb_admin_lottery_report_chat(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminWheelSettings.waiting_lottery_report_chat)
+        await safe_edit(call, "آیدی عددی گروه گزارش را بفرستید. برای بازگشت به ارسال گزارش برای ادمین‌ها، 0 بفرستید.", reply_markup=kb.admin_back_kb("adm_lottery_settings"))
+        await call.answer()
+
+    @router.message(AdminWheelSettings.waiting_lottery_report_chat)
+    async def process_lottery_report_chat(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if text == "0":
+            value = ""
+        else:
+            try:
+                int(text)
+                value = text
+            except ValueError:
+                await message.answer("آیدی گروه باید عددی باشد؛ مثال: -1001234567890")
+                return
+        await asyncio.to_thread(db.set_setting, "lottery_report_chat_id", value)
+        await state.clear()
+        await message.answer("✅ مقصد گزارش قرعه‌کشی ذخیره شد.")
+
     @router.callback_query(F.data == "adm_wheel_edit_percent")
     async def cb_admin_wheel_edit_percent(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -3675,6 +4115,61 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # -------------------------------------------------------------------
     # ساخت کانفیگ شخصی: تنظیمات کلی + سرورهای پنل + قیمت‌گذاری بر اساس بازه
     # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_location_transfer_settings")
+    async def cb_admin_location_transfer_settings(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        limit = await asyncio.to_thread(db.get_setting, "location_change_user_limit", "0")
+        free = await asyncio.to_thread(db.get_setting, "location_change_free_quota", "0")
+        await replace_admin_view(
+            call,
+            "📍 تنظیمات تغییر لوکیشن\n\n"
+            f"سقف انتقال هر کاربر: {'نامحدود' if limit == '0' else limit}\n"
+            f"سهمیه رایگان کلی: {'خاموش' if free == '0' else free + ' انتقال'}",
+            reply_markup=kb.location_transfer_settings_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_location_transfer_user_limit")
+    async def cb_admin_location_transfer_user_limit(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLocationTransferSettings.waiting_user_limit)
+        await safe_edit(call, "سقف تعداد انتقال برای هر کاربر را بفرست. ۰ = نامحدود.", reply_markup=kb.admin_back_kb("adm_location_transfer_settings"))
+        await call.answer()
+
+    @router.message(AdminLocationTransferSettings.waiting_user_limit)
+    async def process_admin_location_transfer_user_limit(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("فقط عدد نامنفی بفرست.")
+            return
+        value = int(text)
+        await asyncio.to_thread(db.set_setting, "location_change_user_limit", str(value))
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "location_transfer_user_limit", str(value))
+        await state.clear()
+        await message.answer("✅ سقف انتقال هر کاربر ذخیره شد.", reply_markup=kb.location_transfer_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_location_transfer_free_quota")
+    async def cb_admin_location_transfer_free_quota(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminLocationTransferSettings.waiting_free_quota)
+        await safe_edit(call, "سهمیه رایگان کلی چند انتقال باشد؟ ۰ = بدون سهمیه رایگان.", reply_markup=kb.admin_back_kb("adm_location_transfer_settings"))
+        await call.answer()
+
+    @router.message(AdminLocationTransferSettings.waiting_free_quota)
+    async def process_admin_location_transfer_free_quota(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("فقط عدد نامنفی بفرست.")
+            return
+        value = int(text)
+        await asyncio.to_thread(db.set_setting, "location_change_free_quota", str(value))
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "location_transfer_free_quota", str(value))
+        await state.clear()
+        await message.answer("✅ سهمیه رایگان کلی ذخیره شد.", reply_markup=kb.location_transfer_settings_kb(db))
 
     @router.callback_query(F.data == "adm_custom_config_settings")
     async def cb_admin_custom_config_settings(call: CallbackQuery):
@@ -4578,6 +5073,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
         template_status = panel_server_readiness_text(server)
+        cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
+        capacity_status = "♾️ ظرفیت: نامحدود" if not cap or cap["max_services"] is None else f"📊 ظرفیت: {cap["active_services"]}/{cap["max_services"]} ({cap["percent"]:.0f}٪)" + (" ⚠️ نزدیک سقف" if cap["near_limit"] else "")
         usage_status = (
             f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
             f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'}"
@@ -4588,10 +5085,107 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"آدرس: {server['api_url']}\n"
             f"وضعیت: {status}\n"
             f"{usage_status}\n"
+            f"{capacity_status}\n"
+            f"انقضا از اولین اتصال: {'🟢 فعال' if server['start_on_first_use'] else '⚪️ خاموش'}\n"
             f"{template_status}"
         )
         await replace_admin_view(call, text, reply_markup=kb.panel_server_view_kb(server))
         await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_panel_server_capacity:"))
+    async def cb_admin_panel_server_capacity(call: CallbackQuery, state: FSMContext):
+        if not full_access_bot:
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_capacity")
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
+        current = "نامحدود" if not cap or cap["max_services"] is None else str(cap["max_services"])
+        await state.update_data(panel_server_id=server_id)
+        await state.set_state(AdminSetPanelCapacity.waiting_limit)
+        await safe_edit(call, f"سقف فعلی: {current}\n\nسقف جدید تعداد سرویس فعال این پنل را بفرست.\nعدد مثبت = سقف مشخص\n۰ = نامحدود", reply_markup=kb.admin_back_kb(f"adm_panel_server_view:{server_id}"))
+        await call.answer()
+
+    @router.message(AdminSetPanelCapacity.waiting_limit)
+    async def process_panel_server_capacity(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text.isdigit():
+            await message.answer("لطفاً فقط یک عدد صحیح نامنفی بفرست.")
+            return
+        limit = int(text)
+        data = await state.get_data()
+        server_id = data.get("panel_server_id")
+        cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
+        if cap and limit > 0 and limit < cap["active_services"]:
+            await message.answer(f"⛔️ سقف نمی‌تواند کمتر از تعداد سرویس‌های فعال فعلی ({cap["active_services"]}) باشد.")
+            return
+        await asyncio.to_thread(db.update_panel_server, server_id, max_services=(limit or None), capacity_alert_sent=0)
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_capacity_set", f"سرور #{server_id} ← {limit or 'unlimited'}")
+        await state.clear()
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        await message.answer("✅ سقف ظرفیت ذخیره شد.", reply_markup=kb.panel_server_view_kb(server))
+
+    @router.callback_query(F.data.startswith("adm_panel_server_transfer:"))
+    async def cb_admin_panel_server_transfer(call: CallbackQuery, state: FSMContext):
+        if not full_access_bot:
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_transfer")
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        await state.update_data(panel_server_id=server_id)
+        await state.set_state(AdminPanelServerTransfer.waiting_price)
+        current = int(server["transfer_price"] or 0)
+        await safe_edit(call,
+            f"💰 هزینه انتقال به «{server['name']}»\n\n"
+            f"مقدار فعلی: {current:,} تومان\n"
+            "قیمت جدید را به تومان بفرست. ۰ یعنی رایگان.",
+            reply_markup=kb.admin_back_kb(f"adm_panel_server_view:{server_id}"),
+        )
+        await call.answer()
+
+    @router.message(AdminPanelServerTransfer.waiting_price)
+    async def process_admin_panel_server_transfer_price(message: Message, state: FSMContext):
+        text = (message.text or "").strip().replace(",", "")
+        if not text.isdigit():
+            await message.answer("لطفاً فقط عدد نامنفی وارد کن.")
+            return
+        price = int(text)
+        if price > 10_000_000_000:
+            await message.answer("حداکثر مبلغ ۱۰ میلیارد تومان است.")
+            return
+        data = await state.get_data()
+        server_id = data.get("panel_server_id")
+        await asyncio.to_thread(db.update_panel_server, server_id, transfer_price=price)
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_transfer_price", f"سرور #{server_id} ← {price}")
+        await state.clear()
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        await message.answer("✅ هزینه انتقال ذخیره شد.", reply_markup=kb.panel_server_view_kb(server))
+
+    @router.callback_query(F.data.startswith("adm_panel_server_transfer_target:"))
+    async def cb_admin_panel_server_transfer_target(call: CallbackQuery):
+        if not full_access_bot:
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_transfer_target")
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        if not server:
+            await call.answer("سرور یافت نشد.", show_alert=True)
+            return
+        new_val = 0 if server["allow_transfer_target"] else 1
+        await asyncio.to_thread(db.update_panel_server, server_id, allow_transfer_target=new_val)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "panel_transfer_target_toggle", f"سرور #{server_id} ← {new_val}")
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        await safe_edit(call, f"🖥 {server['name']}\nتنظیمات انتقال لوکیشن به‌روزرسانی شد.", reply_markup=kb.panel_server_view_kb(server))
+        await call.answer("تنظیم مقصد انتقال تغییر کرد.")
 
     @router.callback_query(F.data.startswith("adm_panel_server_template:"))
     async def cb_admin_panel_server_template(call: CallbackQuery, state: FSMContext):
@@ -4735,6 +5329,31 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reply_markup=kb.panel_server_view_kb(server),
         )
         await call.answer("تغییر کرد.")
+
+    @router.callback_query(F.data.startswith("adm_panel_server_onhold:"))
+    async def cb_admin_panel_server_onhold(call: CallbackQuery):
+        if not full_access_bot:
+            return await deny_reseller_panel_access(call)
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        server_id = callback_id(call.data, "adm_panel_server_onhold")
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        if not server:
+            return await call.answer("سرور یافت نشد.", show_alert=True)
+        supported = {"marzban", "pasarguard", "rebecca", "marzneshin", "3xui", "threexui"}
+        if server["panel_type"] not in supported:
+            return await call.answer("این نوع پنل از On-hold پشتیبانی نمی‌کند.", show_alert=True)
+        new_val = 0 if server["start_on_first_use"] else 1
+        await asyncio.to_thread(db.update_panel_server, server_id, start_on_first_use=new_val)
+        server = await asyncio.to_thread(db.get_panel_server, server_id)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "panel_server_onhold_toggle", f"سرور #{server_id} ← {new_val}")
+        await safe_edit(call,
+            f"🖥 {server['name']}\nنوع: {PANEL_TYPE_LABELS.get(server['panel_type'], server['panel_type'])}\n"
+            f"انقضا از اولین اتصال: {'🟢 فعال' if server['start_on_first_use'] else '⚪️ خاموش'}\n"
+            f"{panel_server_readiness_text(server)}",
+            reply_markup=kb.panel_server_view_kb(server),
+        )
+        await call.answer("تنظیم On-hold تغییر کرد.")
 
     @router.callback_query(F.data.startswith("adm_panel_server_toggle:"))
     async def cb_admin_panel_server_toggle(call: CallbackQuery):
@@ -5345,6 +5964,72 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await message.answer(
             f"✅ درصد تخفیف روی {text}٪ تنظیم شد.", reply_markup=kb.early_renewal_discount_kb(db)
         )
+
+    # -------------------------------------------------------------------
+    # هزینه و انقضای عضویت نمایندگی (F13)
+    # -------------------------------------------------------------------
+    if is_main_bot:
+
+        @router.callback_query(F.data == "adm_reseller_membership")
+        async def cb_admin_reseller_membership(call: CallbackQuery):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            tiers = await asyncio.to_thread(db.list_reseller_tiers, False)
+            await replace_admin_view(
+                call,
+                "⏳ <b>هزینه و انقضای نمایندگی</b>\n\n"
+                "هزینه از کیف پول اعتباری کاربر در زمان تایید/تمدید کسر می‌شود. "
+                "مدت ۰ یا خالی یعنی دائمی.",
+                reply_markup=kb.reseller_membership_tiers_kb(tiers),
+            )
+            await call.answer()
+
+        @router.callback_query(F.data.startswith("adm_rmem_edit:"))
+        async def cb_admin_reseller_membership_edit(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            code = call.data.split(":", 1)[1]
+            tier = await asyncio.to_thread(db.get_reseller_tier, code)
+            if not tier:
+                return await call.answer("سطح یافت نشد.", show_alert=True)
+            await state.update_data(reseller_membership_tier=code)
+            await state.set_state(AdminResellerMembership.waiting_fee_duration)
+            fee = int(tier["membership_fee_toman"] or 0)
+            days = tier["duration_days"] or 0
+            await call.message.answer(
+                f"⚙️ {tier['icon']} {tier['title']}\n\n"
+                f"مقدار فعلی: {fee:,} تومان / {days} روز\n\n"
+                "فرمت جدید را بفرستید: <code>هزینه روز</code>\n"
+                "مثال: <code>250000 30</code>\n"
+                "برای عضویت دائمی: روز را <code>0</code> بزنید."
+            )
+            await call.answer()
+
+        @router.message(AdminResellerMembership.waiting_fee_duration)
+        async def msg_admin_reseller_membership(message: Message, state: FSMContext):
+            if not senior_admin_only(message.from_user.id):
+                return
+            parts = (message.text or "").replace(",", "").split()
+            if len(parts) != 2:
+                await message.answer("فرمت صحیح: <code>هزینه روز</code>؛ مثال <code>250000 30</code>")
+                return
+            try:
+                fee, days = int(parts[0]), int(parts[1])
+                if fee < 0 or days < 0 or fee > 10_000_000_000 or days > 3650:
+                    raise ValueError
+            except ValueError:
+                await message.answer("هزینه باید ۰ تا ۱۰ میلیارد و مدت باید ۰ تا ۳۶۵۰ روز باشد.")
+                return
+            data = await state.get_data()
+            code = data.get("reseller_membership_tier")
+            ok = await asyncio.to_thread(db.update_reseller_tier, code, membership_fee_toman=fee, duration_days=(days or None))
+            await state.clear()
+            if not ok:
+                await message.answer("❌ سطح نمایندگی پیدا نشد.")
+                return
+            tier = await asyncio.to_thread(db.get_reseller_tier, code)
+            await asyncio.to_thread(db.log_admin_action, message.from_user.id, "reseller_membership_update", f"سطح {code} | هزینه {fee} | مدت {days}")
+            await message.answer(f"✅ تنظیم شد: {tier['icon']} {tier['title']} — {fee:,} تومان / {'دائمی' if not days else f'{days} روز'}")
 
     # -------------------------------------------------------------------
     # مدیریت بات‌های نمایندگی (فقط در بات اصلی)
@@ -6042,20 +6727,33 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             request_id = int(call.data.split(":")[1])
             req = (await asyncio.to_thread(db.get_tier_request, request_id))
             if approve:
-                done = req is not None and (await asyncio.to_thread(db.approve_tier_request, request_id, call.from_user.id))
+                result = await asyncio.to_thread(db.approve_tier_request, request_id, call.from_user.id) if req else {"ok": False, "reason": "invalid"}
+                if not result.get("ok"):
+                    if result.get("reason") == "insufficient_balance":
+                        await call.answer(f"موجودی کافی نیست. هزینه: {int(result.get('fee', 0)):,} تومان | موجودی: {int(result.get('balance', 0)):,}", show_alert=True)
+                    else:
+                        await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                    return
             else:
                 done = req is not None and (await asyncio.to_thread(db.reject_tier_request, request_id, call.from_user.id))
-            if not done:
-                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
-                return
+                if not done:
+                    await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                    return
             tier = (await asyncio.to_thread(db.get_reseller_tier, req["tier_code"]))
             label = f"{tier['icon']} {tier['title']}" if tier else req["tier_code"]
             (await asyncio.to_thread(
                 db.log_admin_action, call.from_user.id, "tier_request_approve" if approve else "tier_request_reject",
                 f"درخواست #{request_id} | کاربر {req['user_id']} | سطح {req['tier_code']}",
             ))
+            membership = await asyncio.to_thread(db.get_reseller_membership, req["user_id"]) if approve else {}
+            expiry_line = ""
+            if approve:
+                fee = int(membership.get("membership_fee_toman") or 0)
+                expires = membership.get("reseller_expires_at")
+                expiry_line = f"\n💳 هزینه: {fee:,} تومان" + (f"\n⏳ انقضا: {expires}" if expires else "\n⏳ مدت: دائمی")
             text = (
-                f"✅ درخواست شما برای سطح {label} تایید شد. تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود."
+                f"✅ درخواست شما برای سطح {label} تایید شد.{expiry_line}\n\n"
+                "تخفیف‌ها هنگام «خرید کانفیگ» خودکار اعمال می‌شود."
                 if approve else f"❌ متاسفانه درخواست شما برای سطح {label} رد شد."
             )
             try:
@@ -7940,10 +8638,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         messages = (await asyncio.to_thread(db.get_ticket_messages, ticket_id))
         user = (await asyncio.to_thread(db.get_user, ticket["user_id"]))
         user_label = f"@{user['username']}" if user and user["username"] else str(ticket["user_id"])
+        department = await asyncio.to_thread(db.get_ticket_department, ticket['department_id']) if ticket['department_id'] else None
         lines = [
             f"🎫 تیکت #{ticket['id']} — {kb.TICKET_STATUS_LABELS.get(ticket['status'], ticket['status'])}",
             f"👤 کاربر: {user_label} ({ticket['user_id']})",
             f"📌 موضوع: {ticket['subject']}",
+            f"🧩 بخش: {department['name'] if department else 'عمومی'}",
             "",
         ]
         for m in messages:
@@ -8066,6 +8766,44 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
         await safe_edit(call, f"✅ تیکت #{ticket_id} بسته شد.", reply_markup=kb.admin_back_kb("adm_tickets_menu"))
         await call.answer()
+
+    @router.callback_query(F.data == "adm_ticket_departments")
+    async def cb_admin_ticket_departments(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک می‌تواند دپارتمان‌ها را تنظیم کند.", show_alert=True)
+        departments = await asyncio.to_thread(db.list_ticket_departments, False)
+        await replace_admin_view(call, "🧩 دپارتمان‌های پشتیبانی\n\nبرای تعیین ادمین‌های هر بخش، دپارتمان را انتخاب کنید:", reply_markup=kb.admin_ticket_departments_kb(departments))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ticket_dept:"))
+    async def cb_admin_ticket_department(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک.", show_alert=True)
+        raw = call.data.split(":", 1)[1]
+        if not raw.isdigit():
+            return await call.answer("❌ نامعتبر.", show_alert=True)
+        dep = await asyncio.to_thread(db.get_ticket_department, int(raw))
+        if not dep:
+            return await call.answer("❌ دپارتمان یافت نشد.", show_alert=True)
+        admins = await asyncio.to_thread(db.list_admins_with_roles)
+        assigned = set(await asyncio.to_thread(db.list_ticket_department_admins, dep["id"]))
+        await safe_edit(call, f"🧩 دپارتمان «{dep['name']}»\nادمین‌های مجاز برای دریافت تیکت:", reply_markup=kb.admin_ticket_department_admins_kb(dep, admins, assigned))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ticket_dept_admin:"))
+    async def cb_admin_ticket_department_admin(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await call.answer("⛔️ فقط مالک.", show_alert=True)
+        parts = call.data.split(":")
+        if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+            return await call.answer("❌ نامعتبر.", show_alert=True)
+        dep_id, admin_id = int(parts[1]), int(parts[2])
+        await asyncio.to_thread(db.toggle_ticket_department_admin, dep_id, admin_id)
+        dep = await asyncio.to_thread(db.get_ticket_department, dep_id)
+        admins = await asyncio.to_thread(db.list_admins_with_roles)
+        assigned = set(await asyncio.to_thread(db.list_ticket_department_admins, dep_id))
+        await safe_edit(call, f"🧩 دپارتمان «{dep['name']}»\nادمین‌های مجاز برای دریافت تیکت:", reply_markup=kb.admin_ticket_department_admins_kb(dep, admins, assigned))
+        await call.answer("ذخیره شد")
 
     # -------------------------------------------------------------------
     # تنظیم آیدی مدیر برای چت مستقیم (بخش ارتباط با پشتیبانی)
@@ -8490,6 +9228,95 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         start_date = (date.today() - timedelta(days=days - 1)).isoformat()
         stats = await asyncio.to_thread(db.get_advanced_stats, start_date, end_date)
         await replace_admin_view(call, _fmt_advanced_stats_report(stats), reply_markup=kb.admin_advanced_stats_kb(days))
+        await call.answer()
+
+    # -------------------------------------------------------------------
+    # گروه گزارش تاپیک‌دار
+    # -------------------------------------------------------------------
+
+    def _report_group_text() -> str:
+        chat_id = report_router.get_chat_id(db)
+        status = f"فعال (آیدی: {chat_id})" if chat_id is not None else "غیرفعال؛ گزارش‌ها به پیام خصوصی مدیران می‌روند"
+        return (
+            "📣 گروه گزارش تاپیک‌دار\n\n"
+            f"وضعیت: {status}\n\n"
+            "مراحل راه‌اندازی:\n"
+            "1. یک سوپرگروه بساز و در تنظیمات گروه، حالت «Topics» را روشن کن.\n"
+            "2. بات را به گروه اضافه کن، ادمین کن و دسترسی «Manage Topics» بده.\n"
+            "3. دکمه‌ی «تنظیم یا تغییر گروه» را بزن و آیدی عددی گروه را بفرست (مثل -100123456789).\n\n"
+            "⚠️ فقط مدیران را عضو گروه کن؛ رسیدهای پرداخت کارت‌به‌کارت همچنان به پیام خصوصی مدیران می‌روند."
+        )
+
+    @router.callback_query(F.data == "adm_report_group")
+    async def cb_report_group_menu(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        await replace_admin_view(
+            call, _report_group_text(),
+            reply_markup=kb.admin_report_group_kb(report_router.get_chat_id(db) is not None),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_report_set")
+    async def cb_report_group_set(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminReportGroup.waiting_chat_id)
+        await safe_edit(
+            call,
+            "آیدی عددی سوپرگروه فوروم را بفرست (مثل -100123456789):",
+            reply_markup=kb.admin_back_kb("adm_report_group"),
+        )
+        await call.answer()
+
+    async def _apply_report_group(bot: Bot, chat_id: int) -> str:
+        try:
+            created = await report_router.setup_group(bot, db, chat_id)
+        except report_router.SetupError as e:
+            return f"❌ {e}"
+        return f"✅ گروه گزارش فعال شد ({created} تاپیک جدید ساخته شد)."
+
+    @router.message(AdminReportGroup.waiting_chat_id)
+    async def process_report_group_id(message: Message, state: FSMContext, bot: Bot):
+        if not owner_only(message.from_user.id):
+            return
+        try:
+            chat_id = int((message.text or "").strip())
+        except ValueError:
+            await message.answer("❌ آیدی باید یک عدد صحیح باشد (گروه‌ها منفی هستند، مثل -100123456789).")
+            return
+        await state.clear()
+        result = await _apply_report_group(bot, chat_id)
+        if result.startswith("✅"):
+            await asyncio.to_thread(db.log_admin_action, message.from_user.id, "report_group_set", f"گروه گزارش: {chat_id}")
+        await message.answer(result, reply_markup=kb.admin_report_group_kb(report_router.get_chat_id(db) is not None))
+
+    @router.callback_query(F.data == "adm_report_recheck")
+    async def cb_report_group_recheck(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is None:
+            await call.answer("گروه گزارشی تنظیم نشده است.", show_alert=True)
+            return
+        result = await _apply_report_group(bot, chat_id)
+        await safe_edit(
+            call, result + "\n\n" + _report_group_text(),
+            reply_markup=kb.admin_report_group_kb(report_router.get_chat_id(db) is not None),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_report_clear")
+    async def cb_report_group_clear(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await report_router.clear_group(db)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "report_group_clear", "حذف گروه گزارش")
+        await safe_edit(
+            call, "🚫 گروه گزارش حذف شد؛ گزارش‌ها دوباره به پیام خصوصی مدیران ارسال می‌شوند.",
+            reply_markup=kb.admin_report_group_kb(False),
+        )
         await call.answer()
 
     # -------------------------------------------------------------------
@@ -9205,8 +10032,98 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.answer()
 
     # -------------------------------------------------------------------
+    # هدیه‌ی گروهی حجم/زمان
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_bulk_gift")
+    async def cb_bulk_gift(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminBulkGift.waiting_params)
+        await safe_edit(
+            call,
+            "🎁 <b>هدیه‌ی گروهی</b>\n\n"
+            "فرمت: <code>panel=ID volume=5 days=0</code> یا <code>users=123,456 volume=0 days=7</code>\n"
+            "می‌توانی panel و users را هم‌زمان بدهی. حداقل یکی از volume/days باید بیشتر از صفر باشد.\n\n"
+            "مثال: <code>panel=3 volume=10 days=0</code>",
+            reply_markup=kb.admin_back_kb("adm_cat:management"),
+        )
+        await call.answer()
+
+    @router.message(AdminBulkGift.waiting_params)
+    async def msg_bulk_gift(message: Message, state: FSMContext):
+        if not full_admin_only(message.from_user.id):
+            return
+        text = (message.text or "").strip()
+        vals = {}
+        for token in text.split():
+            if "=" not in token:
+                continue
+            k,v = token.split("=",1)
+            vals[k.lower().strip()] = v.strip()
+        try:
+            panel_id = int(vals["panel"]) if vals.get("panel") else None
+            users = [int(x) for x in vals.get("users", "").split(",") if x.strip()]
+            volume = float(vals.get("volume", "0"))
+            days = int(vals.get("days", "0"))
+            if volume < 0 or days < 0 or (volume <= 0 and days <= 0):
+                raise ValueError
+            if panel_id is None and not users:
+                raise ValueError
+            job = await asyncio.to_thread(
+                bulk_gifts.start_job, db, admin_id=message.from_user.id,
+                panel_server_id=panel_id, user_ids=users, volume_gb=volume, days=days,
+            )
+        except Exception as exc:
+            await message.answer(f"⛔️ ایجاد عملیات ناموفق بود: {exc}\nفرمت نمونه: <code>panel=3 volume=5 days=0</code>")
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ عملیات هدیه‌ی گروهی #{job['id']} ساخته شد.\n"
+            f"تعداد سرویس: {job['total']}\n"
+            f"حجم: {volume:g} گیگ | زمان: {days} روز\n\n"
+            "پردازش با صف پایدار انجام می‌شود و بعد از ری‌استارت ادامه پیدا می‌کند."
+        )
+
+    @router.callback_query(F.data.startswith("adm_bulk_gift_cancel:"))
+    async def cb_bulk_gift_cancel(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        try: job_id=int(call.data.split(":",1)[1])
+        except ValueError: return await call.answer("شناسه نامعتبر", show_alert=True)
+        ok=await asyncio.to_thread(db.cancel_bulk_gift_job, job_id)
+        await call.answer("عملیات لغو شد." if ok else "عملیات قابل لغو نیست.", show_alert=True)
+
+    # -------------------------------------------------------------------
     # دستور متنی برای دسترسی سریع
     # -------------------------------------------------------------------
+
+    @router.message(Command("token2"))
+    async def cmd_token2(message: Message, state: FSMContext):
+        """صدور PAT برای API مستند؛ توکن قبلی همان ادمین فوراً باطل می‌شود."""
+        if not admin_only(message.from_user.id):
+            return
+        await state.clear()
+        raw = "shp_" + secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        prefix = raw[:12]
+        await asyncio.to_thread(
+            db.create_mobile_token,
+            message.from_user.id,
+            "API /token2",
+            token_hash,
+            prefix,
+            "read,users,orders",
+            True,
+        )
+        await message.answer(
+            "🔐 توکن API ساخته شد.\n\n"
+            f"<code>{raw}</code>\n\n"
+            "⚠️ این توکن فقط یک‌بار نمایش داده می‌شود و با صدور توکن جدید، توکن قبلی باطل می‌شود.\n"
+            "سطح دسترسی: read, users, orders\n\n"
+            "📖 مستندات: /api/index.html",
+            parse_mode=ParseMode.HTML,
+        )
 
     @router.message(Command("admin"))
     async def cmd_admin(message: Message, state: FSMContext):

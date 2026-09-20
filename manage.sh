@@ -147,6 +147,8 @@ MSG_EN[lbl_miniapp]="Mini App"
 MSG_FA[lbl_miniapp]="مینی‌اپ"
 MSG_EN[lbl_panel]="Admin Panel"
 MSG_FA[lbl_panel]="پنل مدیریت"
+MSG_EN[lbl_api]="Integration API"
+MSG_FA[lbl_api]="API یکپارچه‌سازی"
 MSG_EN[subtitle]="BOT MANAGEMENT ENGINE"
 MSG_FA[subtitle]="موتور مدیریت بات"
 
@@ -162,6 +164,8 @@ MSG_EN[sec_panel]="ADMIN PANEL"
 MSG_FA[sec_panel]="پنل مدیریت وب"
 MSG_EN[sec_domains]="DOMAINS & PROXY"
 MSG_FA[sec_domains]="دامنه و پروکسی"
+MSG_EN[sec_api]="INTEGRATION API"
+MSG_FA[sec_api]="API یکپارچه‌سازی"
 MSG_EN[sec_advanced]="ADVANCED"
 MSG_FA[sec_advanced]="پیشرفته"
 MSG_EN[pause_prompt]="Press Enter to return to the menu..."
@@ -393,6 +397,32 @@ MSG_FA[panel_restarted_hint]="✅ سرویس ری‌استارت شد. حالا 
 MSG_EN[panel_not_installed_vapid_hint]="Admin panel not installed yet. These keys will be used automatically once installed (option 13)."
 MSG_FA[panel_not_installed_vapid_hint]="پنل مدیریت هنوز نصب نشده. بعد از نصب (گزینه ۱۳) این کلیدها خودکار استفاده می‌شوند."
 
+# setup_api / update_api / remove_api
+MSG_EN[api_dir_missing]="⛔️ api folder not found. Update the project code first (option 2)."
+MSG_FA[api_dir_missing]="⛔️ پوشه api پیدا نشد. اول باید کد پروژه را آپدیت کنی (گزینه ۲)."
+MSG_EN[prompt_domain_api]="Enter a dedicated domain pointing to this server's IP (e.g. api.example.com): "
+MSG_FA[prompt_domain_api]="یک دامنه‌ی جدا که به IP همین سرور اشاره می‌کند را وارد کن (مثلاً api.example.com): "
+MSG_EN[creating_api_service]="⚙️ Creating the systemd service for the integration API..."
+MSG_FA[creating_api_service]="⚙️ ساخت سرویس systemd برای API یکپارچه‌سازی..."
+MSG_EN[api_ready]="✅ Integration API is ready: %s"
+MSG_FA[api_ready]="✅ API یکپارچه‌سازی آماده است: %s"
+MSG_EN[api_token_hint]="Create a token by sending /token2 to the admin bot. Docs: /api/index.html and /api/docs. Access log: logs/api_access.log"
+MSG_FA[api_token_hint]="برای ساخت توکن در بات ادمین دستور /token2 را بفرست. مستندات: /api/index.html و /api/docs. لاگ دسترسی: logs/api_access.log"
+MSG_EN[api_not_installed]="⛔️ Integration API not installed yet. Run option 24 (setup integration API) first."
+MSG_FA[api_not_installed]="⛔️ API یکپارچه‌سازی هنوز نصب نشده. اول گزینه ۲۴ (نصب/تنظیم API یکپارچه‌سازی) را بزن."
+MSG_EN[restarting_api_service]="♻️ Restarting integration API service"
+MSG_FA[restarting_api_service]="♻️ ری‌استارت سرویس API یکپارچه‌سازی"
+MSG_EN[update_api_header]="Updating Integration API"
+MSG_FA[update_api_header]="آپدیت API یکپارچه‌سازی"
+MSG_EN[api_update_done]="✅ Integration API updated."
+MSG_FA[api_update_done]="✅ آپدیت API یکپارچه‌سازی انجام شد."
+MSG_EN[remove_api_warn]="⚠️ This will remove the integration API service and its nginx config (the SSL certificate is kept; API tokens in the database are untouched)."
+MSG_FA[remove_api_warn]="⚠️ این کار سرویس و کانفیگ nginx API یکپارچه‌سازی را حذف می‌کند (گواهی SSL نگه داشته می‌شود؛ توکن‌ها در دیتابیس دست‌نخورده می‌مانند)."
+MSG_EN[prompt_domain_used_api]="What domain did you use for the integration API? (to remove its nginx config): "
+MSG_FA[prompt_domain_used_api]="دامنه‌ای که برای API یکپارچه‌سازی استفاده کرده بودی چه بود؟ (برای حذف کانفیگ nginx): "
+MSG_EN[api_removed]="✅ Integration API removed."
+MSG_FA[api_removed]="✅ API یکپارچه‌سازی حذف شد."
+
 # setup_panel_proxy / remove_panel_proxy
 MSG_EN[prompt_domain_panel_proxy]="Domain for the VPN panel (e.g. panel.example.com): "
 MSG_FA[prompt_domain_panel_proxy]="دامنه‌ای که برای پنل VPN می‌خواهی (مثلا panel.example.com): "
@@ -499,6 +529,12 @@ MSG_EN[menu_21]="Restore backup (new server migration wizard)"
 MSG_FA[menu_21]="بازیابی بکاپ (ویزارد انتقال به سرور جدید)"
 MSG_EN[menu_22]="Bot update mode (Polling / Webhook)"
 MSG_FA[menu_22]="حالت دریافت آپدیت بات (Polling / Webhook)"
+MSG_EN[menu_24]="Setup integration API (domain + SSL + service)"
+MSG_FA[menu_24]="نصب/تنظیم API یکپارچه‌سازی (دامنه + SSL + سرویس)"
+MSG_EN[menu_25]="Remove integration API"
+MSG_FA[menu_25]="حذف API یکپارچه‌سازی"
+MSG_EN[menu_26]="Update integration API"
+MSG_FA[menu_26]="آپدیت API یکپارچه‌سازی"
 MSG_EN[menu_23]="Change admin panel username/password"
 MSG_FA[menu_23]="تغییر نام کاربری و رمز عبور پنل مدیریت وب"
 MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
@@ -601,6 +637,7 @@ print_status_line() {
     status_row lbl_bot "$bot_state"
     status_row lbl_miniapp "$(unit_state "${SERVICE_NAME}-miniapp")"
     status_row lbl_panel "$(unit_state "${SERVICE_NAME}-adminpanel")"
+    status_row lbl_api "$(unit_state "${SERVICE_NAME}-api")"
     echo ""
 }
 
@@ -737,13 +774,16 @@ update_bot() {
 
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
-    local has_miniapp=0 has_panel=0
+    API_SERVICE="${SERVICE_NAME}-api"
+    local has_miniapp=0 has_panel=0 has_api=0
     systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service" && has_miniapp=1
     systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service" && has_panel=1
+    systemctl list-units --full -all | grep -q "${API_SERVICE}.service" && has_api=1
 
     local total=3
     [ "$has_miniapp" = "1" ] && total=$((total+1))
     [ "$has_panel" = "1" ] && total=$((total+1))
+    [ "$has_api" = "1" ] && total=$((total+1))
     local step=0 failed=0
 
     section_header "$(t update_bot_header)"
@@ -765,6 +805,11 @@ update_bot() {
     if [ "$has_panel" = "1" ]; then
         step=$((step+1))
         run_step "$step" "$total" "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
+    fi
+
+    if [ "$has_api" = "1" ]; then
+        step=$((step+1))
+        run_step "$step" "$total" "$(t restarting_api_service)" bash -c "sudo systemctl restart '$API_SERVICE' && sleep 2" || failed=1
     fi
 
     draw_rule
@@ -867,10 +912,10 @@ show_stats() {
     source venv/bin/activate
     SHOPVPN_STATS_LANG="$APP_LANG" python3 - <<'PYEOF'
 import os
-import database as db
+from database import Database
 
 lang = os.environ.get("SHOPVPN_STATS_LANG", "en")
-s = db.get_stats()
+s = Database("bot_database.db").get_stats()
 
 if lang == "fa":
     print(f"\n👥 تعداد کاربران: {s['users']}")
@@ -1842,6 +1887,144 @@ except Exception as e:
 }
 
 # ---------------------------------------------------------------------------
+# Action: integration API setup / update / removal (own domain + SSL + service)
+# عملیات: نصب / آپدیت / حذف API یکپارچه‌سازی (دامنه‌ی جدا + SSL + سرویس)
+# ---------------------------------------------------------------------------
+setup_api() {
+    if [ ! -d "$INSTALL_DIR/api" ]; then
+        echo -e "${RED}$(t api_dir_missing)${RESET}"
+        return
+    fi
+
+    read -rp "$(t prompt_domain_api)" DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        echo -e "${RED}$(t domain_empty)${RESET}"
+        return
+    fi
+
+    echo -e "${CYAN}$(t checking_dns)${RESET}"
+    SERVER_IP=$(curl -fsSL ifconfig.me || echo "")
+    DOMAIN_IP=$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)
+    if [ -n "$SERVER_IP" ] && [ -n "$DOMAIN_IP" ] && [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
+        echo -e "${YELLOW}$(t dns_mismatch_warn "$SERVER_IP" "$DOMAIN_IP")${RESET}"
+        read -rp "$(t continue_prompt)" CONT
+        [ "$CONT" != "yes" ] && return
+    fi
+
+    echo -e "${CYAN}$(t installing_nginx)${RESET}"
+    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
+    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 \
+        apt-get install -y -qq nginx certbot python3-certbot-nginx > /dev/null
+    tune_nginx_for_scale
+
+    echo -e "${CYAN}$(t installing_miniapp_pkgs)${RESET}"
+    cd "$INSTALL_DIR"
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+    deactivate
+
+    echo -e "${CYAN}$(t creating_api_service)${RESET}"
+    API_SERVICE="${SERVICE_NAME}-api"
+    sudo bash -c "cat > /etc/systemd/system/${API_SERVICE}.service" <<EOF
+[Unit]
+Description=ShopVPN Integration API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8003 --workers 1
+Restart=always
+RestartSec=5
+User=$(whoami)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$API_SERVICE" > /dev/null 2>&1
+    sudo systemctl restart "$API_SERVICE"
+
+    echo -e "${CYAN}$(t configuring_nginx "$DOMAIN")${RESET}"
+    sudo bash -c "cat > /etc/nginx/sites-available/${DOMAIN}.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:8003;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    sudo ln -sf "/etc/nginx/sites-available/${DOMAIN}.conf" "/etc/nginx/sites-enabled/${DOMAIN}.conf"
+    if ! sudo nginx -t > /dev/null 2>&1; then
+        echo -e "${RED}$(t nginx_error "$(sudo nginx -t 2>&1)")${RESET}"
+        return
+    fi
+    sudo systemctl reload nginx
+
+    echo -e "${CYAN}$(t getting_ssl)${RESET}"
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos \
+        --register-unsafely-without-email --redirect
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}$(t ssl_failed)${RESET}"
+        return
+    fi
+
+    echo -e "${GREEN}${BOLD}$(t api_ready "https://$DOMAIN")${RESET}"
+    echo -e "${GREEN}$(t api_token_hint)${RESET}"
+}
+
+update_api() {
+    API_SERVICE="${SERVICE_NAME}-api"
+    if ! systemctl list-units --full -all | grep -q "${API_SERVICE}.service"; then
+        echo -e "${RED}$(t api_not_installed)${RESET}"
+        return
+    fi
+    if [ ! -f "$INSTALL_DIR/main.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
+        return
+    fi
+    cd "$INSTALL_DIR"
+
+    local failed=0
+    section_header "$(t update_api_header)"
+    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step 3 3 "$(t restarting_api_service)" bash -c "sudo systemctl restart '$API_SERVICE' && sleep 2" || failed=1
+
+    draw_rule
+    if [ "$failed" = "0" ] && systemctl is-active --quiet "$API_SERVICE"; then
+        echo -e "  ${GREEN}${BOLD}$(t api_update_done)${RESET}"
+    else
+        echo -e "  ${RED}$(t install_failed "$API_SERVICE")${RESET}"
+    fi
+}
+
+remove_api() {
+    echo -e "${RED}${BOLD}$(t remove_api_warn)${RESET}"
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+
+    API_SERVICE="${SERVICE_NAME}-api"
+    sudo systemctl stop "$API_SERVICE" 2>/dev/null || true
+    sudo systemctl disable "$API_SERVICE" 2>/dev/null || true
+    sudo rm -f "/etc/systemd/system/${API_SERVICE}.service"
+    sudo systemctl daemon-reload
+
+    read -rp "$(t prompt_domain_used_api)" DOMAIN
+    if [ -n "$DOMAIN" ]; then
+        sudo rm -f "/etc/nginx/sites-enabled/${DOMAIN}.conf" "/etc/nginx/sites-available/${DOMAIN}.conf"
+        sudo systemctl reload nginx 2>/dev/null || true
+    fi
+    echo -e "${GREEN}$(t api_removed)${RESET}"
+}
+
+# ---------------------------------------------------------------------------
 # Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
 while true; do
@@ -1873,6 +2056,10 @@ while true; do
     menu_item 18 menu_18
     menu_item 19 menu_19 "$RED"
     menu_item 20 menu_20
+    menu_section sec_api
+    menu_item 24 menu_24
+    menu_item 25 menu_25 "$RED"
+    menu_item 26 menu_26
     menu_section sec_advanced
     menu_item 21 menu_21
     menu_item 22 menu_22
@@ -1908,6 +2095,9 @@ while true; do
         21) restore_backup_cli; pause ;;
         22) setup_bot_mode; pause ;;
         23) change_admin_panel_credentials; pause ;;
+        24) setup_api; pause ;;
+        25) remove_api; pause ;;
+        26) update_api; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;

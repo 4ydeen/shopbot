@@ -102,6 +102,11 @@ DEFAULT_SETTINGS = {
     "btn_wallet": "👛 کیف پول من",
     "btn_admin_panel": "⚙️ پنل مدیریت",
     "test_enabled": "1",
+    # F14: پاکسازی خودکار سرویس‌های منقضی. صفر یعنی خاموش.
+    "expired_delete_days": "0",
+    "test_delete_days": "0",
+    "expired_cleanup_warning_days": "3",
+    "expired_cleanup_dry_run": "1",
     "force_join_enabled": "0",
     "force_join_channel": "",  # مثلاً: @mychannel
     "card_number": "0000-0000-0000-0000",
@@ -153,6 +158,9 @@ DEFAULT_SETTINGS = {
     # حالت ۱: پورسانت درصدی از اولین خرید هر زیرمجموعه
     "referral_enabled": "1",
     "referral_percent": "10",  # درصدی که به دعوت‌کننده به‌عنوان اعتبار کیف پول تعلق می‌گیرد
+    "referral_multilevel_enabled": "0",
+    "referral_level2_percent": "3",
+    "referral_level3_percent": "1",
     "referral_commission_max_count": "0",  # حداکثر تعداد نفراتی که پورسانت خریدشان تعلق می‌گیرد (0 = نامحدود)
     # کارمزد نماینده‌ی «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک): روی هر خرید
     # (نه فقط اولین خرید) مشتریانی که با لینک این نماینده وارد شده‌اند، این درصد
@@ -196,6 +204,14 @@ DEFAULT_SETTINGS = {
     "wheel_prizes": "10,20,30,50",  # درصدهای تخفیف ممکن؛ در صورت برد یکی تصادفی انتخاب می‌شود
     "wheel_code_expiry_hours": "24",  # اعتبار کد جایزه پس از برد (ساعت)
     "wheel_cooldown_hours": "24",  # فاصله مجاز بین دو چرخش هر کاربر
+    # امتیاز و قرعه‌کشی شبانه F18
+    "score_enabled": "1",
+    "lottery_enabled": "1",
+    "lottery_agent_enabled": "0",
+    "lottery_prize_type": "wallet",  # wallet | discount
+    "lottery_prizes": "50000,30000,20000",  # رتبه‌های ۱ تا ۳؛ تومان یا درصد تخفیف
+    "lottery_discount_expiry_hours": "24",
+    "lottery_report_chat_id": "",  # آیدی گروه گزارش؛ خالی = ارسال برای ادمین‌ها
     "btn_wheel": "🎡 گردونه شانس",
     # پرداخت کریپتو (Plisio)
     "crypto_payment_enabled": "0",
@@ -224,9 +240,18 @@ DEFAULT_SETTINGS = {
     "renewal_reminder_enabled": "1",
     "renewal_reminder_days_before": "5",  # چند روز قبل از اتمام سرویس یادآوری ارسال شود
     "auto_provision_max_qty": "0",
+    "daily_report_enabled": "1",
+    "daily_report_time": "23:45",
+    "panel_health_enabled": "1",
+    "spam_guard_enabled": "1",
+    "spam_limit": "35",
+    "spam_window": "60",
+    "report_chat_id": "",
     "low_stock_threshold": "3",  # وقتی موجودی یک محصول به این عدد یا کمتر برسد، به ادمین‌ها هشدار داده می‌شود
     "renewal_discount_percent": "20",  # درصد تخفیف کد تشویقی تمدید
     "renewal_discount_expiry_hours": "24",  # اعتبار کد تشویقی تمدید (ساعت)
+    "renewal_cashback_percent": "0",  # درصد کش‌بک تمدید؛ فقط از مبلغ پرداخت‌شده خارج از کیف پول
+    "topup_cashback_percent": "0",  # درصد کش‌بک شارژ کیف پول
     "adm_renewal_settings_style": "success",
     "adm_stock_alert_settings_style": "",
     # یادآوری اتمام حجم + کد تخفیف تشویقی تمدید (مستقل از یادآوری تاریخ انقضا)
@@ -280,6 +305,8 @@ DEFAULT_SETTINGS = {
     "reseller_fixed_product_ids": "",
     # حداقل مبلغ مجاز برای هر روش پرداخت (تومان). 0 یعنی بدون محدودیت.
     "min_amount_wallet_topup": "1000",  # حداقل مبلغ شارژ کیف پول
+    "location_change_user_limit": "0",  # 0 = نامحدود
+    "location_change_free_quota": "0",  # 0 = بدون سهمیه رایگان
     "min_amount_card": "0",             # حداقل مبلغ برای پرداخت کارت‌به‌کارت دستی
     "min_amount_abangateway": "0",      # حداقل مبلغ برای آبان گیت وی
     "min_amount_blupal": "0",           # حداقل مبلغ برای بلوپال
@@ -350,6 +377,7 @@ ACCOUNT_TOGGLE_KEYS = [
     ("svc_show_rename", "✏️ دکمه «تغییر نام کانفیگ»", "1"),
     ("svc_show_auto_renew", "🔄 دکمه «تمدید خودکار»", "1"),
     ("svc_show_transfer", "👤 دکمه «انتقال کانفیگ»", "1"),
+    ("svc_show_location_transfer", "📍 دکمه «تغییر لوکیشن سرویس»", "1"),
     ("svc_show_history", "📜 دکمه «تاریخچه سرویس»", "1"),
     ("svc_show_inquiry", "🔍 دکمه «استعلام»", "1"),
 ]
@@ -606,11 +634,23 @@ class Database:
                     reseller_discount_percent INTEGER,
                     reseller_supply_model TEXT DEFAULT 'volume_credit',
                     fixed_product_main_id INTEGER,
+                    reseller_expires_at TEXT,
+                    reseller_reminder_sent TEXT DEFAULT '',
+                    score INTEGER DEFAULT 0,
                     joined_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS admins (
                     telegram_id INTEGER PRIMARY KEY
+                );
+
+                CREATE TABLE IF NOT EXISTS lottery_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lottery_date TEXT NOT NULL UNIQUE,
+                    winners_json TEXT NOT NULL,
+                    prize_type TEXT NOT NULL,
+                    prizes_json TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS categories (
@@ -681,6 +721,9 @@ class Database:
                     discount_code_id INTEGER,
                     discount_amount INTEGER DEFAULT 0,
                     final_price INTEGER,
+                    cashback_paid INTEGER DEFAULT 0,
+                    cashback_amount INTEGER DEFAULT 0,
+                    cashback_type TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT
                 );
@@ -701,10 +744,69 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS discount_redemptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    order_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_discount_redemptions_code_user ON discount_redemptions(code_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_discount_redemptions_order ON discount_redemptions(order_id);
+
+                CREATE TABLE IF NOT EXISTS wallet_gift_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code_hash TEXT UNIQUE NOT NULL,
+                    amount INTEGER NOT NULL,
+                    max_uses INTEGER DEFAULT 1,
+                    used_count INTEGER DEFAULT 0,
+                    expires_at TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_by INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS wallet_gift_redemptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    gift_code_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    redeemed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(gift_code_id, user_id),
+                    FOREIGN KEY(gift_code_id) REFERENCES wallet_gift_codes(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_gift_redemptions_user ON wallet_gift_redemptions(user_id);
+
+                CREATE TABLE IF NOT EXISTS panel_health (
+                    server_id INTEGER PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'up',
+                    fail_count INTEGER NOT NULL DEFAULT 0,
+                    last_check TEXT,
+                    last_change TEXT,
+                    last_error TEXT,
+                    last_alert TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS panel_health_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS report_topics (
+                    chat_id INTEGER NOT NULL,
+                    topic_key TEXT NOT NULL,
+                    thread_id INTEGER NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, topic_key)
+                );
+
                 CREATE TABLE IF NOT EXISTS wallet_topups (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
+                    cashback_paid INTEGER DEFAULT 0,
+                    cashback_amount INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'pending',
                     receipt_file_id TEXT,
                     receipt_type TEXT DEFAULT 'photo',
@@ -797,6 +899,22 @@ class Database:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS ticket_departments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    is_active INTEGER DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS ticket_department_admins (
+                    department_id INTEGER NOT NULL,
+                    admin_id INTEGER NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (department_id, admin_id),
+                    FOREIGN KEY (department_id) REFERENCES ticket_departments(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS ticket_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ticket_id INTEGER NOT NULL,
@@ -832,6 +950,8 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_support_messages_user_id ON support_messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+                CREATE INDEX IF NOT EXISTS idx_tickets_department_id ON tickets(department_id);
+                CREATE INDEX IF NOT EXISTS idx_ticket_department_admins_admin ON ticket_department_admins(admin_id);
                 CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
                 CREATE INDEX IF NOT EXISTS idx_crypto_invoices_txn ON crypto_invoices(txn_id);
@@ -992,6 +1112,11 @@ class Database:
                     default_group TEXT,
                     used_for_custom_config INTEGER DEFAULT 1,
                     used_for_test_config INTEGER DEFAULT 0,
+                    start_on_first_use INTEGER DEFAULT 0,
+                    max_services INTEGER,
+                    capacity_alert_sent INTEGER DEFAULT 0,
+                    transfer_price INTEGER DEFAULT 0,
+                    allow_transfer_target INTEGER DEFAULT 0,
                     is_active INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
@@ -1052,6 +1177,7 @@ class Database:
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     expires_at TEXT,
+                    start_on_first_use INTEGER DEFAULT 0,
                     FOREIGN KEY(panel_server_id) REFERENCES panel_servers(id)
                 );
 
@@ -1067,6 +1193,68 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_custom_config_history_config_id ON custom_config_history(custom_config_id);
+
+                CREATE TABLE IF NOT EXISTS location_change_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    custom_config_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    old_panel_server_id INTEGER NOT NULL,
+                    new_panel_server_id INTEGER NOT NULL,
+                    fee_toman INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    old_username TEXT,
+                    new_username TEXT,
+                    old_volume_gb INTEGER,
+                    new_volume_gb INTEGER,
+                    old_expires_at TEXT,
+                    old_subscription_url TEXT,
+                    new_expires_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TEXT,
+                    detail TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_location_change_log_user ON location_change_log(user_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS bulk_gift_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_id INTEGER NOT NULL,
+                    panel_server_id INTEGER,
+                    params_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    total INTEGER NOT NULL DEFAULT 0,
+                    done INTEGER NOT NULL DEFAULT 0,
+                    failed INTEGER NOT NULL DEFAULT 0,
+                    note TEXT DEFAULT '',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    finished_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bulk_gift_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL REFERENCES bulk_gift_jobs(id) ON DELETE CASCADE,
+                    custom_config_id INTEGER NOT NULL,
+                    panel_server_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    start_on_first_use INTEGER DEFAULT 0,
+                    expires_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    error TEXT,
+                    claimed_at TEXT,
+                    completed_at TEXT,
+                    UNIQUE(job_id, custom_config_id)
+                );
+                CREATE TABLE IF NOT EXISTS price_change_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    undone_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_price_change_log_created ON price_change_log(created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_bulk_gift_items_job_status ON bulk_gift_items(job_id, status);
+                CREATE INDEX IF NOT EXISTS idx_bulk_gift_jobs_status ON bulk_gift_jobs(status);
 
                 CREATE TABLE IF NOT EXISTS reseller_credit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1149,6 +1337,8 @@ class Database:
                     permanent_discount_percent INTEGER,
                     min_qty INTEGER,
                     min_volume_gb INTEGER,
+                    membership_fee_toman INTEGER NOT NULL DEFAULT 0,
+                    duration_days INTEGER,
                     has_miniapp INTEGER NOT NULL DEFAULT 0,
                     has_web_panel INTEGER NOT NULL DEFAULT 0,
                     has_dedicated_bot INTEGER NOT NULL DEFAULT 0,
@@ -1228,6 +1418,7 @@ class Database:
                     name TEXT NOT NULL,
                     token_hash TEXT UNIQUE NOT NULL,
                     token_prefix TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT 'read,users,orders',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     last_used_at TEXT,
                     revoked_at TEXT
@@ -1307,20 +1498,28 @@ class Database:
             # چه در نصب تازه و چه در ارتقای نصب‌های قدیمی‌تر که این ستون را نداشتند.
             conn.execute("UPDATE admins SET role='owner' WHERE telegram_id=?", (owner_id,))
 
+        # صف هدیه باید بعد از هر ری‌استارت خودکار ادامه پیدا کند. worker خودش
+        # فقط یک نمونه برای هر فایل DB اجرا می‌کند.
+        try:
+            from bulk_gifts import ensure_worker
+            ensure_worker(self)
+        except Exception:
+            logger.exception("شروع worker هدیه‌ی گروهی ناموفق بود")
+
     # جدول‌هایی که «داده‌ی فروشگاه» این نمونه‌ی بات محسوب می‌شوند و در factory
     # reset کامل پاک می‌شوند. reseller_bots و pending_db_purges عمداً اینجا
     # نیستند: این‌ها ثبت بات‌های زیرمجموعه/صف حذف فایل هستند، نه داده‌ی خودِ
     # این بات، و factory reset یک بات نباید بات‌های نماینده‌ی دیگرش را قطع کند.
     FACTORY_RESET_TABLES = (
         "users", "categories", "products", "configs", "test_configs",
-        "test_config_plans", "orders", "discount_codes", "wallet_topups",
+        "test_config_plans", "orders", "discount_codes", "discount_redemptions", "wallet_topups",
         "crypto_invoices", "support_messages", "support_conversations",
-        "admin_presence", "tickets", "ticket_messages", "admin_logs",
+        "admin_presence", "tickets", "ticket_messages", "ticket_departments", "ticket_department_admins", "admin_logs",
         "abangateway_invoices", "blupal_invoices", "noapay_invoices", "extra_gateway_invoices", "custom_gateways", "custom_gateway_invoices",
-        "card_to_card_cards", "card_to_card_invoices", "panel_servers",
+        "card_to_card_cards", "card_to_card_invoices", "panel_servers", "panel_health", "panel_health_events", "report_topics",
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
-        "custom_config_history", "reseller_credit_log", "reseller_requests",
+        "custom_config_history", "location_change_log", "bulk_gift_jobs", "bulk_gift_items", "price_change_log", "lottery_log", "reseller_credit_log", "reseller_requests",
         "reseller_product_credit", "reseller_inline_commission_log", "reseller_tiers",
         "reseller_tier_qty_discounts", "reseller_tier_requests",
         "payment_webhook_logs", "web_push_subscriptions", "temp_messages",
@@ -1379,14 +1578,21 @@ class Database:
             ("users", "referral_first_purchase_rewarded", "INTEGER DEFAULT 0"),
             ("users", "referral_invite_bonus_given", "INTEGER DEFAULT 0"),
             ("users", "referral_free_config_given", "INTEGER DEFAULT 0"),
+            ("users", "score", "INTEGER DEFAULT 0"),
+            ("panel_health", "last_alert", "TEXT"),
             ("orders", "status", "TEXT DEFAULT 'pending'"),
             ("orders", "base_price", "INTEGER"),
             ("orders", "wallet_used", "INTEGER DEFAULT 0"),
             ("orders", "discount_code_id", "INTEGER"),
             ("orders", "discount_amount", "INTEGER DEFAULT 0"),
             ("orders", "final_price", "INTEGER"),
+            ("orders", "cashback_paid", "INTEGER DEFAULT 0"),
+            ("orders", "cashback_amount", "INTEGER DEFAULT 0"),
+            ("orders", "cashback_type", "TEXT"),
             ("orders", "receipt_type", "TEXT DEFAULT 'photo'"),
             ("wallet_topups", "receipt_type", "TEXT DEFAULT 'photo'"),
+            ("wallet_topups", "cashback_paid", "INTEGER DEFAULT 0"),
+            ("wallet_topups", "cashback_amount", "INTEGER DEFAULT 0"),
             ("users", "last_wheel_spin_at", "TEXT"),
             ("discount_codes", "expires_at", "TEXT"),
             ("discount_codes", "source", "TEXT"),
@@ -1394,14 +1600,19 @@ class Database:
             ("discount_codes", "max_purchase", "INTEGER"),
             ("discount_codes", "product_id", "INTEGER"),
             ("discount_codes", "category_id", "INTEGER"),
+            ("discount_codes", "per_user_limit", "INTEGER"),
+            ("discount_codes", "first_purchase_only", "INTEGER DEFAULT 0"),
+            ("discount_codes", "audience", "TEXT DEFAULT 'all'"),
             ("products", "duration_days", "INTEGER DEFAULT 30"),
             ("configs", "expires_at", "TEXT"),
             ("configs", "renewal_reminder_sent", "INTEGER DEFAULT 0"),
             ("configs", "volume_reminder_sent", "INTEGER DEFAULT 0"),
             ("products", "low_stock_alert_sent", "INTEGER DEFAULT 0"),
             ("admins", "role", "TEXT DEFAULT 'admin'"),
+            ("mobile_app_tokens", "scope", "TEXT NOT NULL DEFAULT 'read,users,orders'"),
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
             ("tickets", "claimed_by", "INTEGER"),
+            ("tickets", "department_id", "INTEGER"),
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("orders", "config_name", "TEXT"),
             ("configs", "order_id", "INTEGER"),
@@ -1427,6 +1638,13 @@ class Database:
             ("panel_servers", "proxy_settings", "TEXT"),
             ("panel_servers", "used_for_custom_config", "INTEGER DEFAULT 1"),
             ("panel_servers", "used_for_test_config", "INTEGER DEFAULT 0"),
+            ("panel_servers", "start_on_first_use", "INTEGER DEFAULT 0"),
+            ("panel_servers", "max_services", "INTEGER"),
+            ("panel_servers", "transfer_price", "INTEGER DEFAULT 0"),
+            ("panel_servers", "allow_transfer_target", "INTEGER DEFAULT 0"),
+            ("users", "location_change_count", "INTEGER DEFAULT 0"),
+            ("location_change_log", "old_subscription_url", "TEXT"),
+            ("panel_servers", "capacity_alert_sent", "INTEGER DEFAULT 0"),
             ("panel_servers", "used_for_reseller", "INTEGER DEFAULT 0"),
             ("panel_servers", "xui_inbound_id", "INTEGER"),
             ("panel_servers", "xui_sub_base_url", "TEXT"),
@@ -1455,6 +1673,10 @@ class Database:
             ("reseller_requests", "volume_gb", "INTEGER DEFAULT 0"),
             ("reseller_requests", "tier_code", "TEXT"),
             ("users", "reseller_tier", "TEXT"),
+            ("users", "reseller_expires_at", "TEXT"),
+            ("users", "reseller_reminder_sent", "TEXT DEFAULT ''"),
+            ("reseller_tiers", "membership_fee_toman", "INTEGER NOT NULL DEFAULT 0"),
+            ("reseller_tiers", "duration_days", "INTEGER"),
             ("orders", "tier_discount_amount", "INTEGER DEFAULT 0"),
             ("reseller_requests", "request_text", "TEXT"),
             ("reseller_requests", "status", "TEXT DEFAULT 'pending_review'"),
@@ -1535,6 +1757,10 @@ class Database:
             ("configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "connect_alert_sent", "INTEGER DEFAULT 0"),
             ("custom_configs", "no_connect_alert_sent", "INTEGER DEFAULT 0"),
+            ("custom_configs", "start_on_first_use", "INTEGER DEFAULT 0"),
+            ("custom_configs", "cleanup_soft_disabled_at", "TEXT"),
+            ("custom_configs", "cleanup_warning_sent_at", "TEXT"),
+            ("custom_configs", "cleanup_deleted_at", "TEXT"),
             # آینه‌ی محلیِ پنل اعتبار حجمی نمایندگی (رفع باگ): بات‌های نمایندگی هر
             # کدام دیتابیس sqlite جدای خودشان را دارند و panel_servers.id بین این
             # دو دیتابیس هیچ ارتباطی ندارد. reseller_auto_provision.py برای ساخت
@@ -1652,22 +1878,26 @@ class Database:
     RESELLER_TIER_DEFAULTS = (
         {
             "code": "bronze", "title": "برنزی", "icon": "🥉", "model": "commission", "sort_order": 10,
+            "membership_fee_toman": 0, "duration_days": 30,
             "summary": "کمیسیون از خرید مشتری‌ها",
             "description": "لینک اختصاصی می‌گیرید و از هر خرید مشتریانی که با لینک شما وارد شوند، درصدی کمیسیون به کیف پولتان اضافه می‌شود. بدون سرمایه اولیه.",
         },
         {
             "code": "silver", "title": "نقره‌ای", "icon": "🥈", "model": "discount", "sort_order": 20, "is_enabled": 1,
+            "membership_fee_toman": 0, "duration_days": 30,
             "summary": "تخفیف دائمی و خرید عمده در بات اصلی",
             "description": "بدون لینک و بدون بات؛ از خود بات اصلی با قیمت تخفیفی می‌خرید و هرچه یک‌جا بیشتر بخرید، تخفیف بیشتر می‌شود.",
         },
         {
             "code": "gold", "title": "طلایی", "icon": "🥇", "model": "fixed_product", "sort_order": 30,
+            "membership_fee_toman": 0, "duration_days": 30,
             "has_miniapp": 1, "has_web_panel": 1, "has_dedicated_bot": 1,
             "summary": "فروشگاه شخصی با خرید عمده‌ی محصولات ما",
             "description": "پنل وب، مینی‌اپ و بات مستقل اختصاصی دارید. محصولات فروشگاه را عمده و پیش‌پرداخت می‌خرید و همان‌ها را می‌فروشید.",
         },
         {
             "code": "vip", "title": "VIP", "icon": "👑", "model": "volume_credit", "sort_order": 40,
+            "membership_fee_toman": 0, "duration_days": 30,
             "has_miniapp": 1, "has_web_panel": 1, "has_dedicated_bot": 1,
             "summary": "فروشگاه شخصی با اعتبار حجمی آزاد",
             "description": "پنل وب، مینی‌اپ و بات مستقل اختصاصی دارید. یک استخر حجم می‌خرید و هر محصولی را با هر قیمتی خودتان می‌سازید.",
@@ -1676,8 +1906,8 @@ class Database:
 
     RESELLER_TIER_TEXT_FIELDS = ("title", "icon", "summary", "description")
     RESELLER_TIER_FLAG_FIELDS = ("is_enabled", "has_miniapp", "has_web_panel", "has_dedicated_bot", "auto_approve")
-    RESELLER_TIER_INT_FIELDS = ("sort_order", "commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb")
-    RESELLER_TIER_NULLABLE_FIELDS = ("commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb")
+    RESELLER_TIER_INT_FIELDS = ("sort_order", "commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb", "membership_fee_toman", "duration_days")
+    RESELLER_TIER_NULLABLE_FIELDS = ("commission_min", "commission_max", "permanent_discount_percent", "min_qty", "min_volume_gb", "duration_days")
     RESELLER_TIER_PERCENT_FIELDS = ("commission_min", "commission_max", "permanent_discount_percent")
 
     def _seed_default_reseller_tiers(self, conn):
@@ -1790,17 +2020,163 @@ class Database:
             row = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
             return row["reseller_tier"] if row and row["reseller_tier"] else None
 
-    def set_user_reseller_tier(self, user_tg_id: int, code, discount_percent: int = None) -> bool:
+    def set_user_reseller_tier(self, user_tg_id: int, code, discount_percent: int = None, expires_at: str = None) -> bool:
         if discount_percent is not None:
             discount_percent = int(discount_percent)
             if not 1 <= discount_percent <= 100:
                 raise ValueError("درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
         with self._get_conn() as conn:
             cur = conn.execute(
-                "UPDATE users SET reseller_tier=?, reseller_discount_percent=? WHERE telegram_id=?",
-                (code or None, discount_percent if code == "silver" else None, user_tg_id),
+                "UPDATE users SET reseller_tier=?, reseller_discount_percent=?, reseller_expires_at=? WHERE telegram_id=?",
+                (code or None, discount_percent if code == "silver" else None, expires_at, user_tg_id),
             )
             return cur.rowcount > 0
+
+    def get_reseller_membership(self, user_tg_id: int) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT u.telegram_id, u.reseller_tier, u.reseller_expires_at, u.is_reseller, "
+                "t.title, t.icon, t.membership_fee_toman, t.duration_days "
+                "FROM users u LEFT JOIN reseller_tiers t ON t.code=u.reseller_tier WHERE u.telegram_id=?",
+                (user_tg_id,),
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def _charge_wallet_atomic(self, conn, user_tg_id: int, amount: int) -> bool:
+        if amount <= 0:
+            return True
+        cur = conn.execute(
+            "UPDATE users SET referral_credit=referral_credit-? WHERE telegram_id=? AND referral_credit>=?",
+            (int(amount), user_tg_id, int(amount)),
+        )
+        return cur.rowcount == 1
+
+    def activate_reseller_membership(self, user_tg_id: int, tier_code: str, admin_id: int = None, charge_fee: bool = True) -> dict:
+        with self._get_conn() as conn:
+            tier = conn.execute("SELECT * FROM reseller_tiers WHERE code=?", (tier_code,)).fetchone()
+            user = conn.execute("SELECT reseller_expires_at, referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+            if not tier or not user:
+                return {"ok": False, "reason": "not_found"}
+            fee = int(tier["membership_fee_toman"] or 0)
+            if charge_fee and fee > 0 and not self._charge_wallet_atomic(conn, user_tg_id, fee):
+                return {"ok": False, "reason": "insufficient_balance", "fee": fee, "balance": int(user["referral_credit"] or 0)}
+            duration_days = tier["duration_days"]
+            new_expiry = None
+            if duration_days is not None and int(duration_days) > 0:
+                now = datetime.utcnow()
+                base = now
+                if user["reseller_expires_at"]:
+                    try:
+                        old_dt = datetime.fromisoformat(user["reseller_expires_at"])
+                        if old_dt > now:
+                            base = old_dt
+                    except Exception:
+                        pass
+                new_expiry = (base + timedelta(days=int(duration_days))).isoformat()
+            is_full = tier["model"] in ("fixed_product", "volume_credit")
+            conn.execute(
+                "UPDATE users SET reseller_tier=?, reseller_expires_at=?, reseller_reminder_sent='', is_reseller=? WHERE telegram_id=?",
+                (tier_code, new_expiry, 1 if is_full else 0, user_tg_id),
+            )
+            return {"ok": True, "expires_at": new_expiry, "fee": fee, "duration_days": duration_days, "tier_code": tier_code}
+
+    def renew_reseller_membership(self, user_tg_id: int, tier_code: str = None) -> dict:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT reseller_tier FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+        code = tier_code or (row["reseller_tier"] if row else None)
+        if not code:
+            return {"ok": False, "reason": "no_tier"}
+        return self.activate_reseller_membership(user_tg_id, code, charge_fee=True)
+
+    def claim_reseller_expiry_reminders(self, now: datetime = None, limit: int = 100) -> list:
+        """یادآوری‌های ۷، ۳ و ۱ روز قبل را به‌صورت اتمیک claim می‌کند تا در
+        اجرای دوباره یا چند worker پیام تکراری ارسال نشود."""
+        now = now or datetime.utcnow()
+        candidates = []
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT telegram_id, reseller_tier, reseller_expires_at, reseller_reminder_sent "
+                "FROM users WHERE reseller_tier IS NOT NULL AND reseller_expires_at IS NOT NULL "
+                "AND reseller_expires_at>? ORDER BY reseller_expires_at LIMIT ?",
+                (now.isoformat(), int(limit) * 4),
+            ).fetchall()
+            for row in rows:
+                try:
+                    expiry = datetime.fromisoformat(row["reseller_expires_at"])
+                except Exception:
+                    continue
+                days_left = (expiry - now).total_seconds() / 86400
+                target = next((d for d in (7, 3, 1) if days_left <= d and days_left > 0), None)
+                if target is None:
+                    continue
+                sent = {x for x in (row["reseller_reminder_sent"] or "").split(",") if x}
+                if str(target) in sent:
+                    continue
+                new_sent = ",".join(sorted(sent | {str(target)}, key=int))
+                cur = conn.execute(
+                    "UPDATE users SET reseller_reminder_sent=? WHERE telegram_id=? AND reseller_reminder_sent=?",
+                    (new_sent, row["telegram_id"], row["reseller_reminder_sent"] or ""),
+                )
+                if cur.rowcount:
+                    candidates.append({"user_id": row["telegram_id"], "tier_code": row["reseller_tier"], "expires_at": row["reseller_expires_at"], "days": target})
+                    if len(candidates) >= limit:
+                        break
+        return candidates
+
+    def process_reseller_expiries(self, now: datetime = None, limit: int = 100) -> list:
+        now = now or datetime.utcnow()
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT telegram_id, reseller_tier FROM users WHERE reseller_tier IS NOT NULL AND reseller_expires_at IS NOT NULL "
+                "AND reseller_expires_at<=? ORDER BY reseller_expires_at LIMIT ?",
+                (now.isoformat(), int(limit)),
+            ).fetchall()
+        expired = []
+        for row in rows:
+            try:
+                self.wipe_agent_state(row["telegram_id"])
+                with self._get_conn() as conn:
+                    conn.execute(
+                        "UPDATE users SET is_reseller=0, reseller_expires_at=NULL, reseller_tier=NULL, reseller_discount_percent=NULL, "
+                        "inline_reseller_enabled=0, reseller_credit_gb=0, reseller_supply_model='volume_credit', fixed_product_main_id=NULL, reseller_panel_id=NULL WHERE telegram_id=?",
+                        (row["telegram_id"],),
+                    )
+                expired.append({"user_id": row["telegram_id"], "tier_code": row["reseller_tier"]})
+            except Exception:
+                logger.exception("پاکسازی نمایندگی منقضی کاربر %s ناموفق بود", row["telegram_id"])
+        return expired
+
+    async def reseller_expiry_loop(self, bot=None, interval: int = 3600):
+        """worker ساعتی. اگر bot داده شود، یادآوری و پیام انقضا را هم ارسال می‌کند؛
+        بدون bot فقط پاکسازی DB انجام می‌شود."""
+        while True:
+            try:
+                if bot is not None:
+                    reminders = await asyncio.to_thread(self.claim_reseller_expiry_reminders)
+                    for item in reminders:
+                        try:
+                            tier = await asyncio.to_thread(self.get_reseller_tier, item["tier_code"])
+                            label = f"{tier['icon']} {tier['title']}" if tier else item["tier_code"]
+                            await bot.send_message(item["user_id"], f"⏳ یادآوری انقضای نمایندگی\n\nسطح: {label}\nفقط {item['days']} روز تا پایان عضویت باقی مانده است.\nتاریخ انقضا: {item['expires_at']}\n\nبرای تمدید، هزینه‌ی دوره‌ی بعدی از کیف پول اعتباری کسر می‌شود.")
+                        except Exception:
+                            logger.exception("ارسال یادآوری نمایندگی به %s ناموفق بود", item["user_id"])
+                expired = await asyncio.to_thread(self.process_reseller_expiries)
+                if bot is not None:
+                    for item in expired:
+                        try:
+                            await bot.send_message(item["user_id"], "⚠️ عضویت نمایندگی شما منقضی شد. تنظیمات و دسترسی‌های نمایندگی غیرفعال شدند؛ سرویس‌های ساخته‌شده‌ی شما حذف نشده‌اند. برای ادامه، دوباره درخواست/تمدید نمایندگی ثبت کنید.")
+                        except Exception:
+                            logger.exception("ارسال پیام انقضای نمایندگی به %s ناموفق بود", item["user_id"])
+                    report_chat_id = self.get_setting("report_chat_id", "")
+                    if report_chat_id:
+                        for item in expired:
+                            try:
+                                await bot.send_message(report_chat_id, f"⏰ انقضای نمایندگی | کاربر {item['user_id']} | سطح {item['tier_code']}")
+                            except Exception:
+                                pass
+            except Exception:
+                logger.exception("reseller expiry loop failed")
+            await asyncio.sleep(interval)
 
     def list_tier_members(self, code: str):
         with self._get_conn() as conn:
@@ -1882,31 +2258,49 @@ class Database:
                 ).fetchall()
             return conn.execute("SELECT * FROM reseller_tier_requests ORDER BY id DESC").fetchall()
 
-    def approve_tier_request(self, request_id: int, admin_id: int) -> bool:
+    def approve_tier_request(self, request_id: int, admin_id: int) -> dict:
         req = self.get_tier_request(request_id)
         if not req or req["status"] != "pending":
-            return False
+            return {"ok": False, "reason": "invalid"}
         with self._get_conn() as conn:
             claimed = conn.execute(
-                "UPDATE reseller_tier_requests SET status='approved', reviewed_by=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND status='pending'",
+                "UPDATE reseller_tier_requests SET status='processing', reviewed_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'",
                 (admin_id, request_id),
             ).rowcount
         if not claimed:
-            return False
-        self.switch_agent_tier(req["user_id"], req["tier_code"])
-        self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
-        return True
+            return {"ok": False, "reason": "race"}
+        try:
+            current = self.get_agent_tier(req["user_id"])
+            if current and current != req["tier_code"]:
+                self.switch_agent_tier(req["user_id"], req["tier_code"])
+            result = self.activate_reseller_membership(req["user_id"], req["tier_code"], admin_id=admin_id, charge_fee=True)
+            if not result.get("ok"):
+                with self._get_conn() as conn:
+                    conn.execute("UPDATE reseller_tier_requests SET status='pending', reviewed_by=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='processing'", (request_id,))
+                return result
+            with self._get_conn() as conn:
+                conn.execute("UPDATE reseller_tier_requests SET status='approved', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='processing'", (request_id,))
+            return result
+        except Exception:
+            with self._get_conn() as conn:
+                conn.execute("UPDATE reseller_tier_requests SET status='pending', reviewed_by=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='processing'", (request_id,))
+            raise
 
     def get_agent_tier(self, user_tg_id: int):
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT reseller_tier, is_reseller, inline_reseller_enabled, reseller_supply_model "
+                "SELECT reseller_tier, reseller_expires_at, is_reseller, inline_reseller_enabled, reseller_supply_model "
                 "FROM users WHERE telegram_id=?",
                 (user_tg_id,),
             ).fetchone()
         if not row:
             return None
+        if row["reseller_expires_at"]:
+            try:
+                if datetime.fromisoformat(row["reseller_expires_at"]) <= datetime.utcnow():
+                    return None
+            except Exception:
+                pass
         if row["reseller_tier"]:
             return row["reseller_tier"]
         if row["is_reseller"]:
@@ -1945,7 +2339,7 @@ class Database:
         self.purge_reseller_leftovers(user_tg_id)
         with self._get_conn() as conn:
             conn.execute(
-                "UPDATE users SET inline_reseller_commission_percent=NULL, reseller_discount_percent=NULL, reseller_tier=NULL WHERE telegram_id=?",
+                "UPDATE users SET inline_reseller_commission_percent=NULL, reseller_discount_percent=NULL, reseller_tier=NULL, reseller_expires_at=NULL WHERE telegram_id=?",
                 (user_tg_id,),
             )
             conn.execute("DELETE FROM reseller_product_credit WHERE reseller_id=?", (user_tg_id,))
@@ -2475,11 +2869,19 @@ class Database:
 
     # --------------------- اپ موبایل: توکن دسترسی طولانی‌مدت (PAT) ---------------------
 
-    def create_mobile_token(self, admin_id: int, name: str, token_hash: str, token_prefix: str) -> int:
+    def create_mobile_token(self, admin_id: int, name: str, token_hash: str, token_prefix: str,
+                            scope: str = "read,users,orders", revoke_previous: bool = True) -> int:
+        """ایجاد PAT برای API عمومی. برای /token2 توکن قبلی همان ادمین باطل می‌شود."""
+        scope = ",".join(dict.fromkeys(x.strip() for x in (scope or "read").split(",") if x.strip())) or "read"
         with self._get_conn() as conn:
+            if revoke_previous:
+                conn.execute(
+                    "UPDATE mobile_app_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE admin_id=? AND revoked_at IS NULL",
+                    (admin_id,),
+                )
             cur = conn.execute(
-                "INSERT INTO mobile_app_tokens (admin_id, name, token_hash, token_prefix) VALUES (?, ?, ?, ?)",
-                (admin_id, name.strip()[:64] or "دستگاه بدون نام", token_hash, token_prefix),
+                "INSERT INTO mobile_app_tokens (admin_id, name, token_hash, token_prefix, scope) VALUES (?, ?, ?, ?, ?)",
+                (admin_id, name.strip()[:64] or "API Token", token_hash, token_prefix, scope),
             )
             return cur.lastrowid
 
@@ -2832,6 +3234,57 @@ class Database:
     # -----------------------------------------------------------------------
     # محصولات
     # -----------------------------------------------------------------------
+
+    def preview_bulk_price_change(self, category_id=None, panel_server_id=None, mode="percent", value=0, rounding=0):
+        """پیش‌نمایش و محاسبه‌ی قیمت‌های جدید. mode: percent یا fixed؛ value در percent می‌تواند منفی باشد."""
+        params=[]; where=[]
+        if category_id is not None:
+            where.append("p.category_id=?"); params.append(category_id)
+        if panel_server_id is not None:
+            where.append("p.provision_server_id=?"); params.append(panel_server_id)
+        sql="SELECT p.id,p.name,p.price,p.category_id,p.provision_server_id FROM products p"
+        if where: sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY p.id"
+        with self._get_conn() as conn:
+            rows=conn.execute(sql, params).fetchall()
+        out=[]
+        for r in rows:
+            old=int(r["price"] or 0)
+            if mode == "percent":
+                new=round(old * (100 + float(value)) / 100)
+            else:
+                new=old + int(value)
+            if rounding:
+                unit=abs(int(rounding)); new=int(round(new/unit)*unit)
+            new=max(0,new)
+            out.append({"id":r["id"],"name":r["name"],"old_price":old,"new_price":new,
+                        "category_id":r["category_id"],"provision_server_id":r["provision_server_id"]})
+        return out
+
+    def apply_bulk_price_change(self, changes, scope="products"):
+        """اعمال اتمیک تغییر قیمت و ثبت snapshot کامل برای undo."""
+        if not changes: return None
+        payload=json.dumps(changes, ensure_ascii=False)
+        with self._get_conn() as conn:
+            cur=conn.execute("INSERT INTO price_change_log(scope,payload_json) VALUES(?,?)", (scope,payload))
+            log_id=cur.lastrowid
+            for ch in changes:
+                conn.execute("UPDATE products SET price=? WHERE id=?", (int(ch["new_price"]), int(ch["id"])))
+            return log_id
+
+    def list_price_change_logs(self, limit=10):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM price_change_log WHERE undone_at IS NULL ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+
+    def undo_bulk_price_change(self, log_id):
+        with self._get_conn() as conn:
+            row=conn.execute("SELECT * FROM price_change_log WHERE id=? AND undone_at IS NULL", (log_id,)).fetchone()
+            if not row: return False
+            changes=json.loads(row["payload_json"] or "[]")
+            for ch in changes:
+                conn.execute("UPDATE products SET price=? WHERE id=?", (int(ch["old_price"]), int(ch["id"])))
+            conn.execute("UPDATE price_change_log SET undone_at=CURRENT_TIMESTAMP WHERE id=?", (log_id,))
+            return True
 
     def add_product(self, category_id: int, name: str, price: int, description: str = "", duration_days: int = 30,
                      is_auto_provision: bool = False, auto_provision_volume_gb: int = None,
@@ -3317,7 +3770,14 @@ class Database:
                 (user_tg_id, product_id, base_price, wallet_used, discount_code_id, discount_amount, final_price,
                  quantity, config_name, tier_discount_amount),
             )
-            return cur.lastrowid
+            order_id = cur.lastrowid
+            if discount_code_id:
+                conn.execute(
+                    "UPDATE discount_redemptions SET order_id=? WHERE id=("
+                    "SELECT MAX(id) FROM discount_redemptions WHERE code_id=? AND user_id=? AND order_id IS NULL)",
+                    (order_id, discount_code_id, user_tg_id),
+                )
+            return order_id
 
     def create_custom_config_order(
         self,
@@ -3357,6 +3817,8 @@ class Database:
                 "UPDATE orders SET status='approved', updated_at=? WHERE id=? AND status IN ('pending','processing')",
                 (datetime.utcnow().isoformat(), order_id),
             )
+            if cur.rowcount:
+                conn.execute("UPDATE users SET score=COALESCE(score,0)+2 WHERE telegram_id=(SELECT user_id FROM orders WHERE id=?)", (order_id,))
             return cur.rowcount > 0
 
     def create_renewal_order(
@@ -3384,13 +3846,42 @@ class Database:
             return cur.lastrowid
 
     def approve_renewal_order(self, order_id: int) -> bool:
-        """فقط اگر سفارش pending یا processing (بعد از claim_order) باشد تایید می‌کند."""
+        """تایید اتمیک تمدید و پرداخت یک‌باره‌ی کش‌بک؛ فقط از مبلغ پرداخت‌شده‌ی
+        غیرکیف‌پول محاسبه می‌شود تا کش‌بک باعث چرخه‌ی کیف‌پول نشود."""
+        now = datetime.utcnow().isoformat()
         with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+            if not row or not row["is_renewal"]:
+                return False
             cur = conn.execute(
                 "UPDATE orders SET status='approved', updated_at=? WHERE id=? AND status IN ('pending','processing')",
-                (datetime.utcnow().isoformat(), order_id),
+                (now, order_id),
             )
-            return cur.rowcount > 0
+            if cur.rowcount == 0:
+                return False
+            percent = max(0, min(int(self.get_setting("renewal_cashback_percent", "0") or 0), 100))
+            eligible = max(int(row["final_price"] or 0), 0)
+            amount = (eligible * percent) // 100
+            if amount > 0:
+                cur2 = conn.execute(
+                    "UPDATE orders SET cashback_paid=1, cashback_amount=?, cashback_type='renewal' "
+                    "WHERE id=? AND cashback_paid=0", (amount, order_id)
+                )
+                if cur2.rowcount:
+                    conn.execute(
+                        "UPDATE users SET referral_credit=MAX(referral_credit + ?,0) WHERE telegram_id=?",
+                        (amount, row["user_id"]),
+                    )
+            conn.execute("UPDATE users SET score=COALESCE(score,0)+1 WHERE telegram_id=?", (row["user_id"],))
+            return True
+
+    def get_order_cashback(self, order_id: int):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT cashback_paid, cashback_amount, cashback_type FROM orders WHERE id=?",
+                (order_id,),
+            ).fetchone()
+        return dict(row) if row else {"cashback_paid": 0, "cashback_amount": 0, "cashback_type": None}
 
     def set_order_receipt(self, order_id: int, file_id: str, receipt_type: str = "photo"):
         with self._get_conn() as conn:
@@ -3448,6 +3939,7 @@ class Database:
                 "UPDATE configs SET order_id=? WHERE id=?",
                 [(order_id, cid) for cid in config_ids],
             )
+            conn.execute("UPDATE users SET score=COALESCE(score,0)+2 WHERE telegram_id=(SELECT user_id FROM orders WHERE id=?)", (order_id,))
             return True
 
     def approve_order_auto(self, order_id: int) -> bool:
@@ -3482,7 +3974,7 @@ class Database:
             if order["wallet_used"]:
                 self.add_wallet_credit(order["user_id"], order["wallet_used"])
             if order["discount_code_id"]:
-                self.decrement_discount_usage(order["discount_code_id"])
+                self.decrement_discount_usage(order["discount_code_id"], order_id=order_id)
         return True
 
     def get_orders_by_status(self, status: str, limit: int = 200):
@@ -3744,6 +4236,18 @@ class Database:
                 "top_products": [{"name": r["name"], "orders": r["c"], "revenue": r["s"]} for r in top_products],
             })
             return current
+
+    def get_daily_report_extras(self, day: str) -> dict:
+        with self._get_conn() as conn:
+            topup = conn.execute(
+                "SELECT COUNT(*) c, COALESCE(SUM(amount), 0) s FROM wallet_topups "
+                "WHERE status='approved' AND date(created_at)=?", (day,),
+            ).fetchone()
+            tests = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM custom_configs WHERE source='test' AND date(created_at)=?) + "
+                "(SELECT COUNT(*) FROM test_configs WHERE date(assigned_at)=?) c", (day, day),
+            ).fetchone()
+        return {"topup_count": topup["c"], "topup_amount": topup["s"], "test_count": tests["c"]}
 
     def get_full_stats(self, start_date: str = None, end_date: str = None) -> dict:
         """آمار کامل: get_sales_stats به‌علاوه‌ی موجودی انبار، تیکت‌ها و مشتریان تکراری.
@@ -4085,9 +4589,11 @@ class Database:
                     "SELECT 1 FROM users WHERE telegram_id=?", (referrer_tg_id,)
                 ).fetchone()
                 if referrer_exists:
-                    conn.execute(
-                        "UPDATE users SET referred_by=? WHERE telegram_id=?", (referrer_tg_id, user_tg_id)
+                    cur = conn.execute(
+                        "UPDATE users SET referred_by=? WHERE telegram_id=? AND referred_by IS NULL", (referrer_tg_id, user_tg_id)
                     )
+                    if cur.rowcount and self.get_setting("score_enabled", "1") == "1":
+                        conn.execute("UPDATE users SET score=COALESCE(score,0)+1 WHERE telegram_id=?", (referrer_tg_id,))
 
     # -------------------------------------------------------------------
     # نمایندگی با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
@@ -4367,6 +4873,85 @@ class Database:
                 (delta, user_tg_id),
             )
 
+    @staticmethod
+    def _wallet_gift_code_hash(code: str) -> str:
+        import hashlib
+        return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+    def create_wallet_gift_code(self, code: str, amount: int, max_uses: int = 1, expires_at: str = None, created_by: int = None):
+        code = code.strip().upper()
+        if not code or amount <= 0 or max_uses < 1:
+            raise ValueError("مقادیر کد هدیه نامعتبر است")
+        code_hash = self._wallet_gift_code_hash(code)
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO wallet_gift_codes(code_hash, amount, max_uses, expires_at, created_by) VALUES(?,?,?,?,?)",
+                (code_hash, int(amount), int(max_uses), expires_at, created_by),
+            )
+            return cur.lastrowid
+
+    def list_wallet_gift_codes(self, active_only: bool = False):
+        with self._get_conn() as conn:
+            sql = "SELECT * FROM wallet_gift_codes"
+            if active_only:
+                sql += " WHERE is_active=1"
+            sql += " ORDER BY id DESC"
+            return conn.execute(sql).fetchall()
+
+    def toggle_wallet_gift_code(self, code_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE wallet_gift_codes SET is_active=CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id=?", (code_id,))
+
+    def delete_wallet_gift_code(self, code_id: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM wallet_gift_codes WHERE id=?", (code_id,))
+
+    def redeem_wallet_gift_code(self, user_tg_id: int, code: str) -> dict:
+        from datetime import datetime, timezone
+        code_hash = self._wallet_gift_code_hash(code)
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM wallet_gift_codes WHERE code_hash=?", (code_hash,)).fetchone()
+            if not row or not row["is_active"]:
+                raise ValueError("کد هدیه نامعتبر یا غیرفعال است")
+            if row["expires_at"]:
+                try:
+                    exp = datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00"))
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=timezone.utc)
+                    if exp <= datetime.now(timezone.utc):
+                        conn.execute("UPDATE wallet_gift_codes SET is_active=0 WHERE id=?", (row["id"],))
+                        raise ValueError("اعتبار این کد هدیه تمام شده است")
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
+            if row["used_count"] >= row["max_uses"]:
+                conn.execute("UPDATE wallet_gift_codes SET is_active=0 WHERE id=?", (row["id"],))
+                raise ValueError("ظرفیت استفاده از این کد هدیه تمام شده است")
+            already = conn.execute(
+                "SELECT 1 FROM wallet_gift_redemptions WHERE gift_code_id=? AND user_id=?",
+                (row["id"], user_tg_id),
+            ).fetchone()
+            if already:
+                raise ValueError("این کد هدیه را قبلاً استفاده کرده‌ای")
+            cur = conn.execute(
+                "UPDATE wallet_gift_codes SET used_count=used_count+1, is_active=CASE WHEN used_count+1>=max_uses THEN 0 ELSE is_active END WHERE id=? AND is_active=1 AND used_count<max_uses",
+                (row["id"],),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("کد هدیه هم‌زمان توسط کاربر دیگری مصرف شد؛ دوباره امتحان کن")
+            conn.execute(
+                "INSERT INTO wallet_gift_redemptions(gift_code_id,user_id,amount) VALUES(?,?,?)",
+                (row["id"], user_tg_id, row["amount"]),
+            )
+            conn.execute(
+                "UPDATE users SET referral_credit=MAX(referral_credit+?,0) WHERE telegram_id=?",
+                (row["amount"], user_tg_id),
+            )
+            new_balance = conn.execute("SELECT referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()["referral_credit"]
+            return {"amount": row["amount"], "new_balance": new_balance, "remaining_uses": max(0, row["max_uses"] - row["used_count"] - 1)}
+
     def reward_referrer_if_first_purchase(self, referred_user_tg_id: int, paid_amount: int):
         """حالت ۱ از سه مدل زیرمجموعه‌گیری: پورسانت درصدی، فقط برای اولین خرید هر
         زیرمجموعه، و در صورت تنظیم بودن سقف (referral_commission_max_count)، فقط برای
@@ -4440,8 +5025,33 @@ class Database:
         reward = (paid_amount * percent) // 100
         if reward > 0:
             self.add_wallet_credit(referrer_id, reward)
+            self.add_score(referrer_id, 1)
             return reward, referrer_id
         return None
+
+    def reward_referral_uplines(self, referred_user_tg_id: int, paid_amount: int) -> list:
+        """پرداخت پاداش رفرال سطح ۲ و ۳ برای اولین خرید زیرمجموعه."""
+        if paid_amount <= 0 or self.get_setting("referral_button_enabled", "1") != "1" or self.get_setting("referral_multilevel_enabled", "0") != "1":
+            return []
+        percentages = {2: int(self.get_setting("referral_level2_percent", "0") or 0), 3: int(self.get_setting("referral_level3_percent", "0") or 0)}
+        out = []
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT referred_by FROM users WHERE telegram_id=?", (referred_user_tg_id,)).fetchone()
+            current = row["referred_by"] if row else None
+            conn.execute("""CREATE TABLE IF NOT EXISTS referral_multilevel_rewards (referred_user_id INTEGER NOT NULL, referrer_id INTEGER NOT NULL, level INTEGER NOT NULL, amount INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(referred_user_id, level))""")
+            for level in (2, 3):
+                if not current: break
+                percent = max(0, min(100, percentages[level]))
+                if percent > 0:
+                    amount = (paid_amount * percent) // 100
+                    if amount > 0:
+                        cur = conn.execute("INSERT OR IGNORE INTO referral_multilevel_rewards(referred_user_id,referrer_id,level,amount) VALUES(?,?,?,?)", (referred_user_tg_id,current,level,amount))
+                        if cur.rowcount:
+                            conn.execute("UPDATE users SET referral_credit=MAX(referral_credit+?,0) WHERE telegram_id=?", (amount,current))
+                            out.append({"level":level,"referrer_id":current,"amount":amount})
+                nxt = conn.execute("SELECT referred_by FROM users WHERE telegram_id=?", (current,)).fetchone()
+                current = nxt["referred_by"] if nxt else None
+        return out
 
     def apply_referral_invite_rewards(self, referred_user_tg_id: int, referrer_tg_id: int) -> dict:
         """بلافاصله بعد از ثبت یک دعوت جدید (بدون نیاز به خرید) صدا زده می‌شود و
@@ -4507,14 +5117,19 @@ class Database:
         self, code: str, percent: int = None, fixed_amount: int = None, max_uses: int = 0,
         expires_at: str = None, source: str = "admin", min_purchase: int = None,
         max_purchase: int = None, product_id: int = None, category_id: int = None,
+        per_user_limit: int = None, first_purchase_only: bool = False, audience: str = "all",
     ) -> int:
+        per_user_limit = int(per_user_limit) if per_user_limit and int(per_user_limit) > 0 else None
+        audience = audience if audience in ("all", "normal", "reseller") else "all"
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO discount_codes (code, percent, fixed_amount, max_uses, expires_at, source, "
-                "min_purchase, max_purchase, product_id, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "min_purchase, max_purchase, product_id, category_id, per_user_limit, first_purchase_only, audience) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     code.strip().upper(), percent, fixed_amount, max_uses, expires_at, source,
                     min_purchase or None, max_purchase or None, product_id or None, category_id or None,
+                    per_user_limit, 1 if first_purchase_only else 0, audience,
                 ),
             )
             return cur.lastrowid
@@ -4563,14 +5178,69 @@ class Database:
         with self._get_conn() as conn:
             conn.execute("UPDATE discount_codes SET used_count = used_count + 1 WHERE id=?", (code_id,))
 
-    def decrement_discount_usage(self, code_id: int):
+    def decrement_discount_usage(self, code_id: int, order_id: int = None):
         with self._get_conn() as conn:
+            if order_id is not None:
+                conn.execute(
+                    "DELETE FROM discount_redemptions WHERE code_id=? AND order_id=?", (code_id, order_id)
+                )
             conn.execute(
                 "UPDATE discount_codes SET used_count = MAX(used_count - 1, 0) WHERE id=?", (code_id,)
             )
 
+    def claim_discount_use(self, code_id: int, user_id: int) -> bool:
+        """مصرف یک بار کد را اتمیک رزرو می‌کند (سقف کلی و سقف هر کاربر)؛ در صورت پر بودن سقف False."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE discount_codes SET used_count = used_count + 1 WHERE id=? AND is_active=1 "
+                "AND (COALESCE(max_uses, 0) = 0 OR used_count < max_uses) "
+                "AND (COALESCE(per_user_limit, 0) = 0 OR "
+                "(SELECT COUNT(*) FROM discount_redemptions WHERE code_id=? AND user_id=?) < per_user_limit)",
+                (code_id, code_id, user_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            conn.execute(
+                "INSERT INTO discount_redemptions (code_id, user_id) VALUES (?, ?)", (code_id, user_id)
+            )
+            return True
+
+    def _discount_user_invalid_reason(self, row, user_id: int):
+        keys = row.keys()
+        audience = (row["audience"] if "audience" in keys else None) or "all"
+        first_only = bool(row["first_purchase_only"]) if "first_purchase_only" in keys else False
+        per_user_limit = (row["per_user_limit"] if "per_user_limit" in keys else None) or 0
+        with self._get_conn() as conn:
+            if audience != "all":
+                u = conn.execute(
+                    "SELECT is_reseller, reseller_tier FROM users WHERE telegram_id=?", (user_id,)
+                ).fetchone()
+                is_reseller = bool(u and (u["is_reseller"] or u["reseller_tier"]))
+                if audience == "normal" and is_reseller:
+                    return "این کد تخفیف فقط برای کاربران عادی معتبر است."
+                if audience == "reseller" and not is_reseller:
+                    return "این کد تخفیف فقط برای نمایندگان معتبر است."
+            if first_only:
+                has_order = conn.execute(
+                    "SELECT 1 FROM orders WHERE user_id=? AND status IN ('pending','processing','approved') LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                if has_order:
+                    return "این کد تخفیف فقط برای اولین خرید معتبر است."
+            if per_user_limit:
+                used = conn.execute(
+                    "SELECT COUNT(*) c FROM discount_redemptions WHERE code_id=? AND user_id=?",
+                    (row["id"], user_id),
+                ).fetchone()["c"]
+                if used >= per_user_limit:
+                    if per_user_limit == 1:
+                        return "شما قبلاً از این کد تخفیف استفاده کرده‌اید."
+                    return "سقف استفاده‌ی شما از این کد تخفیف تمام شده است."
+        return None
+
     def get_discount_invalid_reason(
         self, row, price: int = None, product_id: int = None, category_id: int = None,
+        user_id: int = None,
     ) -> str:
         """اگر کد تخفیف معتبر نباشد، دلیل قابل‌نمایش به کاربر را برمی‌گرداند؛
         اگر معتبر باشد None برمی‌گردد. price/product_id در صورت وجود، شرط‌های
@@ -4605,10 +5275,14 @@ class Database:
                 return f"حداقل مبلغ خرید برای این کد {min_purchase:,} تومان است."
             if max_purchase and price > max_purchase:
                 return f"این کد فقط برای خریدهای تا سقف {max_purchase:,} تومان معتبر است."
+        if user_id is not None:
+            return self._discount_user_invalid_reason(row, int(user_id))
         return None
 
-    def is_discount_code_valid(self, row, price: int = None, product_id: int = None, category_id: int = None) -> bool:
-        return self.get_discount_invalid_reason(row, price, product_id, category_id) is None
+    def is_discount_code_valid(
+        self, row, price: int = None, product_id: int = None, category_id: int = None, user_id: int = None,
+    ) -> bool:
+        return self.get_discount_invalid_reason(row, price, product_id, category_id, user_id) is None
 
     def compute_discount_amount(self, row, price: int) -> int:
         if row["percent"]:
@@ -4660,19 +5334,30 @@ class Database:
             ).fetchone()
 
     def approve_topup(self, topup_id: int) -> bool:
-        """فقط اگر topup هنوز pending یا processing (بعد از claim_topup) باشد اعمال می‌شود."""
+        """تایید شارژ کیف پول و اعمال کش‌بک یک‌باره در صورت فعال بودن."""
         topup = self.get_topup(topup_id)
         if not topup:
             return False
+        percent = max(0, min(int(self.get_setting("topup_cashback_percent", "0") or 0), 100))
+        cashback = (int(topup["amount"] or 0) * percent) // 100
         with self._get_conn() as conn:
             cur = conn.execute(
-                "UPDATE wallet_topups SET status='approved', updated_at=? WHERE id=? AND status='pending'",
-                (datetime.utcnow().isoformat(), topup_id),
+                "UPDATE wallet_topups SET status='approved', updated_at=?, cashback_paid=1, cashback_amount=? "
+                "WHERE id=? AND status='pending'",
+                (datetime.utcnow().isoformat(), cashback, topup_id),
             )
             if cur.rowcount == 0:
                 return False
-        self.add_wallet_credit(topup["user_id"], topup["amount"])
+            conn.execute(
+                "UPDATE users SET referral_credit=MAX(referral_credit + ?,0) WHERE telegram_id=?",
+                (int(topup["amount"]) + cashback, topup["user_id"]),
+            )
         return True
+
+    def get_topup_cashback(self, topup_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT cashback_amount FROM wallet_topups WHERE id=?", (topup_id,)).fetchone()
+        return int(row["cashback_amount"] or 0) if row else 0
 
     def reject_topup(self, topup_id: int) -> bool:
         """فقط topup pending را رد می‌کند (نه processing/approved)."""
@@ -6084,6 +6769,94 @@ class Database:
             )
 
     # -----------------------------------------------------------------------
+    # امتیاز و قرعه‌کشی شبانه F18
+
+    def add_score(self, user_tg_id: int, points: int = 1) -> int:
+        """افزایش اتمیک امتیاز؛ امتیاز منفی مجاز نیست."""
+        if self.get_setting("score_enabled", "1") != "1" or points <= 0:
+            return self.get_user_score(user_tg_id)
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET score=MAX(COALESCE(score,0)+?,0) WHERE telegram_id=?",
+                (int(points), user_tg_id),
+            )
+            row = conn.execute("SELECT COALESCE(score,0) score FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+        return int(row["score"]) if row else 0
+
+    def get_user_score(self, user_tg_id: int) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT COALESCE(score,0) score FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
+        return int(row["score"]) if row else 0
+
+    def get_lottery_settings(self) -> dict:
+        raw = self.get_setting("lottery_prizes", "50000,30000,20000") or ""
+        prizes = []
+        for part in raw.split(","):
+            try:
+                value = int(part.strip())
+                if value > 0:
+                    prizes.append(value)
+            except (TypeError, ValueError):
+                pass
+        prizes = (prizes + [50000, 30000, 20000])[:3]
+        return {
+            "enabled": self.get_setting("lottery_enabled", "1") == "1",
+            "score_enabled": self.get_setting("score_enabled", "1") == "1",
+            "agent_enabled": self.get_setting("lottery_agent_enabled", "0") == "1",
+            "prize_type": self.get_setting("lottery_prize_type", "wallet") or "wallet",
+            "prizes": prizes,
+            "discount_expiry_hours": max(1, int(self.get_setting("lottery_discount_expiry_hours", "24") or 24)),
+            "report_chat_id": self.get_setting("lottery_report_chat_id", "") or "",
+        }
+
+    def list_lottery_logs(self, limit: int = 10):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM lottery_log ORDER BY id DESC LIMIT ?", (max(1, int(limit)),)).fetchall()
+
+    def run_lottery_once(self, lottery_date: str = None) -> dict:
+        """سه نفر اول را به‌صورت اتمیک انتخاب و امتیاز همه را صفر می‌کند.
+        INSERT UNIQUE روی lottery_date مانع اجرای دوباره در چند worker/process است."""
+        from datetime import date as _date
+        lottery_date = lottery_date or _date.today().isoformat()
+        settings = self.get_lottery_settings()
+        if not settings["enabled"] or not settings["score_enabled"]:
+            return {"status": "disabled", "winners": [], "prizes": settings["prizes"]}
+        import json as _json
+        with self._get_conn() as conn:
+            exists = conn.execute("SELECT id FROM lottery_log WHERE lottery_date=?", (lottery_date,)).fetchone()
+            if exists:
+                return {"status": "already_done", "winners": [], "prizes": settings["prizes"]}
+            agent_clause = "" if settings["agent_enabled"] else "AND COALESCE(reseller_tier,'') = '' AND COALESCE(inline_reseller_enabled,0)=0"
+            sql = f"SELECT telegram_id, username, first_name, COALESCE(score,0) score FROM users WHERE is_blocked=0 AND COALESCE(score,0)>0 {agent_clause} ORDER BY score DESC, RANDOM() LIMIT 3"
+            rows = conn.execute(sql).fetchall()
+            winners = []
+            for idx, row in enumerate(rows, 1):
+                winners.append({"rank": idx, "user_id": int(row["telegram_id"]), "username": row["username"], "first_name": row["first_name"], "score": int(row["score"]), "prize": int(settings["prizes"][idx-1])})
+            if not winners:
+                return {"status": "no_winners", "winners": [], "prizes": settings["prizes"]}
+            # ابتدا لاگ یکتا ثبت می‌شود تا دو پردازش همزمان نتوانند جایزه بدهند.
+            conn.execute(
+                "INSERT INTO lottery_log(lottery_date,winners_json,prize_type,prizes_json) VALUES(?,?,?,?)",
+                (lottery_date, _json.dumps(winners, ensure_ascii=False), settings["prize_type"], _json.dumps(settings["prizes"]))
+            )
+            for winner in winners:
+                if settings["prize_type"] == "wallet":
+                    conn.execute("UPDATE users SET referral_credit=MAX(COALESCE(referral_credit,0)+?,0) WHERE telegram_id=?", (winner["prize"], winner["user_id"]))
+            conn.execute("UPDATE users SET score=0 WHERE score IS NOT NULL AND score<>0")
+        # کد تخفیف خارج از transaction اصلی ساخته می‌شود؛ لاگ و صفرشدن امتیاز از قبل قطعی است.
+        if settings["prize_type"] == "discount":
+            for winner in winners:
+                expires = (datetime.utcnow() + timedelta(hours=settings["discount_expiry_hours"])).isoformat()
+                code = f"NIGHT{winner['user_id']}{secrets.randbelow(900000)+100000}"
+                try:
+                    self.create_discount_code(code, percent=winner["prize"], max_uses=1, expires_at=expires, source="lottery")
+                    winner["code"] = code
+                    winner["expires_at"] = expires
+                except Exception:
+                    winner["code"] = None
+        return {"status": "completed", "winners": winners, "prizes": settings["prizes"], "prize_type": settings["prize_type"]}
+
+    # -----------------------------------------------------------------------
     # گردونه شانس
     # -----------------------------------------------------------------------
 
@@ -6142,6 +6915,7 @@ class Database:
             "days_before": int(self.get_setting("renewal_reminder_days_before", "5") or 5),
             "discount_percent": int(self.get_setting("renewal_discount_percent", "20") or 20),
             "discount_expiry_hours": int(self.get_setting("renewal_discount_expiry_hours", "24") or 24),
+            "cashback_percent": max(0, min(int(self.get_setting("renewal_cashback_percent", "0") or 0), 100)),
         }
 
     def get_configs_due_for_renewal_reminder(self):
@@ -6327,6 +7101,16 @@ class Database:
                 "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
             ).fetchall()
 
+    def get_custom_configs_due_for_onhold_sync(self):
+        """سرویس‌های On-hold که هنوز تاریخ انقضای واقعی‌شان از پنل ثبت نشده است."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id as config_id, username, panel_server_id "
+                "FROM custom_configs WHERE status='active' AND start_on_first_use=1 "
+                "AND expires_at IS NULL AND subscription_url IS NOT NULL "
+                "AND TRIM(subscription_url) != ''"
+            ).fetchall()
+
     def get_custom_configs_due_for_connect_check(self):
         """معادل بالا برای کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN."""
         settings = self.get_connect_alert_settings()
@@ -6336,7 +7120,7 @@ class Database:
             return conn.execute(
                 "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
                 "created_at as assigned_at, connect_alert_sent, no_connect_alert_sent, "
-                "COALESCE(display_name, username) as product_name "
+                "COALESCE(display_name, username) as product_name, username, panel_server_id, start_on_first_use "
                 "FROM custom_configs "
                 "WHERE status='active' AND source != 'test' "
                 "AND (connect_alert_sent=0 OR no_connect_alert_sent=0) "
@@ -6625,16 +7409,71 @@ class Database:
     # با موضوع مشخص و وضعیت باز/پاسخ‌داده‌شده/بسته)
     # -----------------------------------------------------------------------
 
-    def create_ticket(self, user_id: int, subject: str, first_message: str) -> int:
+    def ensure_ticket_departments(self):
+        defaults = [("فروش", 10), ("فنی", 20), ("مالی", 30), ("عمومی", 40)]
+        with self._get_conn() as conn:
+            for name, order in defaults:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ticket_departments(name, sort_order, is_active) VALUES (?, ?, 1)",
+                    (name, order),
+                )
+
+    def list_ticket_departments(self, active_only=True):
+        self.ensure_ticket_departments()
+        with self._get_conn() as conn:
+            q = "SELECT * FROM ticket_departments" + (" WHERE is_active=1" if active_only else "") + " ORDER BY sort_order, id"
+            return conn.execute(q).fetchall()
+
+    def get_ticket_department(self, department_id):
+        self.ensure_ticket_departments()
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM ticket_departments WHERE id=?", (department_id,)).fetchone()
+
+    def toggle_ticket_department_admin(self, department_id: int, admin_id: int):
+        self.ensure_ticket_departments()
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT 1 FROM ticket_department_admins WHERE department_id=? AND admin_id=?", (department_id, admin_id)).fetchone()
+            if row:
+                conn.execute("DELETE FROM ticket_department_admins WHERE department_id=? AND admin_id=?", (department_id, admin_id))
+                return False
+            conn.execute("INSERT INTO ticket_department_admins(department_id, admin_id) VALUES (?, ?)", (department_id, admin_id))
+            return True
+
+    def list_ticket_department_admins(self, department_id: int):
+        with self._get_conn() as conn:
+            return [r["admin_id"] for r in conn.execute("SELECT admin_id FROM ticket_department_admins WHERE department_id=?", (department_id,)).fetchall()]
+
+    def list_ticket_admin_ids_for_department(self, department_id: int):
+        self.ensure_ticket_departments()
+        assigned = self.list_ticket_department_admins(department_id)
+        admins = self.list_admins()
+        owner = None
+        for a in self.list_admins_with_roles():
+            if a["role"] == "owner":
+                owner = a["telegram_id"]
+                break
+        if assigned:
+            ids = set(assigned)
+        else:
+            # تا قبل از پیکربندی دپارتمان‌ها رفتار قبلی حفظ می‌شود.
+            ids = set(admins)
+        if owner:
+            ids.add(owner)
+        return sorted(ids)
+
+    def create_ticket(self, user_id: int, subject: str, first_message: str, department_id: int = None) -> int:
+        self.ensure_ticket_departments()
+        if department_id is None:
+            deps = self.list_ticket_departments()
+            department_id = deps[0]["id"] if deps else None
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO tickets (user_id, subject, status) VALUES (?, ?, 'open')",
-                (user_id, subject),
+                "INSERT INTO tickets (user_id, subject, status, department_id) VALUES (?, ?, 'open', ?)",
+                (user_id, subject, department_id),
             )
             ticket_id = cur.lastrowid
             conn.execute(
-                "INSERT INTO ticket_messages (ticket_id, sender, message, is_read_by_user, is_read_by_admin) "
-                "VALUES (?, 'user', ?, 1, 0)",
+                "INSERT INTO ticket_messages (ticket_id, sender, message, is_read_by_user, is_read_by_admin) VALUES (?, 'user', ?, 1, 0)",
                 (ticket_id, first_message),
             )
             return ticket_id
@@ -6792,11 +7631,12 @@ class Database:
     def update_panel_server(self, server_id: int, **fields):
         allowed = {"name", "panel_type", "api_url", "api_username", "api_password",
                    "default_group", "is_active", "template_username", "group_ids", "proxy_settings",
-                   "used_for_custom_config", "used_for_test_config", "used_for_reseller",
+                   "used_for_custom_config", "used_for_test_config", "used_for_reseller", "start_on_first_use",
+                   "max_services", "capacity_alert_sent", "transfer_price", "allow_transfer_target",
                    "xui_inbound_id", "xui_inbound_ids", "xui_sub_base_url"}
         sets, values = [], []
         for k, v in fields.items():
-            if k in allowed and v is not None:
+            if k in allowed and (v is not None or k == "max_services"):
                 sets.append(f"{k}=?")
                 values.append(v.rstrip("/") if k == "api_url" else v)
         if not sets:
@@ -6804,6 +7644,54 @@ class Database:
         values.append(server_id)
         with self._get_conn() as conn:
             conn.execute(f"UPDATE panel_servers SET {', '.join(sets)} WHERE id=?", values)
+
+    def get_panel_capacity_info(self, server_id: int):
+        """وضعیت ظرفیت پنل را بر اساس کانفیگ‌های فعال محاسبه می‌کند.
+        max_services تهی/صفر یعنی نامحدود.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT max_services, capacity_alert_sent FROM panel_servers WHERE id=?", (server_id,)
+            ).fetchone()
+            if not row:
+                return None
+            active = conn.execute(
+                "SELECT COUNT(*) AS c FROM custom_configs WHERE panel_server_id=? AND status='active'",
+                (server_id,),
+            ).fetchone()["c"]
+        limit = int(row["max_services"] or 0)
+        remaining = None if limit <= 0 else max(0, limit - active)
+        percent = 0.0 if limit <= 0 else (active / limit) * 100.0
+        return {
+            "max_services": limit or None,
+            "active_services": active,
+            "remaining": remaining,
+            "percent": percent,
+            "near_limit": bool(limit > 0 and percent >= 90.0),
+            "capacity_alert_sent": bool(row["capacity_alert_sent"]),
+        }
+
+    def panel_has_capacity(self, server_id: int, additional: int = 1) -> bool:
+        if not isinstance(additional, int) or additional < 1:
+            return False
+        info = self.get_panel_capacity_info(server_id)
+        return bool(info and (info["max_services"] is None or info["active_services"] + additional <= info["max_services"]))
+
+    def maybe_mark_panel_capacity_alert(self, server_id: int) -> bool:
+        """اگر ظرفیت به ۹۰٪ رسیده باشد، فقط بار اول True می‌دهد؛
+        وقتی مصرف دوباره زیر ۹۰٪ رفت، فلگ آزاد می‌شود."""
+        info = self.get_panel_capacity_info(server_id)
+        if not info or info["max_services"] is None:
+            return False
+        with self._get_conn() as conn:
+            if info["percent"] >= 90.0:
+                if info["capacity_alert_sent"]:
+                    return False
+                conn.execute("UPDATE panel_servers SET capacity_alert_sent=1 WHERE id=?", (server_id,))
+                return True
+            if info["capacity_alert_sent"]:
+                conn.execute("UPDATE panel_servers SET capacity_alert_sent=0 WHERE id=?", (server_id,))
+        return False
 
     def count_custom_configs_by_panel(self, server_id: int) -> int:
         """چند کانفیگ شخصی (custom_configs) به این پنل وصل هستند. چون panel_server_id
@@ -6835,6 +7723,72 @@ class Database:
             conn.execute("DELETE FROM custom_config_products WHERE panel_server_id=?", (server_id,))
             conn.execute("DELETE FROM panel_servers WHERE id=?", (server_id,))
         return dependent
+
+    def set_panel_health_alert(self, server_id: int, last_alert) -> None:
+        """زمان آخرین هشدار/یادآوری قطعی این پنل را ثبت می‌کند؛ last_alert=None یعنی
+        پاک‌کردن (وقتی پنل دوباره بالا می‌آید و برای قطعی بعدی باید از نو حساب شود)."""
+        with self._get_conn() as conn:
+            conn.execute("UPDATE panel_health SET last_alert=? WHERE server_id=?", (last_alert, server_id))
+
+    def list_panel_health(self) -> dict:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM panel_health").fetchall()
+        return {r["server_id"]: r for r in rows}
+
+    def save_panel_health(
+        self, server_id: int, status: str, fail_count: int, last_check: str, last_change: str, last_error: str,
+    ) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO panel_health (server_id, status, fail_count, last_check, last_change, last_error) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(server_id) DO UPDATE SET status=excluded.status, "
+                "fail_count=excluded.fail_count, last_check=excluded.last_check, "
+                "last_change=excluded.last_change, last_error=excluded.last_error",
+                (server_id, status, fail_count, last_check, last_change, last_error),
+            )
+
+    def add_panel_health_event(self, server_id: int, kind: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO panel_health_events (server_id, kind, created_at) VALUES (?, ?, ?)",
+                (server_id, kind, datetime.utcnow().isoformat()),
+            )
+            conn.execute(
+                "DELETE FROM panel_health_events WHERE created_at < ?",
+                ((datetime.utcnow() - timedelta(days=30)).isoformat(),),
+            )
+
+    def get_report_topics(self, chat_id: int) -> dict:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT topic_key, thread_id FROM report_topics WHERE chat_id=?", (chat_id,),
+            ).fetchall()
+        return {r["topic_key"]: r["thread_id"] for r in rows}
+
+    def set_report_topic(self, chat_id: int, topic_key: str, thread_id: int) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO report_topics (chat_id, topic_key, thread_id) VALUES (?, ?, ?) "
+                "ON CONFLICT(chat_id, topic_key) DO UPDATE SET thread_id=excluded.thread_id",
+                (chat_id, topic_key, thread_id),
+            )
+
+    def clear_report_topics(self) -> None:
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM report_topics")
+
+    def get_latest_panel_health_event_id(self) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT MAX(id) m FROM panel_health_events").fetchone()
+            return row["m"] or 0
+
+    def get_panel_health_events_since(self, event_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT e.*, s.name AS server_name FROM panel_health_events e "
+                "LEFT JOIN panel_servers s ON s.id = e.server_id WHERE e.id > ? ORDER BY e.id",
+                (event_id,),
+            ).fetchall()
 
     def get_panel_server(self, server_id: int):
         with self._get_conn() as conn:
@@ -6873,7 +7827,7 @@ class Database:
         fields = (
             "name", "panel_type", "api_url", "api_username", "api_password",
             "api_key", "template_username", "group_ids", "proxy_settings",
-            "default_group", "xui_inbound_id", "xui_inbound_ids", "xui_sub_base_url",
+            "default_group", "xui_inbound_id", "xui_inbound_ids", "xui_sub_base_url", "start_on_first_use", "max_services",
         )
         keys = source_server.keys()
         values = {f: (source_server[f] if f in keys else None) for f in fields}
@@ -6886,24 +7840,24 @@ class Database:
                     "UPDATE panel_servers SET name=?, panel_type=?, api_url=?, api_username=?, "
                     "api_password=?, api_key=?, template_username=?, group_ids=?, proxy_settings=?, "
                     "default_group=?, xui_inbound_id=?, xui_inbound_ids=?, xui_sub_base_url=?, "
-                    "is_active=1 WHERE id=?",
+                    "start_on_first_use=?, max_services=?, is_active=1 WHERE id=?",
                     (values["name"], values["panel_type"], values["api_url"], values["api_username"],
                      values["api_password"], values["api_key"], values["template_username"],
                      values["group_ids"], values["proxy_settings"], values["default_group"],
                      values["xui_inbound_id"], values["xui_inbound_ids"], values["xui_sub_base_url"],
-                     existing["id"]),
+                     values["start_on_first_use"], values["max_services"], existing["id"]),
                 )
                 return existing["id"]
             cur = conn.execute(
                 "INSERT INTO panel_servers (name, panel_type, api_url, api_username, api_password, "
                 "api_key, template_username, group_ids, proxy_settings, default_group, xui_inbound_id, "
-                "xui_inbound_ids, xui_sub_base_url, is_active, used_for_custom_config, used_for_test_config, "
+                "xui_inbound_ids, xui_sub_base_url, start_on_first_use, max_services, is_active, used_for_custom_config, used_for_test_config, "
                 "used_for_reseller, mirror_source_id, is_mirror) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?, 1)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?, 1)",
                 (values["name"], values["panel_type"], values["api_url"], values["api_username"],
                  values["api_password"], values["api_key"], values["template_username"],
                  values["group_ids"], values["proxy_settings"], values["default_group"],
-                 values["xui_inbound_id"], values["xui_inbound_ids"], values["xui_sub_base_url"],
+                 values["xui_inbound_id"], values["xui_inbound_ids"], values["xui_sub_base_url"], values["start_on_first_use"], values["max_services"],
                  source_server["id"]),
             )
             return cur.lastrowid
@@ -6987,23 +7941,96 @@ class Database:
     def add_custom_config(self, user_id: int, panel_server_id: int, username: str,
                            volume_gb: int, duration_days: int, subscription_url: str,
                            order_id: int = None, expires_at: str = None, source: str = "custom_config",
-                           product_id: int = None) -> int:
+                           product_id: int = None, start_on_first_use: bool = None) -> int:
         """source: 'custom_config' (خرید شخصی)، 'test' (کانفیگ تست پنلی)، یا 'reseller'.
         duration_days=0 یعنی سرویس نامحدود/بدون انقضاست؛ در این حالت expires_at
         خالی (NULL) می‌ماند تا همه‌جا به‌صورت «نامحدود» نمایش داده شود. product_id
         به custom_config_products اشاره می‌کند (NULL برای مسیر سراسری قدیمی)."""
-        if expires_at is None and duration_days:
+        if start_on_first_use is None:
+            with self._get_conn() as conn:
+                server_row = conn.execute(
+                    "SELECT start_on_first_use FROM panel_servers WHERE id=?", (panel_server_id,)
+                ).fetchone()
+            start_on_first_use = bool(server_row and server_row["start_on_first_use"])
+        if expires_at is None and duration_days and not start_on_first_use:
             expires_at = (datetime.utcnow() + timedelta(days=duration_days)).isoformat()
         with self._get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO custom_configs (order_id, user_id, panel_server_id, username, volume_gb, "
-                "duration_days, subscription_url, expires_at, source, product_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "duration_days, subscription_url, expires_at, source, product_id, start_on_first_use) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (order_id, user_id, panel_server_id, username, volume_gb, duration_days, subscription_url,
-                 expires_at, source, product_id),
+                 expires_at, source, product_id, int(bool(start_on_first_use))),
             )
             new_id = cur.lastrowid
         self.add_custom_config_history(new_id, "purchase", f"{volume_gb} گیگ / {duration_days} روز")
         return new_id
+
+    def sync_custom_config_expiry(self, custom_config_id: int, expires_at: str) -> bool:
+        """پس از اولین مصرف، تاریخ انقضای واقعی برگشتی از پنل را در DB ثبت می‌کند."""
+        if not expires_at:
+            return False
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE custom_configs SET expires_at=? WHERE id=? AND status='active' AND start_on_first_use=1",
+                (expires_at, custom_config_id),
+            )
+            return cur.rowcount > 0
+
+    def get_cleanup_candidates(self, now_iso: str, warning_since_iso: str = None):
+        """سرویس‌های custom/test که برای پاکسازی خودکار بررسی می‌شوند.
+
+        سرویس‌های نامحدود، On-hold (start_on_first_use بدون expires_at) و
+        سرویس‌هایی که تمدید خودکارشان فعال است عمداً برگردانده نمی‌شوند.
+        """
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM custom_configs "
+                "WHERE status='active' AND duration_days>0 AND expires_at IS NOT NULL "
+                "AND expires_at<=? AND COALESCE(auto_renew,0)=0 "
+                "AND NOT (COALESCE(start_on_first_use,0)=1 AND expires_at IS NULL) "
+                "ORDER BY expires_at ASC, id ASC",
+                (now_iso,),
+            ).fetchall()
+
+    def get_cleanup_warning_candidates(self, now_iso: str, warning_from_iso: str):
+        """سرویس‌هایی که در آستانه حذف هستند و هنوز هشدار نگرفته‌اند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM custom_configs "
+                "WHERE status='active' AND duration_days>0 AND expires_at IS NOT NULL "
+                "AND expires_at>? AND expires_at<=? AND COALESCE(auto_renew,0)=0 "
+                "AND (cleanup_warning_sent_at IS NULL OR cleanup_warning_sent_at='') "
+                "ORDER BY expires_at ASC, id ASC",
+                (now_iso, warning_from_iso),
+            ).fetchall()
+
+    def mark_cleanup_soft_disabled(self, custom_config_id: int, at_iso: str) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE custom_configs SET enabled=0, cleanup_soft_disabled_at=? "
+                "WHERE id=? AND status='active'",
+                (at_iso, custom_config_id),
+            )
+            return cur.rowcount > 0
+
+    def mark_cleanup_warning_sent(self, custom_config_id: int, at_iso: str) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE custom_configs SET cleanup_warning_sent_at=? "
+                "WHERE id=? AND status='active'",
+                (at_iso, custom_config_id),
+            )
+            return cur.rowcount > 0
+
+    def mark_cleanup_deleted(self, custom_config_id: int, at_iso: str) -> bool:
+        """ثبت حذف منطقی؛ رکورد DB عمداً باقی می‌ماند تا تاریخچه و گزارش حفظ شود."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE custom_configs SET status='deleted', enabled=0, cleanup_deleted_at=? "
+                "WHERE id=? AND status='active'",
+                (at_iso, custom_config_id),
+            )
+            return cur.rowcount > 0
 
     def get_custom_configs_for_user(self, user_id: int, source: str = None):
         with self._get_conn() as conn:
@@ -7136,6 +8163,268 @@ class Database:
         self.set_setting("custom_config_prefix", (prefix or "").strip())
 
     # -----------------------------------------------------------------------
+    # هدیه‌ی گروهی حجم/زمان
+    # -----------------------------------------------------------------------
+
+    def create_bulk_gift_job(self, admin_id, panel_server_id=None, user_ids=None, volume_gb=0, days=0, note=""):
+        user_ids = [int(x) for x in (user_ids or [])]
+        volume_gb = float(volume_gb or 0)
+        days = int(days or 0)
+        if volume_gb <= 0 and days <= 0:
+            raise ValueError("مقدار هدیه باید حجم یا زمان داشته باشد")
+        with self._get_conn() as conn:
+            cond = ["cc.status='active'"]
+            params = []
+            # سرویس‌های تست، هدیه‌ی فروشگاهی نیستند.
+            cond.append("COALESCE(cc.source, '') != 'test'")
+            if panel_server_id:
+                cond.append("cc.panel_server_id=?"); params.append(int(panel_server_id))
+            if user_ids:
+                marks = ','.join('?' for _ in user_ids)
+                cond.append(f"cc.user_id IN ({marks})"); params.extend(user_ids)
+            where = ' AND '.join(cond)
+            rows = conn.execute(
+                f"SELECT cc.id, cc.panel_server_id, cc.user_id, cc.username, cc.start_on_first_use, cc.expires_at "
+                f"FROM custom_configs cc WHERE {where} ORDER BY cc.id", params
+            ).fetchall()
+            if not rows:
+                raise ValueError("هیچ سرویس فعالی برای این هدف پیدا نشد")
+            payload = json.dumps({"volume_gb": volume_gb, "days": days}, ensure_ascii=False)
+            cur = conn.execute(
+                "INSERT INTO bulk_gift_jobs(admin_id,panel_server_id,params_json,total,note) VALUES(?,?,?,?,?)",
+                (admin_id, panel_server_id, payload, len(rows), note or ""),
+            )
+            job_id = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO bulk_gift_items(job_id,custom_config_id,panel_server_id,user_id,username,start_on_first_use,expires_at) VALUES(?,?,?,?,?,?,?)",
+                [(job_id, r['id'], r['panel_server_id'], r['user_id'], r['username'], r['start_on_first_use'] or 0, r['expires_at']) for r in rows],
+            )
+            conn.execute("UPDATE bulk_gift_jobs SET status='running', started_at=CURRENT_TIMESTAMP WHERE id=?", (job_id,))
+            return {"id": job_id, "total": len(rows)}
+
+    def get_bulk_gift_job(self, job_id):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM bulk_gift_jobs WHERE id=?", (job_id,)).fetchone()
+
+    def claim_next_bulk_gift_item(self):
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT i.* FROM bulk_gift_items i JOIN bulk_gift_jobs j ON j.id=i.job_id "
+                "WHERE i.status='pending' AND j.status='running' ORDER BY i.id LIMIT 1"
+            ).fetchone()
+            if not row:
+                # jobs بدون آیتم pending را finalize کن.
+                jobs = conn.execute("SELECT id,total,done,failed FROM bulk_gift_jobs WHERE status='running'").fetchall()
+                for j in jobs:
+                    left = conn.execute("SELECT COUNT(*) c FROM bulk_gift_items WHERE job_id=? AND status='pending'", (j['id'],)).fetchone()['c']
+                    if left == 0:
+                        conn.execute("UPDATE bulk_gift_jobs SET status='done',finished_at=CURRENT_TIMESTAMP WHERE id=?", (j['id'],))
+                return None
+            conn.execute("UPDATE bulk_gift_items SET status='processing',claimed_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'", (row['id'],))
+            return conn.execute("SELECT * FROM bulk_gift_items WHERE id=?", (row['id'],)).fetchone()
+
+    def apply_bulk_gift_success(self, item_id, custom_config_id, add_volume_gb, add_days, panel_expires_at=None):
+        with self._get_conn() as conn:
+            item = conn.execute("SELECT * FROM bulk_gift_items WHERE id=?", (item_id,)).fetchone()
+            if not item or item['status'] != 'processing':
+                return False
+            cc = conn.execute("SELECT * FROM custom_configs WHERE id=?", (custom_config_id,)).fetchone()
+            if not cc:
+                conn.execute("UPDATE bulk_gift_items SET status='failed',error='سرویس دیگر وجود ندارد',completed_at=CURRENT_TIMESTAMP WHERE id=?", (item_id,))
+                return False
+            now = datetime.utcnow()
+            new_exp = cc['expires_at']
+            if add_days:
+                base = now
+                if cc['expires_at']:
+                    try:
+                        dt = datetime.fromisoformat(cc['expires_at'])
+                        if dt > now: base = dt
+                    except ValueError: pass
+                new_exp = (base + timedelta(days=int(add_days))).isoformat()
+            new_volume = (cc['volume_gb'] or 0) + float(add_volume_gb or 0)
+            # اگر provider تاریخ معتبر برگرداند، همان مرجع اصلی است.
+            if panel_expires_at:
+                new_exp = panel_expires_at
+            conn.execute("UPDATE custom_configs SET volume_gb=?, expires_at=? WHERE id=?", (new_volume,new_exp,custom_config_id))
+            conn.execute("UPDATE bulk_gift_items SET status='done',completed_at=CURRENT_TIMESTAMP WHERE id=?", (item_id,))
+            conn.execute("UPDATE bulk_gift_jobs SET done=done+1 WHERE id=?", (item['job_id'],))
+        self.add_custom_config_history(custom_config_id, "gift", f"هدیه گروهی: +{add_volume_gb:g} گیگ / +{add_days} روز")
+        return True
+
+    def fail_bulk_gift_item(self, item_id, error):
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT job_id,status FROM bulk_gift_items WHERE id=?", (item_id,)).fetchone()
+            if not row or row['status'] in ('done','failed'):
+                return False
+            conn.execute("UPDATE bulk_gift_items SET status='failed',error=?,completed_at=CURRENT_TIMESTAMP WHERE id=?", (error[:500], item_id))
+            conn.execute("UPDATE bulk_gift_jobs SET failed=failed+1 WHERE id=?", (row['job_id'],))
+            return True
+
+    def list_bulk_gift_jobs(self, limit=10):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM bulk_gift_jobs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+    def cancel_bulk_gift_job(self, job_id):
+        with self._get_conn() as conn:
+            cur=conn.execute("UPDATE bulk_gift_jobs SET status='cancelled',finished_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'", (job_id,))
+            if cur.rowcount:
+                conn.execute("UPDATE bulk_gift_items SET status='failed',error='عملیات توسط ادمین لغو شد',completed_at=CURRENT_TIMESTAMP WHERE job_id=? AND status IN ('pending','processing')", (job_id,))
+            return cur.rowcount > 0
+
+    # -----------------------------------------------------------------------
+    # تغییر لوکیشن سرویس
+    # -----------------------------------------------------------------------
+
+    def get_location_transfer_targets(self, current_panel_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM panel_servers WHERE is_active=1 AND allow_transfer_target=1 AND id<>? ORDER BY id",
+                (current_panel_id,),
+            ).fetchall()
+
+    def get_location_transfer_policy(self, user_tg_id: int, target_panel_id: int) -> dict:
+        limit = int(self.get_setting("location_change_user_limit", "0") or 0)
+        free_quota = int(self.get_setting("location_change_free_quota", "0") or 0)
+        with self._get_conn() as conn:
+            user = conn.execute(
+                "SELECT location_change_count, referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            panel = conn.execute("SELECT * FROM panel_servers WHERE id=?", (target_panel_id,)).fetchone()
+            free_used = conn.execute(
+                "SELECT COUNT(*) AS c FROM location_change_log WHERE status='completed' AND fee_toman=0"
+            ).fetchone()["c"]
+        if not user or not panel:
+            return {"ok": False, "reason": "not_found"}
+        count = int(user["location_change_count"] or 0)
+        if limit > 0 and count >= limit:
+            return {"ok": False, "reason": "user_limit", "limit": limit, "count": count}
+        price = max(0, int(panel["transfer_price"] or 0))
+        is_free = free_quota > 0 and free_used < free_quota
+        if is_free:
+            price = 0
+        return {
+            "ok": True, "price": price, "base_price": max(0, int(panel["transfer_price"] or 0)),
+            "is_free": is_free, "free_used": free_used, "free_quota": free_quota,
+            "count": count, "limit": limit, "balance": int(user["referral_credit"] or 0),
+        }
+
+    def reserve_location_transfer(self, custom_config_id: int, user_tg_id: int, old_panel_id: int,
+                                  new_panel_id: int, base_price: int, old_username: str = None,
+                                  old_volume_gb: int = None, old_expires_at: str = None, old_subscription_url: str = None) -> dict:
+        """رزرو اتمیک انتقال: سهمیه/کیف پول و رکورد pending را همزمان قفل می‌کند."""
+        limit = int(self.get_setting("location_change_user_limit", "0") or 0)
+        free_quota = int(self.get_setting("location_change_free_quota", "0") or 0)
+        with self._get_conn() as conn:
+            user = conn.execute(
+                "SELECT location_change_count, referral_credit FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            if not user:
+                return {"ok": False, "reason": "user_not_found"}
+            count = int(user["location_change_count"] or 0)
+            if limit > 0 and count >= limit:
+                return {"ok": False, "reason": "user_limit", "limit": limit, "count": count}
+            free_used = conn.execute(
+                "SELECT COUNT(*) AS c FROM location_change_log WHERE status='completed' AND fee_toman=0"
+            ).fetchone()["c"]
+            fee = max(0, int(base_price or 0))
+            if free_quota > 0 and free_used < free_quota:
+                fee = 0
+            if fee > 0:
+                cur = conn.execute(
+                    "UPDATE users SET referral_credit=referral_credit-?, location_change_count=COALESCE(location_change_count,0)+1 "
+                    "WHERE telegram_id=? AND referral_credit>=? AND COALESCE(location_change_count,0)<?",
+                    (fee, user_tg_id, fee, limit if limit > 0 else 2147483647),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE users SET location_change_count=COALESCE(location_change_count,0)+1 WHERE telegram_id=? "
+                    "AND COALESCE(location_change_count,0)<?",
+                    (user_tg_id, limit if limit > 0 else 2147483647),
+                )
+            if cur.rowcount != 1:
+                return {"ok": False, "reason": "insufficient_balance" if fee > 0 else "user_limit"}
+            cur = conn.execute(
+                "INSERT INTO location_change_log(custom_config_id,user_id,old_panel_server_id,new_panel_server_id,fee_toman,status,old_username,old_volume_gb,old_expires_at,old_subscription_url) "
+                "VALUES(?,?,?,?,?,'pending',?,?,?,?)",
+                (custom_config_id, user_tg_id, old_panel_id, new_panel_id, fee, old_username, old_volume_gb, old_expires_at, old_subscription_url),
+            )
+            return {"ok": True, "log_id": cur.lastrowid, "fee": fee, "is_free": fee == 0, "count": count + 1, "limit": limit}
+
+    def update_location_transfer_local_pending(self, log_id: int, custom_config_id: int, new_username: str,
+                                               subscription_url: str, new_volume_gb: int, new_expires_at: str) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM location_change_log WHERE id=? AND status='pending'", (log_id,)).fetchone()
+            if not row:
+                return False
+            cur = conn.execute(
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? "
+                "WHERE id=? AND user_id=? AND status='active'",
+                (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
+            )
+            return cur.rowcount == 1
+
+    def complete_location_transfer(self, log_id: int, custom_config_id: int, new_username: str,
+                                   new_volume_gb: int, new_expires_at: str, detail: str = None,
+                                   subscription_url: str = None) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM location_change_log WHERE id=? AND status='pending'", (log_id,)).fetchone()
+            if not row:
+                return False
+            cur = conn.execute(
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? "
+                "WHERE id=? AND user_id=? AND status='active'",
+                (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
+            )
+            if cur.rowcount != 1:
+                return False
+            conn.execute(
+                "UPDATE location_change_log SET status='completed',new_username=?,new_volume_gb=?,new_expires_at=?,completed_at=CURRENT_TIMESTAMP,detail=? WHERE id=?",
+                (new_username, int(new_volume_gb), new_expires_at, detail, log_id),
+            )
+            return True
+
+    def set_location_transfer_subscription(self, custom_config_id: int, log_id: int, subscription_url: str):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE custom_configs SET subscription_url=? WHERE id=?", (subscription_url, custom_config_id))
+            conn.execute("UPDATE location_change_log SET detail=COALESCE(detail,'') || ? WHERE id=?", (" | لینک مقصد ثبت شد", log_id))
+
+    def rollback_location_transfer(self, log_id: int, reason: str = None) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM location_change_log WHERE id=? AND status IN ('pending','completed')", (log_id,)).fetchone()
+            if not row:
+                return False
+            if row["fee_toman"] > 0:
+                conn.execute("UPDATE users SET referral_credit=COALESCE(referral_credit,0)+? WHERE telegram_id=?", (row["fee_toman"], row["user_id"]))
+            conn.execute("UPDATE users SET location_change_count=MAX(COALESCE(location_change_count,0)-1,0) WHERE telegram_id=?", (row["user_id"],))
+            conn.execute(
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=COALESCE(?,volume_gb), expires_at=? "
+                "WHERE id=? AND user_id=?",
+                (row["old_panel_server_id"], row["old_username"], row["old_subscription_url"], row["old_volume_gb"], row["old_expires_at"], row["custom_config_id"], row["user_id"]),
+            )
+            conn.execute("UPDATE location_change_log SET status='rolled_back',detail=? WHERE id=?", (reason or "rollback", log_id))
+            return True
+
+    def finalize_location_transfer_local(self, log_id: int, custom_config_id: int, new_username: str,
+                                         subscription_url: str, new_volume_gb: int, new_expires_at: str,
+                                         detail: str = None) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM location_change_log WHERE id=? AND status='pending'", (log_id,)).fetchone()
+            if not row:
+                return False
+            cur = conn.execute(
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? WHERE id=? AND user_id=? AND status='active'",
+                (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
+            )
+            if cur.rowcount != 1:
+                return False
+            conn.execute(
+                "UPDATE location_change_log SET status='completed',new_username=?,new_volume_gb=?,new_expires_at=?,completed_at=CURRENT_TIMESTAMP,detail=? WHERE id=?",
+                (new_username, int(new_volume_gb), new_expires_at, detail, log_id),
+            )
+            return True
+
+    # -----------------------------------------------------------------------
     # تاریخچه‌ی سرویس (custom_config_history)
     # -----------------------------------------------------------------------
 
@@ -7209,6 +8498,7 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT * FROM custom_configs WHERE auto_renew=1 AND enabled=1 AND duration_days>0 "
+                "AND (start_on_first_use=0 OR expires_at IS NOT NULL) "
                 "AND expires_at IS NOT NULL AND expires_at<=?",
                 (threshold,),
             ).fetchall()

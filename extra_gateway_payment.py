@@ -14,6 +14,7 @@ import crypto_payment
 import exchange_rate
 import extra_gateway_clients as clients
 import extra_gateway_registry as registry
+import report_router
 from config import API_BASE_URL
 
 logger = logging.getLogger("extra_gateway_payment")
@@ -262,11 +263,7 @@ async def check_invoice(db, invoice) -> str:
 
 
 async def _notify_admins(db, bot, text: str):
-    for admin_id in await asyncio.to_thread(db.list_admins):
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception:
-            pass
+    await report_router.report(bot, db, "error", text)
 
 
 async def _finalize_reseller(db, bot, invoice) -> str:

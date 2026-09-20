@@ -279,7 +279,7 @@ async def finalize_paid_order(db, bot, order_id: int, notify_admins_fn=None) -> 
                 return "⚠️ پرداخت تایید شد ولی موجودی هم‌زمان تمام شده؛ ادمین به‌زودی دستی رسیدگی می‌کند."
             db.approve_order(order_id, [r["id"] for r in results])
             links = [r["link"] for r in results]
-            await check_and_notify_low_stock(bot.send_message, db, order["product_id"])
+            await check_and_notify_low_stock(bot.send_message, db, order["product_id"], bot_token=bot.token)
         await deliver_config_to_user(
             bot, order["user_id"], product["name"] if product else "",
             links, final_price=order["final_price"], order_id=order_id, db=db,

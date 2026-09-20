@@ -18,11 +18,16 @@ class WalletTopup(StatesGroup):
     waiting_customgw_phone = State()
 
 
+class WalletGiftCode(StatesGroup):
+    waiting_code = State()
+
+
 class ContactFlow(StatesGroup):
     waiting_message = State()
 
 
 class TicketFlow(StatesGroup):
+    waiting_department = State()
     waiting_subject = State()
     waiting_message = State()
 
@@ -106,6 +111,12 @@ class AdminEditTestPlan(StatesGroup):
     waiting_duration_hours = State()
 
 
+class AdminCleanupSettings(StatesGroup):
+    waiting_expired_days = State()
+    waiting_test_days = State()
+    waiting_warning_days = State()
+
+
 class AdminForceJoin(StatesGroup):
     waiting_channel = State()
 
@@ -185,6 +196,12 @@ class AdminEditWelcome(StatesGroup):
     waiting_text = State()
 
 
+class AdminCreateWalletGift(StatesGroup):
+    waiting_amount = State()
+    waiting_maxuses = State()
+    waiting_expiry = State()
+
+
 class AdminCreateDiscount(StatesGroup):
     waiting_code = State()
     waiting_type_value = State()
@@ -195,11 +212,17 @@ class AdminCreateDiscount(StatesGroup):
     waiting_scope_category = State()
     waiting_scope_product = State()
     waiting_expiry = State()
+    waiting_per_user = State()
+    waiting_first_only = State()
+    waiting_audience = State()
 
 
 class AdminReferralPercent(StatesGroup):
     waiting_value = State()
 
+
+class AdminReferralMultilevel(StatesGroup):
+    waiting_value = State()
 
 class AdminReferralCommissionMax(StatesGroup):
     waiting_value = State()
@@ -222,6 +245,10 @@ class AdminResellerCredit(StatesGroup):
     waiting_delta = State()
 
 
+class AdminResellerMembership(StatesGroup):
+    waiting_fee_duration = State()
+
+
 class AdminAddResellerBot(StatesGroup):
     waiting_token = State()
     waiting_owner_id = State()
@@ -236,6 +263,8 @@ class AdminSetPanelDomain(StatesGroup):
 
 class AdminWheelSettings(StatesGroup):
     waiting_win_percent = State()
+    waiting_lottery_prizes = State()
+    waiting_lottery_report_chat = State()
     waiting_prizes = State()
     waiting_expiry = State()
     waiting_cooldown = State()
@@ -309,6 +338,10 @@ class AdminBackupSecondaryChat(StatesGroup):
     waiting_chat_id = State()
 
 
+class AdminReportGroup(StatesGroup):
+    waiting_chat_id = State()
+
+
 class AdminBackupSftp(StatesGroup):
     waiting_host = State()
     waiting_port = State()
@@ -336,6 +369,24 @@ class AdminAddPanelServer(StatesGroup):
 class AdminEditProduct(StatesGroup):
     waiting_volume = State()
     waiting_sub_base_url = State()
+
+
+class AdminBulkPrice(StatesGroup):
+    waiting_category = State()
+    waiting_panel = State()
+    waiting_mode = State()
+    waiting_value = State()
+    waiting_rounding = State()
+    waiting_confirm = State()
+
+
+class AdminPanelServerTransfer(StatesGroup):
+    waiting_price = State()
+
+
+class AdminLocationTransferSettings(StatesGroup):
+    waiting_user_limit = State()
+    waiting_free_quota = State()
 
 
 class AdminSetPanelTemplate(StatesGroup):
@@ -459,3 +510,7 @@ class AdminTempMessage(StatesGroup):
     waiting_target_id = State()
     waiting_text = State()
     waiting_custom_minutes = State()
+
+
+class AdminBulkGift(StatesGroup):
+    waiting_params = State()

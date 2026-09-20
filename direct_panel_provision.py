@@ -52,6 +52,12 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
     if not server or not server["is_active"]:
         raise ProvisionError("پنل متصل به این محصول یافت نشد یا غیرفعال است؛ با پشتیبانی تماس بگیرید.")
 
+    if not db.panel_has_capacity(server_id, quantity):
+        info = db.get_panel_capacity_info(server_id) or {}
+        limit = info.get("max_services") or 0
+        used = info.get("active_services", 0)
+        raise ProvisionError(f"ظرفیت پنل تکمیل است ({used}/{limit} سرویس فعال).")
+
     volume_gb = product["auto_provision_volume_gb"]
     if volume_gb is None or volume_gb < 0:
         raise ProvisionError("حجم این محصول تنظیم نشده است.")
@@ -82,6 +88,10 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
 
     try:
         for index in range(quantity):
+            # بررسی دوم درست قبل از ساخت، برای کاهش احتمال عبور از سقف در خریدهای هم‌زمان.
+            if not db.panel_has_capacity(server_id, 1):
+                await _rollback_built()
+                raise ProvisionError("ظرفیت پنل در همین لحظه تکمیل شد؛ مبلغ سفارش به شما برگردانده می‌شود.")
             username = None
             result = None
             wanted = planned[index] if planned else None

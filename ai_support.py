@@ -759,7 +759,7 @@ async def _tool_get_referral_info(db) -> dict:
     return {"ok": True}
 
 
-async def _tool_check_discount_code(db, args: dict) -> dict:
+async def _tool_check_discount_code(db, user_tg_id: int, args: dict) -> dict:
     code = (args.get("code") or "").strip()
     if not code:
         return {"valid": False, "reason": "empty_code"}
@@ -773,7 +773,7 @@ async def _tool_check_discount_code(db, args: dict) -> dict:
         row = db.get_discount_code(code)
         if not row:
             return None, None
-        reason = db.get_discount_invalid_reason(row, product_id=product_id)
+        reason = db.get_discount_invalid_reason(row, product_id=product_id, user_id=user_tg_id)
         return row, reason
 
     row, reason = await asyncio.to_thread(_read)
@@ -1189,7 +1189,7 @@ async def _run_tool_uncached(db, user_tg_id: int, name: str, args: dict) -> dict
     if name == "get_referral_info":
         return await _tool_get_referral_info(db)
     if name == "check_discount_code":
-        return await _tool_check_discount_code(db, args)
+        return await _tool_check_discount_code(db, user_tg_id, args)
     if name == "get_recent_tickets":
         return await _tool_get_recent_tickets(db, user_tg_id)
     if name == "request_purchase_with_wallet":

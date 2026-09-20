@@ -36,6 +36,12 @@ from temp_messages import temp_message_cleanup_loop
 import extra_gateway_payment
 from force_join import ForceJoinMiddleware
 from blocked_user import BlockedUserMiddleware
+from spam_guard import ThrottleMiddleware
+from panel_health import panel_health_loop
+from daily_report import daily_report_loop
+from cleanup_loop import cleanup_loop
+from lottery_loop import lottery_loop
+from report_router import ReportGroupGuardMiddleware
 import keyboards as kb
 
 logger = logging.getLogger(__name__)
@@ -219,9 +225,17 @@ class BotManager:
         dp = Dispatcher(storage=fsm_storage)
         dp.errors.register(_global_error_handler)
 
+        report_guard_mw = ReportGroupGuardMiddleware(db)
+        dp.message.outer_middleware(report_guard_mw)
+        dp.callback_query.outer_middleware(report_guard_mw)
+
         blocked_mw = BlockedUserMiddleware(db)
         dp.message.outer_middleware(blocked_mw)
         dp.callback_query.outer_middleware(blocked_mw)
+
+        throttle_mw = ThrottleMiddleware(db)
+        dp.message.outer_middleware(throttle_mw)
+        dp.callback_query.outer_middleware(throttle_mw)
 
         presence_mw = AdminPresenceMiddleware(db)
         dp.message.outer_middleware(presence_mw)
@@ -283,12 +297,20 @@ class BotManager:
         extra_gateway_task = (
             asyncio.create_task(extra_gateway_payment.poll_loop(bot, db)) if is_main_bot else None
         )
+        panel_health_task = asyncio.create_task(panel_health_loop(bot, db)) if is_main_bot else None
+        daily_report_task = asyncio.create_task(daily_report_loop(bot, db))
+        cleanup_task = asyncio.create_task(cleanup_loop(bot, db))
+        lottery_task = asyncio.create_task(lottery_loop(bot, db))
+        reseller_expiry_task = asyncio.create_task(db.reseller_expiry_loop(bot))
 
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
             "connect_alert_task": connect_alert_task,
             "backup_task": backup_task, "cache_refresh_task": cache_refresh_task,
-            "temp_msg_task": temp_msg_task, "extra_gateway_task": extra_gateway_task, "db_path": db_path,
+            "temp_msg_task": temp_msg_task, "extra_gateway_task": extra_gateway_task,
+            "panel_health_task": panel_health_task, "daily_report_task": daily_report_task,
+            "cleanup_task": cleanup_task, "lottery_task": lottery_task,
+            "reseller_expiry_task": reseller_expiry_task, "db_path": db_path,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
@@ -342,6 +364,41 @@ class BotManager:
             extra_gateway_task.cancel()
             try:
                 await extra_gateway_task
+            except Exception:
+                pass
+        panel_health_task = inst.get("panel_health_task")
+        if panel_health_task:
+            panel_health_task.cancel()
+            try:
+                await panel_health_task
+            except Exception:
+                pass
+        daily_report_task = inst.get("daily_report_task")
+        if daily_report_task:
+            daily_report_task.cancel()
+            try:
+                await daily_report_task
+            except Exception:
+                pass
+        cleanup_task = inst.get("cleanup_task")
+        if cleanup_task:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except Exception:
+                pass
+        lottery_task = inst.get("lottery_task")
+        if lottery_task:
+            lottery_task.cancel()
+            try:
+                await lottery_task
+            except Exception:
+                pass
+        reseller_expiry_task = inst.get("reseller_expiry_task")
+        if reseller_expiry_task:
+            reseller_expiry_task.cancel()
+            try:
+                await reseller_expiry_task
             except Exception:
                 pass
         if BOT_MODE == "webhook" and self.webhook_server is not None:

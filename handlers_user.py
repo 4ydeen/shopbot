@@ -13,7 +13,8 @@ import random
 import re
 import asyncio
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timezone, timedelta
 
 from aiogram import Router, F, Bot, Dispatcher
 from aiogram.filters import CommandStart, Command
@@ -24,7 +25,7 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, Teleg
 
 from md_utils import escape_md, escape_html
 import keyboards as kb
-from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
+from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, WalletTopup, WalletGiftCode, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
 import ai_support
 from config import MAX_TEST_PER_USER, RESELLER_DBS_DIR, resolve_db_path, DB_PATH, ADMIN_PANEL_URL
 from database import Database, DuplicateBotTokenError
@@ -44,6 +45,7 @@ import extra_gateway_registry
 import extra_gateway_user
 import custom_gateway_payment
 import card_to_card_payment
+import report_router
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, ProvisionError
 from direct_panel_provision import provision_direct, planned_usernames, ProvisionError as DirectProvisionError
@@ -432,7 +434,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             elif token.startswith("disc_"):
                 code = token[len("disc_"):]
                 code_row = (await asyncio.to_thread(db.get_discount_code, code))
-                if (await asyncio.to_thread(db.is_discount_code_valid, code_row)):
+                if (await asyncio.to_thread(db.is_discount_code_valid, code_row, user_id=message.from_user.id)):
                     await state.update_data(
                         pending_discount_code_id=code_row["id"],
                         pending_discount_code_label=code_row["code"],
@@ -500,7 +502,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(text)
             return
         tier_info = await _tier_info(message.from_user.id, product["price"], 1)
-        discount_amount, discount_label = await _apply_pending_discount(state, tier_info["total_after"], product_id)
+        discount_amount, discount_label = await _apply_pending_discount(
+            state, tier_info["total_after"], product_id, user_id=message.from_user.id
+        )
         text = _product_confirm_text(product, 1, stock, wallet_credit, discount_amount, discount_label, tier_info)
         await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id, 1, stock, 10 if tier_info["title"] else 0))
 
@@ -657,7 +661,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             text += f"\n👛 موجودی کیف پول شما: {wallet_credit:,} تومان (به‌صورت خودکار در پرداخت اعمال می‌شود)\n"
         return text
 
-    async def _apply_pending_discount(state: FSMContext, total_price: int, product_id: int = None):
+    async def _apply_pending_discount(state: FSMContext, total_price: int, product_id: int = None, user_id: int = None):
         """اگر از دیپ‌لینک کد تخفیف پندینگ داریم و هنوز روی این خرید اعمال نشده،
         همین‌جا اعمالش می‌کند و مبلغ تخفیف/برچسب را برمی‌گرداند. اگر کد به این
         محصول/مبلغ نخورد (مثلاً مخصوص محصول دیگری یا زیر حداقل خرید است)، ساکت
@@ -667,7 +671,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not pending_id:
             return data.get("discount_amount", 0) or 0, ""
         code_row = (await asyncio.to_thread(db.get_discount_code_by_id, pending_id))
-        if not (await asyncio.to_thread(db.is_discount_code_valid, code_row, total_price, product_id)):
+        if not (await asyncio.to_thread(db.is_discount_code_valid, code_row, total_price, product_id, user_id=user_id)):
             await state.update_data(pending_discount_code_id=None, pending_discount_code_label=None)
             return 0, ""
         discount_amount = (await asyncio.to_thread(db.compute_discount_amount, code_row, total_price))
@@ -690,7 +694,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await call.answer()
             return
         tier_info = await _tier_info(call.from_user.id, product["price"], 1)
-        discount_amount, discount_label = await _apply_pending_discount(state, tier_info["total_after"], product_id)
+        discount_amount, discount_label = await _apply_pending_discount(
+            state, tier_info["total_after"], product_id, user_id=call.from_user.id
+        )
         text = _product_confirm_text(product, 1, stock, wallet_credit, discount_amount, discount_label, tier_info)
         await _safe_edit(call.message, text, reply_markup=kb.product_confirm_kb(db, product_id, 1, stock, 10 if tier_info["title"] else 0))
         await call.answer()
@@ -710,7 +716,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         quantity = max(1, min(quantity + delta * step, stock))
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, call.from_user.id))
         tier_info = await _tier_info(call.from_user.id, product["price"], quantity)
-        discount_amount, discount_label = await _apply_pending_discount(state, tier_info["total_after"], product_id)
+        discount_amount, discount_label = await _apply_pending_discount(
+            state, tier_info["total_after"], product_id, user_id=call.from_user.id
+        )
         text = _product_confirm_text(product, quantity, stock, wallet_credit, discount_amount, discount_label, tier_info)
         await _safe_edit(call.message, text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, stock, 10 if tier_info["title"] else 0))
         await call.answer()
@@ -753,7 +761,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         total_price = tier_info["total_after"]
         code_row = (await asyncio.to_thread(db.get_discount_code, message.text.strip()))
         invalid_reason = (await asyncio.to_thread(
-            db.get_discount_invalid_reason, code_row, total_price, product_id
+            db.get_discount_invalid_reason, code_row, total_price, product_id, user_id=message.from_user.id
         ))
         if invalid_reason:
             await message.answer(
@@ -790,6 +798,23 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         await message.answer(text, reply_markup=kb.product_confirm_kb(db, product_id, quantity, max(stock, quantity), 10 if tier_info["title"] else 0))
 
+    async def _report_order_to_group(bot: Bot, order_id: int, caption: str, reply_markup, receipt_file_id: str = None, receipt_type: str = "photo") -> bool:
+        if receipt_file_id:
+            sent = await report_router.send_media(bot, db, "purchase", receipt_file_id, receipt_type, caption, reply_markup)
+        else:
+            sent = await report_router.send_text(bot, db, "purchase", caption, reply_markup)
+        if not sent:
+            return False
+        await asyncio.to_thread(db.set_order_admin_message, order_id, sent.chat.id, sent.message_id)
+        return True
+
+    async def _report_topup_to_group(bot: Bot, topup_id: int, file_id: str, receipt_type: str, caption: str, reply_markup) -> bool:
+        sent = await report_router.send_media(bot, db, "finance", file_id, receipt_type, caption, reply_markup)
+        if not sent:
+            return False
+        await asyncio.to_thread(db.set_topup_admin_message, topup_id, sent.chat.id, sent.message_id)
+        return True
+
     async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo"):
         order = (await asyncio.to_thread(db.get_order, order_id))
 
@@ -814,6 +839,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ ساخته شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
+            if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
+                return
             for admin_id in (await asyncio.to_thread(db.list_admins)):
                 if receipt_file_id:
                     factory = lambda aid=admin_id: _send_receipt_to_admin(
@@ -858,6 +885,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و سرویس تمدید شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
+            if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
+                return
             for admin_id in (await asyncio.to_thread(db.list_admins)):
                 if receipt_file_id:
                     factory = lambda aid=admin_id: _send_receipt_to_admin(
@@ -902,6 +931,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not receipt_file_id and not already_approved:
             caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
 
+        if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
+            return
         for admin_id in (await asyncio.to_thread(db.list_admins)):
             if receipt_file_id:
                 factory = lambda aid=admin_id: _send_receipt_to_admin(
@@ -1078,10 +1109,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         price_after_code = max(total_price - discount_amount, 0)
         wallet_used = min(wallet_credit, price_after_code)
 
+        if discount_code_id:
+            claimed = await asyncio.to_thread(db.claim_discount_use, discount_code_id, call.from_user.id)
+            if not claimed:
+                await state.update_data(
+                    discount_code_id=None, discount_amount=0, discount_product_id=None,
+                    pending_discount_code_id=None, pending_discount_code_label=None,
+                )
+                await call.answer("این کد تخفیف دیگر برای شما قابل استفاده نیست. دوباره تلاش کنید.", show_alert=True)
+                return
         if wallet_used > 0:
             (await asyncio.to_thread(db.add_wallet_credit, call.from_user.id, -wallet_used))
-        if discount_code_id:
-            (await asyncio.to_thread(db.increment_discount_usage, discount_code_id))
 
         order_id = (await asyncio.to_thread(db.create_order, 
             call.from_user.id,
@@ -1147,7 +1185,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                         return
                     (await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results]))
                     links = [r["link"] for r in results]
-                    await check_and_notify_low_stock(bot.send_message, db, product_id)
+                    await check_and_notify_low_stock(bot.send_message, db, product_id, bot_token=bot.token)
                 reward_info = (await asyncio.to_thread(db.reward_referrer_if_first_purchase, call.from_user.id, order["base_price"]))
                 if reward_info:
                     reward_amount, referrer_id = reward_info
@@ -1820,6 +1858,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, message.from_user.id)) if wallet_allowed else 0
         wallet_used = min(wallet_credit, price)
 
+        capacity_ok = await asyncio.to_thread(db.panel_has_capacity, server["id"], 1)
+        if not capacity_ok:
+            cap = await asyncio.to_thread(db.get_panel_capacity_info, server["id"])
+            await message.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]} سرویس فعال).")
+            await state.clear()
+            return
+
         if wallet_used > 0:
             (await asyncio.to_thread(db.add_wallet_credit, message.from_user.id, -wallet_used))
 
@@ -1837,6 +1882,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await state.clear()
                 server_row = (await asyncio.to_thread(db.get_panel_server, server["id"]))
                 try:
+                    if not db.panel_has_capacity(server_row["id"], 1):
+                        raise RuntimeError("ظرفیت پنل در همین لحظه تکمیل شد.")
                     provider = get_provider(server_row)
                     result = await provider.create_user(username, volume_gb, duration_days)
                 except PanelUsernameTakenError:
@@ -2244,6 +2291,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         await _send_test_config_link(message, result['link'], "🧪 کانفیگ تست شما:")
+        await report_router.notify_test_config(
+            message.bot, db, message.from_user.id, message.from_user.full_name, message.from_user.username,
+            "📦 از بانک لینک دستی",
+        )
 
     async def _deliver_test_plan(message: Message, plan) -> None:
         # رفع باگ ریس‌کاندیشن: قبلاً اینجا فقط یک SELECT ساده (get_user) چک
@@ -2279,6 +2330,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             message, result['subscription_url'],
             f"🧪 کانفیگ تست شما ({plan['name']} - {format_plan_amount(plan)}):",
         )
+        await report_router.notify_test_config(
+            message.bot, db, message.from_user.id, message.from_user.full_name, message.from_user.username,
+            f"📦 {escape_html(plan['name'])} - {escape_html(format_plan_amount(plan))}\n"
+            f"🔑 <code>{escape_html(result.get('username') or '')}</code>",
+        )
 
     @router.callback_query(F.data.startswith("user_test_plan:"))
     async def cb_user_test_plan_pick(call: CallbackQuery):
@@ -2291,7 +2347,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await call.answer("این پلن دیگر در دسترس نیست.", show_alert=True)
             return
         await call.message.delete()
-        await _deliver_test_plan(call.message, plan)
+        await _deliver_test_plan(call.message.model_copy(update={"from_user": call.from_user}), plan)
         await call.answer()
 
     # -----------------------------------------------------------------------
@@ -2827,7 +2883,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 f"تمدید خودکار: {'🟢 فعال' if (cc['auto_renew'] if 'auto_renew' in cc.keys() else 0) == 1 else '🔴 غیرفعال'}\n"
                 f"🗓 تاریخ خرید: {to_jalali_str(cc['created_at'], with_time=True)}\n"
             )
-            if cc["expires_at"]:
+            if cc["start_on_first_use"] and not cc["expires_at"]:
+                text += "⏳ انقضا: شروع از اولین اتصال\n"
+            elif cc["expires_at"]:
                 text += f"📅 انقضا: {to_jalali_str(cc['expires_at'], with_time=True)}\n"
             if sub_url:
                 text += f"🔗 `{sub_url}`\n"
@@ -3340,6 +3398,237 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await call.answer("✅ تمدید خودکار فعال شد. هر بار نزدیک انقضا، از کیف پول کسر و تمدید می‌شود.")
         else:
             await call.answer("✅ تمدید خودکار غیرفعال شد.")
+
+    # -----------------------------------------------------------------------
+    # تغییر لوکیشن سرویس: ساخت روی مقصد، سپس حذف مبدا، با rollback
+    # -----------------------------------------------------------------------
+
+    def _location_remaining_days(cc):
+        if not cc["expires_at"]:
+            return 0
+        try:
+            dt = datetime.fromisoformat(cc["expires_at"])
+            if dt.tzinfo:
+                dt = dt.replace(tzinfo=None)
+            seconds = (dt - datetime.utcnow()).total_seconds()
+            return max(1, int(math.ceil(seconds / 86400))) if seconds > 0 else 0
+        except Exception:
+            return 0
+
+    @router.callback_query(F.data.startswith("svc_location:"))
+    async def cb_service_location_ask(call: CallbackQuery):
+        if (await asyncio.to_thread(db.get_setting, "svc_show_location_transfer", "1")) != "1":
+            await call.answer("این قابلیت غیرفعال است.", show_alert=True)
+            return
+        cb_id = call.data.split(":", 1)[1]
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item or item["kind"] != "custom":
+            await call.answer("این مورد یافت نشد.", show_alert=True)
+            return
+        if _is_test_item(item):
+            await call.answer("تغییر لوکیشن برای کانفیگ تست مجاز نیست.", show_alert=True)
+            return
+        cc = item["custom"]
+        if int(cc["start_on_first_use"] or 0) and not cc["expires_at"]:
+            await call.answer("⛔️ این سرویس هنوز استفاده نشده و در حالت On-hold است؛ تغییر لوکیشن مجاز نیست.", show_alert=True)
+            return
+        current_server = await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])
+        if not current_server or not current_server["is_active"]:
+            await call.answer("پنل فعلی سرویس در دسترس نیست.", show_alert=True)
+            return
+        targets = await asyncio.to_thread(db.get_location_transfer_targets, cc["panel_server_id"])
+        targets = [x for x in targets if int(x["id"]) != int(cc["panel_server_id"])]
+        if not targets:
+            await call.answer("هیچ لوکیشن مقصد فعالی برای انتقال تعریف نشده است.", show_alert=True)
+            return
+        policies = {}
+        for target in targets:
+            policy = await asyncio.to_thread(db.get_location_transfer_policy, call.from_user.id, target["id"])
+            policies[target["id"]] = policy
+        if all(not p.get("ok") for p in policies.values()):
+            first = next(iter(policies.values()))
+            if first.get("reason") == "user_limit":
+                await call.answer(f"⛔️ سقف انتقال شما تکمیل شده است ({first.get('count',0)}/{first.get('limit')}).", show_alert=True)
+            else:
+                await call.answer("هیچ مقصد مجازی برای انتقال وجود ندارد.", show_alert=True)
+            return
+        await call.answer()
+        await _safe_edit(
+            call.message,
+            "📍 تغییر لوکیشن سرویس\n\nلوکیشن مقصد را انتخاب کنید.\n"
+            "در انتقال، حجم باقی‌مانده و زمان باقی‌مانده حفظ می‌شود؛ لینک اشتراک قبلی پس از موفقیت از کار می‌افتد.",
+            reply_markup=kb.service_location_targets_kb(cb_id, targets, policies),
+        )
+
+    @router.callback_query(F.data.startswith("svc_location_pick:"))
+    async def cb_service_location_pick(call: CallbackQuery):
+        if (await asyncio.to_thread(db.get_setting, "svc_show_location_transfer", "1")) != "1":
+            await call.answer("این قابلیت غیرفعال است.", show_alert=True)
+            return
+        _, cb_id, target_id_s = call.data.split(":", 2)
+        target_id = int(target_id_s)
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item or item["kind"] != "custom" or _is_test_item(item):
+            await call.answer("این سرویس قابل انتقال نیست.", show_alert=True)
+            return
+        cc = item["custom"]
+        target = await asyncio.to_thread(db.get_panel_server, target_id)
+        if not target or not target["is_active"] or not target["allow_transfer_target"]:
+            await call.answer("لوکیشن مقصد دیگر قابل انتقال نیست.", show_alert=True)
+            return
+        policy = await asyncio.to_thread(db.get_location_transfer_policy, call.from_user.id, target_id)
+        if not policy.get("ok"):
+            if policy.get("reason") == "user_limit":
+                await call.answer(f"⛔️ سقف انتقال شما تکمیل شده است ({policy.get('count',0)}/{policy.get('limit')}).", show_alert=True)
+            else:
+                await call.answer("امکان انتقال به این مقصد وجود ندارد.", show_alert=True)
+            return
+        price = int(policy.get("price", 0))
+        fee_text = "رایگان" if price <= 0 else f"{price:,} تومان"
+        await call.answer()
+        await _safe_edit(
+            call.message,
+            f"⚠️ انتقال «{cc['display_name'] or cc['username']}» به «{target['name']}»\n\n"
+            f"هزینه انتقال: **{fee_text}**\n"
+            "حجم باقی‌مانده و زمان باقی‌مانده منتقل می‌شود.\n"
+            "پس از موفقیت، لینک قدیمی از کار خواهد افتاد.\n\nآیا ادامه می‌دهید؟",
+            parse_mode="Markdown",
+            reply_markup=kb.service_location_confirm_kb(cb_id, target_id),
+        )
+
+    @router.callback_query(F.data.startswith("svc_location_ok:"))
+    async def cb_service_location_confirm(call: CallbackQuery):
+        if (await asyncio.to_thread(db.get_setting, "svc_show_location_transfer", "1")) != "1":
+            await call.answer("این قابلیت غیرفعال است.", show_alert=True)
+            return
+        _, cb_id, target_id_s = call.data.split(":", 2)
+        target_id = int(target_id_s)
+        user_tg_id = call.from_user.id
+        item = _find_my_orders_item(user_tg_id, cb_id)
+        if not item or item["kind"] != "custom" or _is_test_item(item):
+            await call.answer("این سرویس قابل انتقال نیست.", show_alert=True)
+            return
+        cc = item["custom"]
+        old_server = await asyncio.to_thread(db.get_panel_server, cc["panel_server_id"])
+        target = await asyncio.to_thread(db.get_panel_server, target_id)
+        if not old_server or not target or not old_server["is_active"] or not target["is_active"] or not target["allow_transfer_target"]:
+            await call.answer("مبدا یا مقصد دیگر قابل استفاده نیست.", show_alert=True)
+            return
+        if int(cc["start_on_first_use"] or 0) and not cc["expires_at"]:
+            await call.answer("⛔️ سرویس هنوز استفاده نشده و قابل انتقال نیست.", show_alert=True)
+            return
+        cap = await asyncio.to_thread(db.get_panel_capacity_info, target_id)
+        if cap and cap.get("max_services") is not None and cap["active_services"] + 1 > cap["max_services"]:
+            await call.answer("⛔️ ظرفیت لوکیشن مقصد تکمیل است.", show_alert=True)
+            return
+        remaining_days = _location_remaining_days(cc)
+        if cc["expires_at"] and remaining_days <= 0:
+            await call.answer("⛔️ این سرویس منقضی شده است.", show_alert=True)
+            return
+        await call.answer("⏳ در حال انتقال سرویس...")
+        old_provider = get_provider(old_server)
+        target_provider = get_provider(target)
+        try:
+            usage = await old_provider.get_user_usage(cc["username"])
+            used_bytes = max(0, int(usage.get("used_bytes", 0) or 0))
+            limit_bytes = int(usage.get("data_limit_bytes", 0) or 0)
+            if limit_bytes > 0:
+                remaining_bytes = max(limit_bytes - used_bytes, 0)
+                remaining_volume = int(math.ceil(remaining_bytes / (1024 ** 3)))
+            else:
+                remaining_volume = int(cc["volume_gb"] or 0)
+            if remaining_volume <= 0:
+                await call.answer("⛔️ حجم باقی‌مانده برای انتقال وجود ندارد.", show_alert=True)
+                return
+            status = str(usage.get("status") or "").lower()
+            if status in {"on_hold", "on-hold", "onhold", "pending"}:
+                await call.answer("⛔️ این سرویس هنوز استفاده نشده است و قابل انتقال نیست.", show_alert=True)
+                return
+            try:
+                result = await target_provider.create_user(
+                    cc["username"], remaining_volume, remaining_days,
+                    start_on_first_use=False,
+                )
+            except TypeError as te:
+                if "start_on_first_use" not in str(te):
+                    raise
+                result = await target_provider.create_user(cc["username"], remaining_volume, remaining_days)
+        except PanelUsernameTakenError:
+            await call.message.answer("⛔️ نام کاربری این سرویس روی لوکیشن مقصد از قبل وجود دارد؛ سرویس قدیمی دست‌نخورده باقی ماند.")
+            return
+        except PanelError as e:
+            await call.message.answer(f"⛔️ ساخت سرویس روی لوکیشن مقصد ناموفق بود؛ سرویس قدیمی دست‌نخورده باقی ماند.\n{e}")
+            return
+        except Exception:
+            logging.getLogger("handlers_user").exception("location transfer create failed")
+            await call.message.answer("⛔️ هنگام ساخت سرویس روی مقصد خطایی رخ داد؛ سرویس قدیمی دست‌نخورده باقی ماند.")
+            return
+
+        reserve = await asyncio.to_thread(
+            db.reserve_location_transfer, cc["id"], user_tg_id, cc["panel_server_id"], target_id,
+            int(target["transfer_price"] or 0), cc["username"], cc["volume_gb"], cc["expires_at"], cc["subscription_url"],
+        )
+        if not reserve.get("ok"):
+            try:
+                await target_provider.delete_user(result.username)
+            except Exception:
+                logging.getLogger("handlers_user").exception("location transfer rollback delete failed")
+            reason = reserve.get("reason")
+            if reason == "insufficient_balance":
+                await call.message.answer("⛔️ موجودی کیف پول برای هزینه انتقال کافی نیست؛ سرویس قدیمی دست‌نخورده باقی ماند.")
+            elif reason == "user_limit":
+                await call.message.answer("⛔️ سقف تعداد انتقال شما تکمیل شده است؛ سرویس قدیمی دست‌نخورده باقی ماند.")
+            else:
+                await call.message.answer("⛔️ امکان رزرو انتقال وجود نداشت؛ سرویس قدیمی دست‌نخورده باقی ماند.")
+            return
+
+        log_id = reserve["log_id"]
+        new_expiry = cc["expires_at"]
+        try:
+            if not await asyncio.to_thread(
+                db.update_location_transfer_local_pending, log_id, cc["id"], result.username,
+                result.subscription_url, remaining_volume, new_expiry,
+            ):
+                raise RuntimeError("local update failed")
+            if not await asyncio.to_thread(
+                db.complete_location_transfer, log_id, cc["id"], result.username,
+                remaining_volume, new_expiry, f"{old_server['name']} → {target['name']} | هزینه {reserve['fee']:,} تومان",
+                result.subscription_url,
+            ):
+                raise RuntimeError("local finalize failed")
+            try:
+                await old_provider.delete_user(cc["username"])
+            except Exception as old_delete_error:
+                raise RuntimeError(f"old panel delete failed: {old_delete_error}")
+        except Exception as e:
+            logging.getLogger("handlers_user").exception("location transfer finalize failed")
+            try:
+                await target_provider.delete_user(result.username)
+            except Exception:
+                logging.getLogger("handlers_user").exception("location transfer target rollback failed")
+            await asyncio.to_thread(db.rollback_location_transfer, log_id, str(e))
+            await call.message.answer("⛔️ انتقال کامل نشد؛ تلاش شد سرویس و هزینه به وضعیت قبلی برگردد. سرویس قدیمی در صورت موفقیت rollback حفظ شده است.")
+            return
+
+        try:
+            await asyncio.to_thread(
+                db.add_custom_config_history, cc["id"], "location_change",
+                f"انتقال لوکیشن: {old_server['name']} → {target['name']} | {remaining_volume}GB | {remaining_days} روز | هزینه {reserve['fee']:,} تومان",
+            )
+        except Exception:
+            logging.getLogger("handlers_user").exception("location transfer history log failed")
+
+        item2 = _find_my_orders_item(user_tg_id, cb_id)
+        if item2:
+            text = await _my_orders_item_text(item2)
+            await _safe_edit(
+                call.message,
+                "✅ لوکیشن سرویس با موفقیت تغییر کرد.\n\n" + text,
+                parse_mode="Markdown",
+                reply_markup=kb.service_detail_kb(db, cb_id, item2["kind"], True, **_svc_kb_kwargs(item2)),
+            )
+        else:
+            await call.message.answer("✅ لوکیشن سرویس با موفقیت تغییر کرد.")
 
     @router.callback_query(F.data.startswith("svc_transfer:"))
     async def cb_service_transfer_ask(call: CallbackQuery, state: FSMContext):
@@ -4137,6 +4426,27 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         else:
             await message.answer("😔 امروز شانس با تو نبود! فردا دوباره امتحان کن.")
 
+    @router.callback_query(F.data == "wallet_gift_code")
+    async def cb_wallet_gift_code(call: CallbackQuery, state: FSMContext):
+        await state.set_state(WalletGiftCode.waiting_code)
+        await _safe_edit(call.message, "🎁 کد هدیه را ارسال کنید:", reply_markup=kb.cancel_kb())
+        await call.answer()
+
+    @router.message(WalletGiftCode.waiting_code)
+    async def process_wallet_gift_code(message: Message, state: FSMContext):
+        code = message.text.strip()
+        try:
+            result = await asyncio.to_thread(db.redeem_wallet_gift_code, message.from_user.id, code)
+        except ValueError as e:
+            await message.answer(f"❌ {e}\nدوباره تلاش کنید یا انصراف بدهید.", reply_markup=kb.cancel_kb())
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ {result['amount']:,} تومان به کیف پول شما اضافه شد.\n"
+            f"موجودی فعلی: {result['new_balance']:,} تومان",
+            reply_markup=kb.wallet_menu_kb(),
+        )
+
     @router.callback_query(F.data == "start_topup")
     async def cb_start_topup(call: CallbackQuery, state: FSMContext):
         min_topup = int((await asyncio.to_thread(db.get_setting, "min_amount_wallet_topup", "1000")) or "1000")
@@ -4440,13 +4750,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 آیدی عددی: {message.from_user.id}\n"
             f"💰 مبلغ: {amount:,} تومان"
         )
-        for admin_id in (await asyncio.to_thread(db.list_admins)):
-            factory = lambda aid=admin_id: _send_receipt_to_admin(
-                bot, aid, file_id, receipt_type, caption, kb.topup_review_kb(topup_id)
-            )
-            sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup_id)
-            if sent:
-                (await asyncio.to_thread(db.set_topup_admin_message, topup_id, admin_id, sent.message_id))
+        if not await _report_topup_to_group(bot, topup_id, file_id, receipt_type, caption, kb.topup_review_kb(topup_id)):
+            for admin_id in (await asyncio.to_thread(db.list_admins)):
+                factory = lambda aid=admin_id: _send_receipt_to_admin(
+                    bot, aid, file_id, receipt_type, caption, kb.topup_review_kb(topup_id)
+                )
+                sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup_id)
+                if sent:
+                    (await asyncio.to_thread(db.set_topup_admin_message, topup_id, admin_id, sent.message_id))
 
         await message.answer(
             "✅ درخواست شارژ کیف پول شما برای بررسی ارسال شد. پس از تایید ادمین، مبلغ به کیف پول شما اضافه می‌شود.",
@@ -5220,13 +5531,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     f"🆔 آیدی عددی: {message.from_user.id}\n"
                     f"💰 مبلغ: {topup['amount']:,} تومان"
                 )
-                for admin_id in (await asyncio.to_thread(db.list_admins)):
-                    factory = lambda aid=admin_id: _send_receipt_to_admin(
-                        bot, aid, file_id, receipt_type, caption, kb.topup_review_kb(topup["id"])
-                    )
-                    sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup["id"])
-                    if sent:
-                        (await asyncio.to_thread(db.set_topup_admin_message, topup["id"], admin_id, sent.message_id))
+                if not await _report_topup_to_group(bot, topup["id"], file_id, receipt_type, caption, kb.topup_review_kb(topup["id"])):
+                    for admin_id in (await asyncio.to_thread(db.list_admins)):
+                        factory = lambda aid=admin_id: _send_receipt_to_admin(
+                            bot, aid, file_id, receipt_type, caption, kb.topup_review_kb(topup["id"])
+                        )
+                        sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup["id"])
+                        if sent:
+                            (await asyncio.to_thread(db.set_topup_admin_message, topup["id"], admin_id, sent.message_id))
             except Exception:
                 log.exception(
                     "پردازش fallback رسید شارژ کیف‌پول #%s کاربر %s ناموفق بود.",
@@ -5922,7 +6234,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     return
                 await asyncio.to_thread(db.approve_order, order_id, [r["id"] for r in results])
                 links = [r["link"] for r in results]
-                await check_and_notify_low_stock(bot.send_message, db, product_id)
+                await check_and_notify_low_stock(bot.send_message, db, product_id, bot_token=bot.token)
 
             reward_info = await asyncio.to_thread(db.reward_referrer_if_first_purchase, user_id, order["base_price"])
             if reward_info:
@@ -6213,14 +6525,59 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=kb.my_order_delete_confirm_kb(str(service_id)),
         )
 
+    @router.callback_query(F.data.startswith("svc_disruption:"))
+    async def cb_service_disruption(call: CallbackQuery, bot: Bot):
+        cb_id = call.data.split(":", 1)[1]
+        item = _find_my_orders_item(call.from_user.id, cb_id)
+        if not item or item["kind"] != "custom":
+            await call.answer("سرویس یافت نشد.", show_alert=True)
+            return
+        if _is_test_item(item):
+            await call.answer("گزارش اختلال برای سرویس تستی فعال نیست.", show_alert=True)
+            return
+        cc = item["custom"]
+        deps = await asyncio.to_thread(db.list_ticket_departments, True)
+        dep = next((d for d in deps if d["name"] == "فنی"), deps[0] if deps else None)
+        subject = f"گزارش اختلال سرویس «{cc['display_name'] or cc['username']}»"
+        ticket_text = (f"کاربر گزارش اختلال سرویس را ثبت کرد.\n\nنام کاربری پنل: {cc['username']}\n"
+                       f"شناسه سرویس: {cc['id']}\nپنل: {cc['panel_server_id'] or '-'}")
+        ticket_id = await asyncio.to_thread(db.create_ticket, call.from_user.id, subject, ticket_text, dep["id"] if dep else None)
+        await call.message.answer(f"✅ گزارش اختلال ثبت شد. شماره تیکت: #{ticket_id}\nبخش فنی در حال بررسی است.")
+        for admin_id in await asyncio.to_thread(db.list_ticket_admin_ids_for_department, dep["id"] if dep else None):
+            try:
+                await bot.send_message(admin_id, f"⚠️ گزارش اختلال جدید #{ticket_id}\n👤 {call.from_user.id}\n📌 {subject}\n\n{ticket_text}", reply_markup=kb.ticket_admin_notify_kb(ticket_id))
+            except Exception:
+                logging.getLogger("handlers_user").exception("اعلان اختلال #%s به ادمین %s ناموفق بود", ticket_id, admin_id)
+        await call.answer("گزارش ثبت شد")
+
     # --- سیستم تیکت (موضوع مشخص + پیام، مستقل از چت مستقیم بالا) ---
 
     @router.callback_query(F.data == "tickets_new")
     async def cb_tickets_new(call: CallbackQuery, state: FSMContext):
+        departments = await asyncio.to_thread(db.list_ticket_departments, True)
+        await state.set_state(TicketFlow.waiting_department)
+        await _safe_edit(call.message, "🧩 لطفاً بخش مرتبط با درخواست خود را انتخاب کنید:", reply_markup=kb.ticket_departments_kb(departments))
+        await call.answer()
+
+    @router.callback_query(F.data == "ticket_cancel")
+    async def cb_ticket_cancel(call: CallbackQuery, state: FSMContext):
+        await state.clear()
+        await _safe_edit(call.message, "❌ ثبت تیکت لغو شد.", reply_markup=kb.contact_menu_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("ticket_dept:"))
+    async def cb_ticket_department(call: CallbackQuery, state: FSMContext):
+        raw = call.data.split(":", 1)[1]
+        if not raw.isdigit():
+            await call.answer("❌ دپارتمان نامعتبر است.", show_alert=True)
+            return
+        department = await asyncio.to_thread(db.get_ticket_department, int(raw))
+        if not department or not department["is_active"]:
+            await call.answer("❌ این دپارتمان در دسترس نیست.", show_alert=True)
+            return
+        await state.update_data(ticket_department_id=int(raw))
         await state.set_state(TicketFlow.waiting_subject)
-        await _safe_edit(
-            call.message, (await asyncio.to_thread(db.get_setting, "ticket_intro_text")), reply_markup=kb.cancel_kb()
-        )
+        await _safe_edit(call.message, f"🧩 بخش انتخاب‌شده: {department['name']}\n\nموضوع تیکت را ارسال کنید:", reply_markup=kb.cancel_kb())
         await call.answer()
 
     @router.message(TicketFlow.waiting_subject)
@@ -6240,16 +6597,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         data = await state.get_data()
         subject = data.get("ticket_subject") or "بدون موضوع"
+        department_id = data.get("ticket_department_id")
+        department = await asyncio.to_thread(db.get_ticket_department, department_id) if department_id else None
         user = message.from_user
-        ticket_id = (await asyncio.to_thread(db.create_ticket, user.id, subject, message.text))
+        ticket_id = (await asyncio.to_thread(db.create_ticket, user.id, subject, message.text, department_id))
         text = (
             f"🎫 تیکت جدید #{ticket_id}\n"
             f"👤 {user.first_name or ''} (@{user.username or '---'})\n"
             f"🆔 {user.id}\n"
-            f"📌 موضوع: {subject}\n\n"
+            f"📌 موضوع: {subject}\n"
+            f"🧩 بخش: {(department['name'] if department else 'عمومی')}\n\n"
             f"✉️ {message.text}"
         )
-        for admin_id in (await asyncio.to_thread(db.list_admins)):
+        for admin_id in (await asyncio.to_thread(db.list_ticket_admin_ids_for_department, department_id)):
             try:
                 await bot.send_message(admin_id, text, reply_markup=kb.ticket_admin_notify_kb(ticket_id))
             except Exception:
@@ -6346,7 +6706,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 {user.id}\n\n"
             f"✉️ {message.text}"
         )
-        admin_ids = [ticket["claimed_by"]] if ticket["claimed_by"] else (await asyncio.to_thread(db.list_admins))
+        admin_ids = [ticket["claimed_by"]] if ticket["claimed_by"] else (await asyncio.to_thread(db.list_ticket_admin_ids_for_department, ticket["department_id"]))
         for admin_id in admin_ids:
             try:
                 await bot.send_message(admin_id, text, reply_markup=kb.ticket_admin_notify_kb(ticket_id))
