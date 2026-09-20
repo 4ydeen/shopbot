@@ -71,12 +71,16 @@ import extra_gateway_clients
 import extra_gateway_payment
 import extra_gateway_registry
 import payment_engine
+import report_router
 import card_to_card_payment
 from asset_versioning import static_version, ApiNoStoreMiddleware
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER, PAYMENT_METHOD_META
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
@@ -592,6 +596,7 @@ def api_custom_configs(auth=Depends(get_verified_user)):
             "subscription_url": c["subscription_url"],
             "created_at": c["created_at"],
             "expires_at": c["expires_at"],
+            "start_on_first_use": (c["start_on_first_use"] if "start_on_first_use" in c.keys() else 0) == 1,
             "is_test": c["source"] == "test",
             "enabled": (c["enabled"] if "enabled" in c.keys() else 1) == 1,
             "auto_renew": (c["auto_renew"] if "auto_renew" in c.keys() else 0) == 1,
@@ -1047,6 +1052,9 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
     server = db.get_panel_server_for_usage("custom_config")
     if not server or not server["is_active"]:
         raise HTTPException(status_code=400, detail="در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست.")
+    if not db.panel_has_capacity(server["id"], 1):
+        cap = db.get_panel_capacity_info(server["id"])
+        raise HTTPException(status_code=409, detail=f"ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]} سرویس فعال).")
 
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
@@ -1070,6 +1078,8 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
     try:
         if order["final_price"] <= 0:
             try:
+                if not db.panel_has_capacity(server["id"], 1):
+                    raise RuntimeError("ظرفیت پنل در همین لحظه تکمیل شد.")
                 provider = get_provider(server)
                 result = await provider.create_user(username, body.volume_gb, settings["duration_days"])
             except Exception as e:
@@ -1180,6 +1190,32 @@ def api_test_config_status(auth=Depends(get_verified_user)):
     }
 
 
+_background_tasks = set()
+
+
+async def _report_test_claim(bot_token: str, db, tg_id: int, detail_html: str) -> None:
+    bot = None
+    try:
+        if report_router.get_chat_id(db) is None:
+            return
+        row = db.get_user(tg_id)
+        bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        await report_router.notify_test_config(
+            bot, db, tg_id, (row["first_name"] if row else "") or "", row["username"] if row else None, detail_html,
+        )
+    except Exception:
+        logging.getLogger("miniapp").warning("اعلان کانفیگ تست ناموفق بود.", exc_info=True)
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+def _schedule_test_claim_report(tenant, db, tg_id: int, detail_html: str) -> None:
+    task = asyncio.create_task(_report_test_claim(tenant.bot_token, db, tg_id, detail_html))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 @app.post("/api/test-config/claim")
 async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_joined)):
     tg_id, db, tenant = auth
@@ -1225,6 +1261,11 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
             except ProvisionError as e:
                 db.release_test_slot(tg_id)
                 raise HTTPException(status_code=409, detail=str(e))
+        _schedule_test_claim_report(
+            tenant, db, tg_id,
+            f"📦 {html_lib.escape(plan['name'])} - {html_lib.escape(format_plan_amount(plan))}\n"
+            f"🔑 <code>{html_lib.escape(result.get('username') or '')}</code>",
+        )
         return {"link": result["subscription_url"]}
 
     if not is_full_access:
@@ -1240,6 +1281,7 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
     if not result:
         db.release_test_slot(tg_id)
         raise HTTPException(status_code=400, detail="متاسفانه موجودی کانفیگ تست تمام شده است.")
+    _schedule_test_claim_report(tenant, db, tg_id, "📦 از بانک لینک دستی")
     return {"link": result["link"]}
 
 
@@ -1720,7 +1762,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     discount_amount = 0
     if body.discount_code:
         code_row = db.get_discount_code(body.discount_code)
-        invalid_reason = db.get_discount_invalid_reason(code_row, total_price, body.product_id)
+        invalid_reason = db.get_discount_invalid_reason(code_row, total_price, body.product_id, user_id=tg_id)
         if invalid_reason:
             raise HTTPException(status_code=400, detail=invalid_reason)
         discount_amount = db.compute_discount_amount(code_row, total_price)
@@ -1730,10 +1772,10 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     price_after_code = max(total_price - discount_amount, 0)
     wallet_used = min(wallet_credit, price_after_code)
 
+    if discount_code_id and not db.claim_discount_use(discount_code_id, tg_id):
+        raise HTTPException(status_code=400, detail="این کد تخفیف دیگر برای شما قابل استفاده نیست.")
     if wallet_used > 0:
         db.add_wallet_credit(tg_id, -wallet_used)
-    if discount_code_id:
-        db.increment_discount_usage(discount_code_id)
 
     order_id = db.create_order(
         tg_id, body.product_id, base_price=total_price,
@@ -1775,7 +1817,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
                         json={"chat_id": admin_id, "text": text},
                     )
 
-            await check_and_notify_low_stock(_send_admin_msg, db, body.product_id)
+            await check_and_notify_low_stock(_send_admin_msg, db, body.product_id, bot_token=tenant.bot_token)
 
             db.reward_referrer_if_first_purchase(tg_id, order["final_price"] or total_price)
             order = db.get_order(order_id)
@@ -3123,7 +3165,7 @@ async def _complete_generic_gateway_payment(db: Database, tenant: "Tenant", invo
             order["user_id"], product["name"] if product else "", [r["link"] for r in results],
             final_price=order["final_price"], order_id=order_id, db=db, bot_token=tenant.bot_token,
         ))
-        await check_and_notify_low_stock(_notify, db, order["product_id"])
+        await check_and_notify_low_stock(_notify, db, order["product_id"], bot_token=tenant.bot_token)
     else:
         db.release_order_claim(order_id)
         for admin_id in db.list_admins():
@@ -4125,6 +4167,7 @@ class PanelServerUpdate(BaseModel):
     api_url: Optional[str] = None
     api_username: Optional[str] = None
     api_password: Optional[str] = None
+    max_services: Optional[int] = None
 
 
 class PanelServerSetTemplate(BaseModel):
@@ -4148,7 +4191,7 @@ class CustomConfigSettingsUpdate(BaseModel):
     max_gb: Optional[int] = None
 
 
-def _panel_server_public(s) -> dict:
+def _panel_server_public(s, db) -> dict:
     is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
     xui_inbound_ids = parse_xui_inbound_ids(s) if s["panel_type"] in INBOUND_SELECT_PANEL_TYPES else []
     if is_sub_base_type:
@@ -4156,6 +4199,11 @@ def _panel_server_public(s) -> dict:
         configured = bool(s["xui_sub_base_url"]) and (bool(xui_inbound_ids) if needs_inbound else True)
     else:
         configured = bool(s["group_ids"] and s["proxy_settings"])
+    cap = None
+    try:
+        cap = db.get_panel_capacity_info(s["id"])
+    except Exception:
+        pass
     return {
         "id": s["id"], "name": s["name"], "panel_type": s["panel_type"],
         "api_url": s["api_url"], "template_username": s["template_username"],
@@ -4165,13 +4213,16 @@ def _panel_server_public(s) -> dict:
         "used_for_custom_config": bool(s["used_for_custom_config"]),
         "used_for_test_config": bool(s["used_for_test_config"]),
         "default_group": s["default_group"], "is_active": bool(s["is_active"]),
+        "max_services": cap["max_services"] if cap else None,
+        "active_services": cap["active_services"] if cap else 0,
+        "capacity_percent": cap["percent"] if cap else 0,
     }
 
 
 @app.get("/api/admin/panel-servers")
 def api_admin_list_panel_servers(auth=Depends(require_full_access_admin)):
     _, db, _ = auth
-    return [_panel_server_public(s) for s in db.get_panel_servers()]
+    return [_panel_server_public(s, db) for s in db.get_panel_servers()]
 
 
 @app.post("/api/admin/panel-servers")
@@ -4281,6 +4332,7 @@ def api_admin_edit_panel_server(server_id: int, body: PanelServerUpdate, auth=De
     db.update_panel_server(
         server_id, name=body.name, api_url=body.api_url,
         api_username=body.api_username, api_password=body.api_password,
+        max_services=(None if body.max_services == 0 else body.max_services),
     )
     return {"status": "ok"}
 
@@ -5167,6 +5219,7 @@ class RenewalSettingsUpdate(BaseModel):
     days_before: int
     discount_percent: int
     discount_expiry_hours: int
+    cashback_percent: int = 0
 
 
 class VolumeReminderSettingsUpdate(BaseModel):
@@ -5560,6 +5613,30 @@ def api_admin_get_renewal_settings(auth=Depends(require_senior_admin)):
     return db.get_renewal_settings()
 
 
+@app.get("/api/admin/settings/cashback")
+def api_admin_get_cashback_settings(auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    return {
+        "renewal_cashback_percent": int(db.get_setting("renewal_cashback_percent", "0") or 0),
+        "topup_cashback_percent": int(db.get_setting("topup_cashback_percent", "0") or 0),
+    }
+
+
+class CashbackSettingsUpdate(BaseModel):
+    renewal_cashback_percent: int = 0
+    topup_cashback_percent: int = 0
+
+
+@app.post("/api/admin/settings/cashback")
+def api_admin_set_cashback_settings(body: CashbackSettingsUpdate, auth=Depends(require_senior_admin)):
+    _, db, _ = auth
+    for name, value in (("renewal_cashback_percent", body.renewal_cashback_percent), ("topup_cashback_percent", body.topup_cashback_percent)):
+        if value < 0 or value > 100:
+            raise HTTPException(status_code=400, detail="درصد کش‌بک باید بین ۰ تا ۱۰۰ باشد.")
+        db.set_setting(name, str(value))
+    return {"status": "ok"}
+
+
 @app.post("/api/admin/settings/renewal")
 def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(require_senior_admin)):
     _, db, _ = auth
@@ -5567,10 +5644,13 @@ def api_admin_set_renewal_settings(body: RenewalSettingsUpdate, auth=Depends(req
         raise HTTPException(status_code=400, detail="درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.")
     if body.days_before <= 0 or body.discount_expiry_hours <= 0:
         raise HTTPException(status_code=400, detail="مقادیر روز/ساعت باید بزرگ‌تر از صفر باشند.")
+    if body.cashback_percent < 0 or body.cashback_percent > 100:
+        raise HTTPException(status_code=400, detail="درصد کش‌بک باید بین ۰ تا ۱۰۰ باشد.")
     db.set_setting("renewal_reminder_enabled", "1" if body.enabled else "0")
     db.set_setting("renewal_reminder_days_before", str(body.days_before))
     db.set_setting("renewal_discount_percent", str(body.discount_percent))
     db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
+    db.set_setting("renewal_cashback_percent", str(body.cashback_percent))
     return {"status": "ok"}
 
 
@@ -5678,6 +5758,9 @@ class DiscountCreate(BaseModel):
     max_purchase: Optional[int] = None
     product_id: Optional[int] = None
     category_id: Optional[int] = None
+    per_user_limit: Optional[int] = None
+    first_purchase_only: bool = False
+    audience: str = "all"
 
 
 def _discount_to_dict(d):
@@ -5691,6 +5774,9 @@ def _discount_to_dict(d):
         "max_purchase": d["max_purchase"] if "max_purchase" in keys else None,
         "product_id": d["product_id"] if "product_id" in keys else None,
         "category_id": d["category_id"] if "category_id" in keys else None,
+        "per_user_limit": d["per_user_limit"] if "per_user_limit" in keys else None,
+        "first_purchase_only": bool(d["first_purchase_only"]) if "first_purchase_only" in keys else False,
+        "audience": (d["audience"] if "audience" in keys else None) or "all",
     }
 
 
@@ -5717,6 +5803,8 @@ def api_admin_create_discount(body: DiscountCreate, auth=Depends(require_senior_
         max_uses=body.max_uses, expires_at=body.expires_at, source="admin",
         min_purchase=body.min_purchase, max_purchase=body.max_purchase,
         product_id=body.product_id, category_id=body.category_id,
+        per_user_limit=body.per_user_limit, first_purchase_only=body.first_purchase_only,
+        audience=body.audience,
     )
     return _discount_to_dict(db.get_discount_code_by_id(discount_id))
 
