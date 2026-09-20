@@ -149,7 +149,8 @@ class ThreeXUIProvider(BasePanelProvider):
         (مثلاً ساخت لینک کانفیگ دستی به‌جای subscription) هم قابل استفاده باشد."""
         sub_id = secrets.token_hex(8)
         client_uuid = str(uuid.uuid4())
-        expiry_ms = int((time.time() + duration_days * 86400) * 1000) if duration_days else 0  # 0 = بدون انقضا
+        start_on_first_use = bool(self.server["start_on_first_use"]) if "start_on_first_use" in self.server.keys() else False
+        expiry_ms = (-int(duration_days * 86400000)) if duration_days and start_on_first_use else (int((time.time() + duration_days * 86400) * 1000) if duration_days else 0)  # 0 = بدون انقضا
         data_limit_bytes = int(volume_gb * (1024 ** 3))  # 0 = نامحدود
         client = {
             "id": client_uuid,
@@ -164,7 +165,7 @@ class ThreeXUIProvider(BasePanelProvider):
         }
         return client, sub_id
 
-    async def create_user(self, username: str, volume_gb: int, duration_days: int) -> PanelUserResult:
+    async def create_user(self, username: str, volume_gb: int, duration_days: int, start_on_first_use: bool = False) -> PanelUserResult:
         inbound_ids = self._inbound_ids()
         sub_base_url = self.server["xui_sub_base_url"]
         if not inbound_ids or not sub_base_url:
@@ -219,10 +220,16 @@ class ThreeXUIProvider(BasePanelProvider):
 
         obj = data.get("obj") or {}
         used = (obj.get("up") or 0) + (obj.get("down") or 0)
+        expiry = obj.get("expiryTime")
+        try:
+            expiry = int(expiry) if expiry is not None else 0
+        except (TypeError, ValueError):
+            expiry = 0
         return {
             "used_bytes": used,
             "data_limit_bytes": obj.get("total", 0) or 0,
             "status": "active" if obj.get("enable") else "disabled",
+            "expires_at": (expiry / 1000.0) if expiry > 10000 else None,
         }
 
     async def get_user(self, username: str) -> PanelUserResult:
@@ -344,8 +351,12 @@ class ThreeXUIProvider(BasePanelProvider):
                     current_expiry = int(current_expiry)
                 except (TypeError, ValueError):
                     current_expiry = 0
-                base_ms = current_expiry if current_expiry > now_ms else now_ms
-                new_expiry = base_ms + add_days * 86400000 if add_days else current_expiry
+                is_on_hold = current_expiry < -10000
+                if is_on_hold:
+                    new_expiry = current_expiry - (add_days * 86400000) if add_days else current_expiry
+                else:
+                    base_ms = current_expiry if current_expiry > now_ms else now_ms
+                    new_expiry = base_ms + add_days * 86400000 if add_days else current_expiry
                 # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
                 # سقف حجم را با بستهٔ تازه جایگزین می‌کند، وگرنه حجم باقیمانده‌ی قبلی هم به
                 # اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد (تمدید کامل

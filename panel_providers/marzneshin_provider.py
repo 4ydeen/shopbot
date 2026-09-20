@@ -81,12 +81,13 @@ class MarzneshinProvider(BasePanelProvider):
 
         return {"group_ids": service_ids, "proxy_settings": {}}
 
-    async def create_user(self, username: str, volume_gb: int, duration_days: int) -> PanelUserResult:
+    async def create_user(self, username: str, volume_gb: int, duration_days: int, start_on_first_use: bool = False) -> PanelUserResult:
         service_ids = self.server["group_ids"]
         if not service_ids:
             raise PanelError(
                 "سرویس‌های این سرور تنظیم نشده. اول از «تعیین کاربر نمونه» استفاده کن."
             )
+        start_on_first_use = bool(self.server["start_on_first_use"]) if "start_on_first_use" in self.server.keys() else bool(start_on_first_use)
         payload = {
             "username": username,
             "service_ids": json.loads(service_ids) if isinstance(service_ids, str) else service_ids,
@@ -94,7 +95,10 @@ class MarzneshinProvider(BasePanelProvider):
             "data_limit_reset_strategy": "no_reset",
             "note": "ساخته‌شده توسط ShopVPN (کانفیگ شخصی)",
         }
-        if duration_days:
+        if duration_days and start_on_first_use:
+            payload["expire_strategy"] = "start_on_first_use"
+            payload["usage_duration"] = int(duration_days * 86400)
+        elif duration_days:
             expire_dt = datetime.datetime.now() + datetime.timedelta(days=duration_days)
             payload["expire_strategy"] = "fixed_date"
             payload["expire_date"] = expire_dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -155,6 +159,7 @@ class MarzneshinProvider(BasePanelProvider):
             "used_bytes": data.get("used_traffic", 0) or 0,
             "data_limit_bytes": data.get("data_limit", 0) or 0,
             "status": data.get("status", ""),
+            "expires_at": data.get("expire_date"),
         }
 
     async def get_user(self, username: str) -> PanelUserResult:
@@ -316,6 +321,8 @@ class MarzneshinProvider(BasePanelProvider):
                 raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             now_dt = datetime.datetime.now()
+            is_start_on_first_use = current.get("expire_strategy") == "start_on_first_use"
+            current_usage_duration = int(current.get("usage_duration") or 0)
             current_expire_str = current.get("expire_date")
             current_expire_dt = None
             if current_expire_str:
@@ -339,10 +346,15 @@ class MarzneshinProvider(BasePanelProvider):
             else:
                 new_limit = current.get("data_limit")
 
-            payload = {"data_limit": new_limit}
-            if new_expire_dt:
-                payload["expire_strategy"] = "fixed_date"
-                payload["expire_date"] = new_expire_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            if is_start_on_first_use:
+                payload = {"data_limit": new_limit,
+                           "expire_strategy": "start_on_first_use",
+                           "usage_duration": current_usage_duration + int(add_days * 86400)}
+            else:
+                payload = {"data_limit": new_limit}
+                if new_expire_dt:
+                    payload["expire_strategy"] = "fixed_date"
+                    payload["expire_date"] = new_expire_dt.strftime("%Y-%m-%dT%H:%M:%S")
             try:
                 async with session.put(
                     f"{self._base_url()}/api/users/{username}", json=payload, headers=headers,

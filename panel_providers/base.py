@@ -34,7 +34,7 @@ class BasePanelProvider(ABC):
         self.server = server
 
     @abstractmethod
-    async def create_user(self, username: str, volume_gb: int, duration_days: int) -> PanelUserResult:
+    async def create_user(self, username: str, volume_gb: int, duration_days: int, start_on_first_use: bool = False) -> PanelUserResult:
         """کاربر جدید روی پنل می‌سازد و لینک اشتراک را برمی‌گرداند."""
         raise NotImplementedError
 

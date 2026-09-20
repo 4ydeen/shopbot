@@ -112,22 +112,26 @@ class PasarguardProvider(BasePanelProvider):
             "proxy_settings": self._clean_proxy_settings(data.get("proxy_settings")),
         }
 
-    async def create_user(self, username: str, volume_gb: int, duration_days: int) -> PanelUserResult:
+    async def create_user(self, username: str, volume_gb: int, duration_days: int, start_on_first_use: bool = False) -> PanelUserResult:
         group_ids = self.server["group_ids"]
         proxy_settings = self.server["proxy_settings"]
         if not group_ids or not proxy_settings:
             raise PanelError(
                 "قالب گروه/پروکسی برای این سرور تنظیم نشده. اول از «تعیین کاربر نمونه» استفاده کن."
             )
+        start_on_first_use = bool(self.server["start_on_first_use"]) if "start_on_first_use" in self.server.keys() else bool(start_on_first_use)
         payload = {
             "username": username,
             "proxy_settings": json.loads(proxy_settings) if isinstance(proxy_settings, str) else proxy_settings,
             "group_ids": json.loads(group_ids) if isinstance(group_ids, str) else group_ids,
             "data_limit": int(volume_gb * (1024 ** 3)),  # 0 = نامحدود
-            "expire": (int(time.time() + duration_days * 86400)) if duration_days else 0,  # 0 = بدون انقضا
+            "expire": (int(time.time() + duration_days * 86400)) if duration_days and not start_on_first_use else 0,
             "note": "ساخته‌شده توسط ShopVPN (کانفیگ شخصی)",
             "data_limit_reset_strategy": "no_reset",
+            "status": "on_hold" if start_on_first_use and duration_days else "active",
         }
+        if start_on_first_use and duration_days:
+            payload["on_hold_expire_duration"] = int(duration_days * 86400)
         async with aiohttp.ClientSession() as session:
             token = await self._get_token(session)
             try:
@@ -183,6 +187,7 @@ class PasarguardProvider(BasePanelProvider):
             "used_bytes": data.get("used_traffic", 0) or 0,
             "data_limit_bytes": data.get("data_limit", 0) or 0,
             "status": data.get("status", ""),
+            "expires_at": _expire_to_epoch(data.get("expire")),
         }
 
     async def get_user(self, username: str) -> PanelUserResult:
@@ -279,6 +284,8 @@ class PasarguardProvider(BasePanelProvider):
                 raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             now_ts = int(time.time())
+            is_on_hold = str(current.get("status", "")).lower() == "on_hold"
+            current_hold_duration = int(current.get("on_hold_expire_duration") or 0)
             current_expire = _expire_to_epoch(current.get("expire"))
             base_expire = current_expire if (current_expire and current_expire > now_ts) else now_ts
             new_expire = base_expire + add_days * 86400 if add_days else current_expire
@@ -296,7 +303,11 @@ class PasarguardProvider(BasePanelProvider):
             else:
                 new_limit = current.get("data_limit")
 
-            payload = {"data_limit": new_limit, "expire": new_expire, "status": "active"}
+            if is_on_hold:
+                payload = {"data_limit": new_limit, "expire": 0, "status": "on_hold",
+                           "on_hold_expire_duration": current_hold_duration + int(add_days * 86400)}
+            else:
+                payload = {"data_limit": new_limit, "expire": new_expire, "status": "active"}
             try:
                 async with session.put(
                     f"{self._base_url()}/api/user/{username}", json=payload, headers=headers,

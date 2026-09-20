@@ -119,23 +119,26 @@ class MarzbanProvider(BasePanelProvider):
             "proxy_settings": self._clean_proxies(data.get("proxies")),
         }
 
-    async def create_user(self, username: str, volume_gb: int, duration_days: int) -> PanelUserResult:
+    async def create_user(self, username: str, volume_gb: int, duration_days: int, start_on_first_use: bool = False) -> PanelUserResult:
         inbounds = self.server["group_ids"]
         proxies = self.server["proxy_settings"]
         if not inbounds or not proxies:
             raise PanelError(
                 "قالب inbounds/proxies برای این سرور تنظیم نشده. اول از «تعیین کاربر نمونه» استفاده کن."
             )
+        start_on_first_use = bool(self.server["start_on_first_use"]) if "start_on_first_use" in self.server.keys() else bool(start_on_first_use)
         payload = {
             "username": username,
             "proxies": json.loads(proxies) if isinstance(proxies, str) else proxies,
             "inbounds": json.loads(inbounds) if isinstance(inbounds, str) else inbounds,
             "data_limit": int(volume_gb * (1024 ** 3)),  # 0 = نامحدود (استاندارد Marzban)
-            "expire": (int(time.time() + duration_days * 86400)) if duration_days else 0,  # 0 = بدون انقضا
+            "expire": (int(time.time() + duration_days * 86400)) if duration_days and not start_on_first_use else 0,  # on-hold زمان را بعد از اولین اتصال شروع می‌کند
             "note": "ساخته‌شده توسط ShopVPN (کانفیگ شخصی)",
             "data_limit_reset_strategy": "no_reset",
-            "status": "active",
+            "status": "on_hold" if start_on_first_use and duration_days else "active",
         }
+        if start_on_first_use and duration_days:
+            payload["on_hold_expire_duration"] = int(duration_days * 86400)
         async with aiohttp.ClientSession() as session:
             token = await self._get_token(session)
             try:
@@ -191,6 +194,7 @@ class MarzbanProvider(BasePanelProvider):
             "used_bytes": data.get("used_traffic", 0) or 0,
             "data_limit_bytes": data.get("data_limit", 0) or 0,
             "status": data.get("status", ""),
+            "expires_at": _expire_to_epoch(data.get("expire")),
         }
 
     async def get_user(self, username: str) -> PanelUserResult:
@@ -286,6 +290,8 @@ class MarzbanProvider(BasePanelProvider):
                 raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
             now_ts = int(time.time())
+            is_on_hold = str(current.get("status", "")).lower() == "on_hold"
+            current_hold_duration = int(current.get("on_hold_expire_duration") or 0)
             current_expire = _expire_to_epoch(current.get("expire"))
             base_expire = current_expire if (current_expire and current_expire > now_ts) else now_ts
             new_expire = base_expire + add_days * 86400 if add_days else current_expire
@@ -304,7 +310,15 @@ class MarzbanProvider(BasePanelProvider):
             else:
                 new_limit = current.get("data_limit")
 
-            payload = {"data_limit": new_limit, "expire": new_expire, "status": "active"}
+            if is_on_hold:
+                payload = {
+                    "data_limit": new_limit,
+                    "expire": 0,
+                    "status": "on_hold",
+                    "on_hold_expire_duration": current_hold_duration + int(add_days * 86400),
+                }
+            else:
+                payload = {"data_limit": new_limit, "expire": new_expire, "status": "active"}
             try:
                 async with session.put(
                     f"{self._base_url()}/api/user/{username}", json=payload, headers=headers,
