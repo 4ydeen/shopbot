@@ -727,6 +727,7 @@ async function renderHome() {
       link: c.subscription_url,
       links: c.subscription_url ? [c.subscription_url] : [],
       expires_at: c.expires_at || null,
+      start_on_first_use: !!c.start_on_first_use,
     }));
     const allActive = [...active, ...customCards];
 
@@ -1050,6 +1051,7 @@ async function renderServices() {
       link: c.subscription_url,
       links: c.subscription_url ? [c.subscription_url] : [],
       expires_at: c.expires_at || null,
+      start_on_first_use: !!c.start_on_first_use,
     }));
     const all = [...orders, ...customCards];
 
@@ -1160,12 +1162,12 @@ function serviceInactiveRow(o) {
 
 function orderCard(o, opts = {}) {
   const deletable = !!opts.deletable;
-  const exp = o.expires_at ? toJalaliStr(o.expires_at) : "نامحدود";
+  const exp = o.expires_at ? toJalaliStr(o.expires_at) : (o.start_on_first_use ? "شروع از اولین اتصال" : "نامحدود");
   const links = (o.links && o.links.length) ? o.links : (o.link ? [o.link] : []);
   const showSvcActions = o.is_custom_config && !o.is_test && o.custom_config_id;
   return `
     <div class="order-block">
-      <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">فعال تا ${exp}</span></div>
+      <div class="stat-row"><span>${o.product_name}${o.quantity > 1 ? ` × ${o.quantity}` : ""}</span><span class="badge approved">${o.start_on_first_use && !o.expires_at ? "فعال · شروع از اولین اتصال" : `فعال تا ${exp}`}</span></div>
       ${links.map((link, idx) => {
         const delKind = o.is_custom_config ? "custom" : "order";
         const delId = o.is_custom_config ? o.custom_config_id : (o.config_ids && o.config_ids[idx]);
@@ -5634,6 +5636,10 @@ async function renderAdminSalesSection() {
             if (d.max_purchase) constraints.push(`حداکثر خرید ${fmt(d.max_purchase)} ت`);
             if (d.product_id) { const p = (allProducts || []).find((x) => x.id === d.product_id); constraints.push(`مخصوص محصول: ${p ? p.name : "#" + d.product_id}`); }
             else if (d.category_id) { const c = (allCategories || []).find((x) => x.id === d.category_id); constraints.push(`مخصوص دسته: ${c ? c.name : "#" + d.category_id}`); }
+            if (d.per_user_limit) constraints.push(`هر کاربر ${d.per_user_limit} بار`);
+            if (d.first_purchase_only) constraints.push("فقط خرید اول");
+            if (d.audience === "normal") constraints.push("فقط کاربران عادی");
+            else if (d.audience === "reseller") constraints.push("فقط نمایندگان");
             if (d.expires_at) constraints.push(`انقضا: ${String(d.expires_at).slice(0, 10)}`);
             return `
             <div class="admin-list-row">
@@ -5674,7 +5680,19 @@ async function renderAdminSalesSection() {
             ${(allProducts || []).length ? `<optgroup label="فقط یک محصول خاص">${(allProducts || []).map((p) => `<option value="prod:${p.id}">📦 ${p.name}</option>`).join("")}</optgroup>` : ""}
           </select>
           <label class="field-label">تاریخ انقضا (اختیاری)</label>
-          <input class="input" id="new-disc-expires" type="date" style="margin-bottom:4px" />
+          <input class="input" id="new-disc-expires" type="date" style="margin-bottom:10px" />
+          <label class="field-label">سقف استفاده‌ی هر کاربر (خالی یعنی نامحدود)</label>
+          <input class="input" id="new-disc-peruser" type="number" min="0" placeholder="مثال: 1" style="margin-bottom:10px" />
+          <label class="field-label">قابل استفاده برای</label>
+          <select class="input" id="new-disc-audience" style="margin-bottom:10px">
+            <option value="all">👥 همه‌ی کاربران</option>
+            <option value="normal">🙂 فقط کاربران عادی</option>
+            <option value="reseller">🤝 فقط نمایندگان</option>
+          </select>
+          <div class="field-switch-row">
+            <span>فقط برای اولین خرید کاربر</span>
+            <label class="switch"><input type="checkbox" id="new-disc-firstonly" /><span class="switch-slider"></span></label>
+          </div>
           <div class="field-error" id="new-disc-error"></div>
           <button class="btn" id="new-disc-save" style="margin-top:8px">➕ افزودن کد تخفیف</button>
         </div>
@@ -5906,6 +5924,9 @@ async function renderAdminSalesSection() {
             max_purchase: maxPurchaseVal ? Number(maxPurchaseVal) : null,
             product_id: productId, category_id: categoryId,
             expires_at: expiresVal ? new Date(expiresVal + "T23:59:59").toISOString() : null,
+            per_user_limit: Number(document.getElementById("new-disc-peruser").value) || null,
+            first_purchase_only: document.getElementById("new-disc-firstonly").checked,
+            audience: document.getElementById("new-disc-audience").value,
           }),
         });
         tg.HapticFeedback.notificationOccurred("success");
