@@ -950,7 +950,6 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_support_messages_user_id ON support_messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
-                CREATE INDEX IF NOT EXISTS idx_tickets_department_id ON tickets(department_id);
                 CREATE INDEX IF NOT EXISTS idx_ticket_department_admins_admin ON ticket_department_admins(admin_id);
                 CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
                 CREATE INDEX IF NOT EXISTS idx_reseller_bots_active ON reseller_bots(is_active);
@@ -1825,6 +1824,7 @@ class Database:
                 "INSERT OR IGNORE INTO settings (key, value) VALUES ('_migrated_btn_my_orders_rename', '1')"
             )
 
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_department_id ON tickets(department_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_configs_order_id ON configs(order_id)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_logs_record ON admin_logs(record_type, record_id)"
