@@ -1054,7 +1054,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
         raise HTTPException(status_code=400, detail="در حال حاضر سروری برای ساخت کانفیگ شخصی فعال نیست.")
     if not db.panel_has_capacity(server["id"], 1):
         cap = db.get_panel_capacity_info(server["id"])
-        raise HTTPException(status_code=409, detail=f"ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]} سرویس فعال).")
+        raise HTTPException(status_code=409, detail=f"ظرفیت پنل تکمیل است ({cap['active_services']}/{cap['max_services']} سرویس فعال).")
 
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
@@ -4213,9 +4213,9 @@ def _panel_server_public(s, db) -> dict:
         "used_for_custom_config": bool(s["used_for_custom_config"]),
         "used_for_test_config": bool(s["used_for_test_config"]),
         "default_group": s["default_group"], "is_active": bool(s["is_active"]),
-        "max_services": cap["max_services"] if cap else None,
-        "active_services": cap["active_services"] if cap else 0,
-        "capacity_percent": cap["percent"] if cap else 0,
+        "max_services": cap['max_services'] if cap else None,
+        "active_services": cap['active_services'] if cap else 0,
+        "capacity_percent": cap['percent'] if cap else 0,
     }
 
 
