@@ -196,18 +196,22 @@ MSG_FA[install_failed]="⚠️ بات اجرا نشد. برای بررسی خط�
 # update_bot / update_miniapp
 MSG_EN[bot_not_installed]="⛔️ Bot not installed yet. Run option 1 (install) first."
 MSG_FA[bot_not_installed]="⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن."
-MSG_EN[fetching_latest]="🔄 Fetching the latest changes from GitHub..."
-MSG_FA[fetching_latest]="🔄 دریافت آخرین تغییرات از گیت‌هاب..."
-MSG_EN[updating_packages]="🐍 Updating packages..."
-MSG_FA[updating_packages]="🐍 آپدیت پکیج‌ها..."
-MSG_EN[restarting_bot_service]="♻️ Restarting the bot service..."
-MSG_FA[restarting_bot_service]="♻️ ری‌استارت سرویس بات..."
+MSG_EN[fetching_latest]="🔄 Fetching latest changes from GitHub"
+MSG_FA[fetching_latest]="🔄 دریافت آخرین تغییرات از گیت‌هاب"
+MSG_EN[updating_packages]="🐍 Updating Python packages"
+MSG_FA[updating_packages]="🐍 آپدیت پکیج‌های پایتون"
+MSG_EN[restarting_bot_service]="♻️ Restarting bot service"
+MSG_FA[restarting_bot_service]="♻️ ری‌استارت سرویس بات"
+MSG_EN[update_bot_header]="Updating Bot"
+MSG_FA[update_bot_header]="آپدیت بات"
 MSG_EN[update_done]="✅ Bot updated."
 MSG_FA[update_done]="✅ آپدیت بات انجام شد."
 MSG_EN[miniapp_not_installed]="⛔️ Mini App not installed yet. Run option 10 (setup Mini App) first."
 MSG_FA[miniapp_not_installed]="⛔️ مینی‌اپ هنوز نصب نشده. اول گزینه ۱۰ (نصب/تنظیم مینی‌اپ) را بزن."
-MSG_EN[restarting_miniapp_service]="♻️ Restarting the Mini App service..."
-MSG_FA[restarting_miniapp_service]="♻️ ری‌استارت سرویس مینی‌اپ..."
+MSG_EN[restarting_miniapp_service]="♻️ Restarting Mini App service"
+MSG_FA[restarting_miniapp_service]="♻️ ری‌استارت سرویس مینی‌اپ"
+MSG_EN[update_miniapp_header]="Updating Mini App"
+MSG_FA[update_miniapp_header]="آپدیت مینی‌اپ"
 MSG_EN[miniapp_update_done]="✅ Mini App updated."
 MSG_FA[miniapp_update_done]="✅ آپدیت مینی‌اپ انجام شد."
 
@@ -354,8 +358,10 @@ MSG_FA[miniapp_removed]="✅ مینی‌اپ حذف شد."
 # update_admin_panel / remove_admin_panel
 MSG_EN[panel_not_installed_yet]="⛔️ Admin panel not installed yet. Run option 13 (setup admin panel) first."
 MSG_FA[panel_not_installed_yet]="⛔️ پنل مدیریت هنوز نصب نشده. اول گزینه ۱۳ (نصب/تنظیم پنل مدیریت) را بزن."
-MSG_EN[restarting_panel_service]="♻️ Restarting the admin panel service..."
-MSG_FA[restarting_panel_service]="♻️ ری‌استارت سرویس پنل مدیریت..."
+MSG_EN[restarting_panel_service]="♻️ Restarting admin panel service"
+MSG_FA[restarting_panel_service]="♻️ ری‌استارت سرویس پنل مدیریت"
+MSG_EN[update_panel_header]="Updating Admin Panel"
+MSG_FA[update_panel_header]="آپدیت پنل مدیریت"
 MSG_EN[panel_update_done]="✅ Admin panel updated."
 MSG_FA[panel_update_done]="✅ آپدیت پنل مدیریت انجام شد."
 MSG_EN[remove_panel_warn]="⚠️ This will remove the admin panel service and its nginx config (SSL certificate is kept; panel accounts in the database are untouched)."
@@ -618,6 +624,40 @@ pause() {
 }
 
 # ---------------------------------------------------------------------------
+# Step-progress UI for multi-step flows (update, etc.)
+# رابط نمایش مرحله‌ای برای عملیات چندمرحله‌ای (آپدیت و ...)
+# ---------------------------------------------------------------------------
+section_header() {
+    local title="$1" fill pad
+    fill=$(( UI_WIDTH - ${#title} - 3 ))
+    [ "$fill" -lt 0 ] && fill=0
+    printf -v pad '%*s' "$fill" ''
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}▌ ${title}${RESET} ${DIM}${pad// /─}${RESET}"
+    echo ""
+}
+
+# run_step <index> <total> <label> <command...>
+# Runs <command...>, then prints a single aligned result line:
+#   [i/N] ✓ label   (green, on success)
+#   [i/N] ✗ label   (red, plus last lines of output, on failure)
+run_step() {
+    local idx="$1" total="$2" label="$3" out status
+    shift 3
+    out="$("$@" 2>&1)"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+        printf '  %b[%s/%s]%b %b✓%b %s\n' "${CYAN}${BOLD}" "$idx" "$total" "$RESET" "${GREEN}${BOLD}" "$RESET" "$label"
+    else
+        printf '  %b[%s/%s]%b %b✗%b %s\n' "${CYAN}${BOLD}" "$idx" "$total" "$RESET" "${RED}${BOLD}" "$RESET" "$label"
+        if [ -n "$out" ]; then
+            echo "$out" | tail -5 | sed "s/^/        ${DIM}/" | sed "s/\$/${RESET}/"
+        fi
+    fi
+    return "$status"
+}
+
+# ---------------------------------------------------------------------------
 # Action: full initial install / عملیات: نصب اولیه کامل
 # ---------------------------------------------------------------------------
 install_bot() {
@@ -694,31 +734,45 @@ update_bot() {
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}$(t fetching_latest)${RESET}"
-    fetch_project_code "$INSTALL_DIR"
-    echo -e "${CYAN}$(t updating_packages)${RESET}"
-    source venv/bin/activate
-    pip install -r requirements.txt --quiet
-    deactivate
-    echo -e "${CYAN}$(t restarting_bot_service)${RESET}"
-    sudo systemctl restart "$SERVICE_NAME"
-    sleep 2
 
     MINIAPP_SERVICE="${SERVICE_NAME}-miniapp"
-    if systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service"; then
-        echo -e "${CYAN}$(t restarting_miniapp_service)${RESET}"
-        sudo systemctl restart "$MINIAPP_SERVICE"
-        sleep 2
-    fi
-
     PANEL_SERVICE="${SERVICE_NAME}-adminpanel"
-    if systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service"; then
-        echo -e "${CYAN}$(t restarting_panel_service)${RESET}"
-        sudo systemctl restart "$PANEL_SERVICE"
-        sleep 2
+    local has_miniapp=0 has_panel=0
+    systemctl list-units --full -all | grep -q "${MINIAPP_SERVICE}.service" && has_miniapp=1
+    systemctl list-units --full -all | grep -q "${PANEL_SERVICE}.service" && has_panel=1
+
+    local total=3
+    [ "$has_miniapp" = "1" ] && total=$((total+1))
+    [ "$has_panel" = "1" ] && total=$((total+1))
+    local step=0 failed=0
+
+    section_header "$(t update_bot_header)"
+
+    step=$((step+1))
+    run_step "$step" "$total" "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+
+    step=$((step+1))
+    run_step "$step" "$total" "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+
+    step=$((step+1))
+    run_step "$step" "$total" "$(t restarting_bot_service)" bash -c "sudo systemctl restart '$SERVICE_NAME' && sleep 2" || failed=1
+
+    if [ "$has_miniapp" = "1" ]; then
+        step=$((step+1))
+        run_step "$step" "$total" "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
     fi
 
-    echo -e "${GREEN}$(t update_done)${RESET}"
+    if [ "$has_panel" = "1" ]; then
+        step=$((step+1))
+        run_step "$step" "$total" "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
+    fi
+
+    draw_rule
+    if [ "$failed" = "0" ] && systemctl is-active --quiet "$SERVICE_NAME"; then
+        echo -e "  ${GREEN}${BOLD}$(t update_done)${RESET}"
+    else
+        echo -e "  ${RED}$(t install_failed "$SERVICE_NAME")${RESET}"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -735,16 +789,19 @@ update_miniapp() {
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}$(t fetching_latest)${RESET}"
-    fetch_project_code "$INSTALL_DIR"
-    echo -e "${CYAN}$(t updating_packages)${RESET}"
-    source venv/bin/activate
-    pip install -r requirements.txt --quiet
-    deactivate
-    echo -e "${CYAN}$(t restarting_miniapp_service)${RESET}"
-    sudo systemctl restart "$MINIAPP_SERVICE"
-    sleep 2
-    echo -e "${GREEN}$(t miniapp_update_done)${RESET}"
+
+    local failed=0
+    section_header "$(t update_miniapp_header)"
+    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step 3 3 "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
+
+    draw_rule
+    if [ "$failed" = "0" ] && systemctl is-active --quiet "$MINIAPP_SERVICE"; then
+        echo -e "  ${GREEN}${BOLD}$(t miniapp_update_done)${RESET}"
+    else
+        echo -e "  ${RED}$(t install_failed "$MINIAPP_SERVICE")${RESET}"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1269,16 +1326,19 @@ update_admin_panel() {
         return
     fi
     cd "$INSTALL_DIR"
-    echo -e "${CYAN}$(t fetching_latest)${RESET}"
-    fetch_project_code "$INSTALL_DIR"
-    echo -e "${CYAN}$(t updating_packages)${RESET}"
-    source venv/bin/activate
-    pip install -r requirements.txt --quiet
-    deactivate
-    echo -e "${CYAN}$(t restarting_panel_service)${RESET}"
-    sudo systemctl restart "$PANEL_SERVICE"
-    sleep 2
-    echo -e "${GREEN}$(t panel_update_done)${RESET}"
+
+    local failed=0
+    section_header "$(t update_panel_header)"
+    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step 3 3 "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
+
+    draw_rule
+    if [ "$failed" = "0" ] && systemctl is-active --quiet "$PANEL_SERVICE"; then
+        echo -e "  ${GREEN}${BOLD}$(t panel_update_done)${RESET}"
+    else
+        echo -e "  ${RED}$(t install_failed "$PANEL_SERVICE")${RESET}"
+    fi
 }
 
 # ---------------------------------------------------------------------------
