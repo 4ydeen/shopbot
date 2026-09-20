@@ -9,6 +9,7 @@
      صفحه ست می‌شود تا بعد از نصب، آیکون به پنل همان نماینده باز شود. -->
 <link rel="manifest" id="pwa-manifest-link" href="/manifest.json">
 <meta name="theme-color" content="#0B0C14">
+<meta name="asset-version" content="{{ASSET_VERSION}}">
 
 <!-- آیفون (سافاری از manifest.json پشتیبانی کامل ندارد؛ این متاتگ‌ها لازم‌اند) -->
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -19,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=5">
+<link rel="stylesheet" href="/assets/style.css">
 <script>
 (function(){
   var t = { theme:'android', mode:'light' };
@@ -154,6 +155,6 @@
 
 <div id="toast-root" class="toast-root"></div>
 
-<script src="/assets/app.js?v=5"></script>
+<script src="/assets/app.js"></script>
 </body>
 </html>

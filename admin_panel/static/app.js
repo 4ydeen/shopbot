@@ -732,6 +732,25 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+(function watchAppVersion() {
+  const meta = document.querySelector('meta[name="asset-version"]');
+  const current = meta && meta.content;
+  if (!current || current.startsWith('{{')) return;
+  const isTyping = () => {
+    const el = document.activeElement;
+    return !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
+  };
+  const check = async () => {
+    try {
+      const res = await fetch('/api/app-version', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.v && data.v !== current && !isTyping()) location.reload();
+    } catch (e) {}
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  setInterval(() => { if (!document.hidden) check(); }, 60000);
+})();
+
 let deferredInstallPrompt = null;
 
 function isStandalonePwa() {
