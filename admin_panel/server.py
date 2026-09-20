@@ -45,6 +45,7 @@ from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 import button_registry
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel import mobile_auth
+from asset_versioning import file_digest, static_version, ApiNoStoreMiddleware
 from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file, get_me as tg_get_me
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
@@ -75,6 +76,7 @@ COOKIE_NAME = "panel_session"
 NOTIFY_POLL_SECONDS = 15
 
 app = FastAPI(title="ShopVPN Admin Panel")
+app.add_middleware(ApiNoStoreMiddleware)
 main_db = Database(DB_PATH)
 main_db.init_db(owner_id=OWNER_ID)
 
@@ -6271,20 +6273,20 @@ def serve_manifest(request: Request):
     return JSONResponse(manifest, media_type="application/manifest+json")
 
 
-def _asset_version(filename: str) -> int:
-    try:
-        return int(os.path.getmtime(os.path.join(STATIC_DIR, filename)))
-    except OSError:
-        return int(time.time())
+def _asset_version(filename: str) -> str:
+    return file_digest(os.path.join(STATIC_DIR, filename))
 
 
 def _bust_asset_cache(html: str) -> str:
-    # کش‌شکن خودکار: هر بار app.js یا style.css عوض شود mtime‌شان هم عوض
-    # می‌شود، پس مرورگر دیگر نسخه‌ی قدیمیِ کش‌شده را اجرا نمی‌کند — بدون
-    # نیاز به دستی زیاد کردن شماره‌ی ورژن در هر دیپلوی.
     html = html.replace('src="/assets/app.js"', f'src="/assets/app.js?v={_asset_version("app.js")}"')
     html = html.replace('href="/assets/style.css"', f'href="/assets/style.css?v={_asset_version("style.css")}"')
+    html = html.replace("{{ASSET_VERSION}}", static_version(STATIC_DIR))
     return html
+
+
+@app.get("/api/app-version")
+def app_version():
+    return {"v": static_version(STATIC_DIR)}
 
 
 @app.get("/", response_class=HTMLResponse)
