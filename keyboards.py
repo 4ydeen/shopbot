@@ -1011,7 +1011,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_abangateway_payments", "💳 پرداخت‌های آبان گیت وی", "adm_abangateway_payments"),
     ("adm_blupal_payments", "💳 پرداخت‌های بلوپال", "adm_blupal_payments"),
     ("adm_noapay_payments", "⭐ پرداخت‌های NoapayBot", "adm_noapay_payments"),
-    ("adm_xgw_payments", "💠 پرداخت‌های درگاه‌های جدید", "adm_xgw_payments"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
@@ -1036,7 +1035,6 @@ ADMIN_PANEL_ITEMS = [
     ("adm_set_abangateway", "💳 تنظیم درگاه آبان گیت وی", "adm_set_abangateway"),
     ("adm_set_blupal", "💳 تنظیم درگاه بلوپال", "adm_set_blupal"),
     ("adm_set_noapay", "⭐ تنظیم درگاه NoapayBot", "adm_set_noapay"),
-    ("adm_set_xgw", "🧩 تنظیم درگاه‌های زرین‌پال/آقای پرداخت/...", "adm_set_xgw"),
     ("adm_card_auto", "📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "adm_card_auto"),
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
@@ -1051,6 +1049,14 @@ ADMIN_PANEL_ITEMS = [
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
     ("adm_set_support_contact", "🆔 آیدی مدیر برای چت مستقیم", "adm_set_support_contact"),
     ("adm_ai_support_settings", "🤖 دستیار هوشمند (سوالات متداول)", "adm_ai_support_settings"),
+]
+
+ADMIN_PANEL_ITEMS += [
+    (f"adm_xgw_pay_{_k}", f"{extra_gateway_registry.GATEWAYS[_k]['icon']} پرداخت‌های {extra_gateway_registry.GATEWAYS[_k]['title']}", f"adm_xgw_payments:{_k}")
+    for _k in extra_gateway_registry.GATEWAY_ORDER
+] + [
+    (f"adm_set_xgw_{_k}", f"{extra_gateway_registry.GATEWAYS[_k]['icon']} تنظیم درگاه {extra_gateway_registry.GATEWAYS[_k]['title']}", f"adm_xgw:{_k}")
+    for _k in extra_gateway_registry.GATEWAY_ORDER
 ]
 
 
@@ -1073,7 +1079,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_abangateway_payments",
         "adm_blupal_payments",
         "adm_noapay_payments",
-        "adm_xgw_payments",
+        *[f"adm_xgw_pay_{_k}" for _k in extra_gateway_registry.GATEWAY_ORDER],
         "adm_reseller_requests_menu",
     ]),
     ("products", "📦 محصولات و کانفیگ", [
@@ -1107,7 +1113,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_set_abangateway",
         "adm_set_blupal",
         "adm_set_noapay",
-        "adm_set_xgw",
+        *[f"adm_set_xgw_{_k}" for _k in extra_gateway_registry.GATEWAY_ORDER],
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
@@ -1158,7 +1164,7 @@ def _admin_item_label_and_cb(key: str):
 
 
 def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
-    if key in ("adm_set_xgw", "adm_xgw_payments") and not is_main_bot:
+    if key.startswith(("adm_set_xgw_", "adm_xgw_pay_")) and not is_main_bot:
         return False
     if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu", "adm_commission_resellers_menu") and not is_main_bot:
         # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت

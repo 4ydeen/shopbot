@@ -5482,9 +5482,14 @@ class Database:
                 (json.dumps(meta, ensure_ascii=False), datetime.utcnow().isoformat(), id_),
             )
 
-    def list_extra_invoices(self, limit: int = 50):
+    def list_extra_invoices(self, limit: int = 50, gateway: str = None):
         limit = max(1, min(int(limit or 50), 200))
         with self._get_conn() as conn:
+            if gateway:
+                return conn.execute(
+                    "SELECT * FROM extra_gateway_invoices WHERE gateway=? ORDER BY id DESC LIMIT ?",
+                    (gateway, limit),
+                ).fetchall()
             return conn.execute(
                 "SELECT * FROM extra_gateway_invoices ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()

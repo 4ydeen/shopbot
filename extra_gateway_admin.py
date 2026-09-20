@@ -23,19 +23,6 @@ def _mask(value: str) -> str:
     return f"...{value[-4:]}" if value and len(value) > 4 else ("•••" if value else "")
 
 
-def gateways_menu_kb(db) -> InlineKeyboardMarkup:
-    rows = []
-    for key in registry.GATEWAY_ORDER:
-        meta = registry.GATEWAYS[key]
-        enabled = db.get_setting(registry.enable_setting(key), "0") == "1"
-        rows.append([InlineKeyboardButton(
-            text=f"{meta['icon']} {meta['title']}: {'🟢 فعال' if enabled else '🔴 غیرفعال'}",
-            callback_data=f"adm_xgw:{key}",
-        )])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def gateway_settings_kb(db, key: str) -> InlineKeyboardMarkup:
     meta = registry.GATEWAYS[key]
     enabled = db.get_setting(registry.enable_setting(key), "0") == "1"
@@ -55,7 +42,7 @@ def gateway_settings_kb(db, key: str) -> InlineKeyboardMarkup:
             shown = value or "❌ تنظیم نشده"
         label = field["label"] if len(field["label"]) <= 28 else field["label"][:26] + "…"
         rows.append([InlineKeyboardButton(text=f"{label}: {shown} (تغییر)", callback_data=f"adm_xgw_set:{key}:{idx}")])
-    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_set_xgw")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -74,7 +61,7 @@ def gateway_settings_text(db, key: str) -> str:
     return "\n".join(lines)
 
 
-def invoices_kb(invoices) -> InlineKeyboardMarkup:
+def invoices_kb(invoices, gateway: str) -> InlineKeyboardMarkup:
     rows = []
     for inv in invoices:
         meta = registry.GATEWAYS.get(inv["gateway"], {"icon": "💠", "title": inv["gateway"]})
@@ -89,7 +76,7 @@ def invoices_kb(invoices) -> InlineKeyboardMarkup:
                 row.append(InlineKeyboardButton(text="🔄", callback_data=f"check_xgw_invoice:{inv['id']}"))
             row.append(InlineKeyboardButton(text="❌", callback_data=f"cancel_xgw_invoice:{inv['id']}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="adm_xgw_payments")])
+    rows.append([InlineKeyboardButton(text="🔄 بروزرسانی", callback_data=f"adm_xgw_payments:{gateway}")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -99,30 +86,34 @@ def register(router, db, is_main_bot: bool, admin_only, full_admin_only, deny_su
     if not is_main_bot:
         return
 
-    async def _load_invoices():
+    async def _load_invoices(gateway: str):
         await asyncio.to_thread(db.expire_stale_extra_invoices)
         await asyncio.to_thread(db.purge_old_extra_invoices, 7)
-        return await asyncio.to_thread(db.list_extra_invoices, 50)
+        return await asyncio.to_thread(db.list_extra_invoices, 50, gateway)
 
-    async def _show_menu(call: CallbackQuery):
+    async def _show_invoices(call: CallbackQuery, key: str):
+        meta = registry.GATEWAYS[key]
+        invoices = await _load_invoices(key)
+        if not invoices:
+            await replace_admin_view(
+                call, f"{meta['icon']} پرداخت‌های {meta['title']}\n\nهیچ پرداختی ثبت نشده است.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 بروزرسانی", callback_data=f"adm_xgw_payments:{key}")],
+                    [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")],
+                ]),
+            )
+            return
         await replace_admin_view(
             call,
-            "🧩 تنظیم درگاه‌های پرداخت (زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments، استارز داخلی)\n\n"
-            "یکی را انتخاب کن.",
-            reply_markup=gateways_menu_kb(db),
+            f"{meta['icon']} پرداخت‌های {meta['title']}\n\n"
+            "این پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
+            reply_markup=invoices_kb(invoices, key),
         )
 
     async def _show_gateway(call: CallbackQuery, key: str):
         await replace_admin_view(
             call, gateway_settings_text(db, key), reply_markup=gateway_settings_kb(db, key),
         )
-
-    @router.callback_query(F.data == "adm_set_xgw")
-    async def cb_set_xgw(call: CallbackQuery):
-        if not full_admin_only(call.from_user.id):
-            return await deny_support(call)
-        await _show_menu(call)
-        await call.answer()
 
     @router.callback_query(F.data.startswith("adm_xgw:"))
     async def cb_xgw_open(call: CallbackQuery):
@@ -230,19 +221,15 @@ def register(router, db, is_main_bot: bool, admin_only, full_admin_only, deny_su
             reply_markup=gateway_settings_kb(db, key),
         )
 
-    @router.callback_query(F.data == "adm_xgw_payments")
+    @router.callback_query(F.data.startswith("adm_xgw_payments:"))
     async def cb_xgw_payments(call: CallbackQuery):
         if not admin_only(call.from_user.id):
             return await call.answer()
-        invoices = await _load_invoices()
-        if not invoices:
-            await call.answer("هیچ پرداختی با درگاه‌های جدید ثبت نشده است.", show_alert=True)
+        key = call.data.split(":", 1)[1]
+        if key not in registry.GATEWAYS:
+            await call.answer("درگاه نامعتبر.", show_alert=True)
             return
-        await replace_admin_view(
-            call,
-            "💠 پرداخت‌های درگاه‌های جدید\n\nاین پرداخت‌ها به‌صورت خودکار تایید می‌شوند و در بخش سفارش‌ها/شارژهای دستی نمایش داده نمی‌شوند.",
-            reply_markup=invoices_kb(invoices),
-        )
+        await _show_invoices(call, key)
         await call.answer()
 
     @router.callback_query(F.data.startswith("view_xgw_invoice:"))
@@ -279,7 +266,7 @@ def register(router, db, is_main_bot: bool, admin_only, full_admin_only, deny_su
             if invoice["gateway"] != "tgstars":
                 rows.append([InlineKeyboardButton(text="🔄 بررسی وضعیت", callback_data=f"check_xgw_invoice:{invoice['id']}")])
             rows.append([InlineKeyboardButton(text="❌ لغو و حذف فاکتور", callback_data=f"cancel_xgw_invoice:{invoice['id']}")])
-        rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_xgw_payments")])
+        rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=f"adm_xgw_payments:{invoice['gateway']}")])
         await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         await call.answer()
 
@@ -313,16 +300,7 @@ def register(router, db, is_main_bot: bool, admin_only, full_admin_only, deny_su
         invoice = await asyncio.to_thread(db.get_extra_invoice, invoice_id) if invoice_id else None
         if not invoice:
             await call.answer("فاکتور یافت نشد یا قبلاً حذف شده.", show_alert=True)
-        else:
-            await asyncio.to_thread(db.cancel_and_delete_extra_invoice, invoice_id)
-            await call.answer("✅ فاکتور لغو و حذف شد.")
-        invoices = await _load_invoices()
-        if not invoices:
-            await replace_admin_view(
-                call, "💠 پرداخت‌های درگاه‌های جدید\n\nهیچ پرداختی ثبت نشده است.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:daily")]
-                ]),
-            )
             return
-        await replace_admin_view(call, "💠 پرداخت‌های درگاه‌های جدید", reply_markup=invoices_kb(invoices))
+        await asyncio.to_thread(db.cancel_and_delete_extra_invoice, invoice_id)
+        await call.answer("✅ فاکتور لغو و حذف شد.")
+        await _show_invoices(call, invoice["gateway"])
