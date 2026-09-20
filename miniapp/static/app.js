@@ -6037,7 +6037,7 @@ async function renderAdminFinanceSection() {
         <p class="hint-text">${escHtml(gw.help)}</p>
         ${gw.fields.map((f) => `
         <label class="field-label">${escHtml(f.label)}</label>
-        <input class="input xgw-field" data-setting="${escHtml(f.setting)}" type="${f.secret ? "password" : f.numeric ? "number" : "text"}" placeholder="${f.secret ? escHtml(f.has_value ? f.masked || "•••• تنظیم شده" : "مقدار را وارد کن") : ""}" value="${escHtml(f.value)}" style="direction:ltr;text-align:left;margin-bottom:4px" />
+        <input class="input xgw-field" data-setting="${escHtml(f.setting)}" type="${f.secret ? "password" : f.numeric ? "number" : "text"}"${f.numeric ? " step=\"any\"" : ""} placeholder="${f.secret ? escHtml(f.has_value ? f.masked || "•••• تنظیم شده" : "مقدار را وارد کن") : ""}" value="${escHtml(f.value)}" style="direction:ltr;text-align:left;margin-bottom:4px" />
         `).join("")}
         ${gw.hint_url ? `
         <label class="field-label">${gw.key === "nowpayments" ? "آدرس IPN (خودکار در فاکتور ارسال می‌شود)" : "آدرس برگشت (باید با دامنه‌ی ثبت‌شده در درگاه یکی باشد)"}</label>
