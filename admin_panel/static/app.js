@@ -2781,7 +2781,7 @@ async function showUserDetail(tgId) {
       </div>
       <span class="badge ${u.is_blocked ? 'badge-rejected' : 'badge-approved'}">${u.is_blocked ? 'مسدود' : 'فعال'}</span>
       ${hasPerm('resellers') && !d.is_reseller && !d.agent_tier ? `<button class="btn btn-sm btn-primary" id="ud-make-reseller">🏪 نماینده کردن</button>` : ''}
-      ${hasPerm('resellers') && (d.is_reseller || d.agent_tier) ? `${d.is_reseller ? '<button class="btn btn-sm btn-primary" id="ud-edit-reseller">⚙️ ویرایش نمایندگی</button>' : ''}<button class="btn btn-sm btn-danger" id="ud-delete-reseller">🗑 حذف نمایندگی</button>` : ''}
+      ${hasPerm('resellers') && (d.is_reseller || d.agent_tier) ? `${d.is_reseller ? '<button class="btn btn-sm btn-primary" id="ud-edit-reseller">⚙️ ویرایش نمایندگی</button>' : ''}<button class="btn btn-sm" id="ud-change-reseller-tier">⚖️ تغییر سطح نماینده</button><button class="btn btn-sm btn-danger" id="ud-delete-reseller">🗑 حذف نمایندگی</button>` : ''}
       ${historyBtn('user', tgId)}
     </div>
 
@@ -2838,6 +2838,8 @@ async function showUserDetail(tgId) {
     if (makeResellerBtn) makeResellerBtn.addEventListener('click', () => openMakeResellerModal(tgId, close));
     const editResellerBtn = $('#ud-edit-reseller', body);
     if (editResellerBtn) editResellerBtn.addEventListener('click', () => openResellerManageModal(tgId));
+    const changeTierBtn = $('#ud-change-reseller-tier', body);
+    if (changeTierBtn) changeTierBtn.addEventListener('click', () => openChangeResellerTierModal(tgId, close, d.agent_tier));
     const deleteResellerBtn = $('#ud-delete-reseller', body);
     if (deleteResellerBtn) deleteResellerBtn.addEventListener('click', async () => {
       if (!confirm('حذف کامل نمایندگی این کاربر و موجودی‌های نمایندگی انجام شود؟')) return;
@@ -2860,8 +2862,19 @@ function openMakeResellerModal(tgId, closeUserModal) {
   }).catch(handleErr);
 }
 
-function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
-  openModal(`نماینده کردن کاربر ${tgId}`, `
+/* تغییر سطح نمایندگیِ یک نماینده‌ی موجود (مثلاً برنزی -> طلایی) بدون نیاز به
+   حذف کامل و ساخت دوباره‌ی دستی. */
+function openChangeResellerTierModal(tgId, closeUserModal, currentTierCode) {
+  apiGet('/reseller-tiers').then(all => {
+    const tiers = all.filter(t => t.is_enabled && t.code !== currentTierCode);
+    if (!tiers.length) { toast('سطح فعال دیگری برای انتقال این نماینده وجود ندارد.', true); return; }
+    openMakeResellerTierModal(tgId, closeUserModal, tiers, { isChange: true });
+  }).catch(handleErr);
+}
+
+function openMakeResellerTierModal(tgId, closeUserModal, tiers, opts = {}) {
+  const isChange = !!opts.isChange;
+  openModal(isChange ? `تغییر سطح نمایندگی کاربر ${tgId}` : `نماینده کردن کاربر ${tgId}`, `
     <div class="form-grid">
       <div><b>سطح نمایندگی</b></div>
       <select class="input" id="mr-tier">
@@ -2901,10 +2914,11 @@ function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
 
       <div id="mr-note-wrap">
         <div><b>یادداشت داخلی (اختیاری)</b></div>
-        <textarea class="input" id="mr-note" rows="2" placeholder="مثلاً دلیل نماینده‌کردن این کاربر..."></textarea>
+        <textarea class="input" id="mr-note" rows="2" placeholder="${isChange ? 'مثلاً دلیل تغییر سطح این نماینده...' : 'مثلاً دلیل نماینده‌کردن این کاربر...'}"></textarea>
       </div>
 
-      <button class="btn btn-primary" id="mr-submit">ثبت و نماینده کردن</button>
+      ${isChange ? '<div class="hint-text">با ثبت، وضعیت نمایندگیِ فعلی این کاربر (بات اختصاصی، اعتبار/موجودی، کمیسیون یا تخفیف) کامل پاک و سطح جدید مثل ساخت نمایندگی از نو برایش تنظیم می‌شود. کیف پول و سابقه‌ی مالی او دست‌نخورده می‌ماند.</div>' : ''}
+      <button class="btn btn-primary" id="mr-submit">${isChange ? 'ثبت و تغییر سطح' : 'ثبت و نماینده کردن'}</button>
     </div>
   `, (body, close) => {
     const tierSel = $('#mr-tier', body);
@@ -2979,9 +2993,10 @@ function openMakeResellerTierModal(tgId, closeUserModal, tiers) {
       if (t.model === 'volume_credit' || t.model === 'fixed_product') {
         payload.panel_server_id = $('#mr-panel', body).value ? Number($('#mr-panel', body).value) : null;
       }
+      if (isChange && !confirm('تایید می‌کنی؟ وضعیت نمایندگیِ فعلی این کاربر کامل پاک و سطح جدید از نو تنظیم می‌شود.')) return;
       try {
-        await apiPost(`/users/${tgId}/make-reseller`, payload);
-        toast('کاربر با موفقیت نماینده شد.');
+        await apiPost(`/users/${tgId}/${isChange ? 'change-reseller-tier' : 'make-reseller'}`, payload);
+        toast(isChange ? 'سطح نمایندگی با موفقیت تغییر کرد.' : 'کاربر با موفقیت نماینده شد.');
         close();
         if (closeUserModal) closeUserModal();
         showUserDetail(tgId);
