@@ -69,6 +69,7 @@ import noapay_client
 import noapay_payment
 import payment_engine
 import card_to_card_payment
+from asset_versioning import static_version, ApiNoStoreMiddleware
 from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from miniapp.auth import validate_init_data
@@ -89,6 +90,7 @@ from admin_panel.telegram_notify import send_message as _tg_notify, fetch_telegr
 
 app = FastAPI(title="V2Ray Shop Mini App API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(ApiNoStoreMiddleware)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -366,15 +368,13 @@ async def get_bot_username(tenant: Tenant) -> str:
 # ---------------------------------------------------------------------------
 
 def get_asset_version() -> str:
-    """نسخه‌ی خودکار برای cache-busting، بر اساس آخرین زمان تغییر فایل‌های استاتیک."""
-    try:
-        mtimes = [
-            os.path.getmtime(os.path.join(STATIC_DIR, "style.css")),
-            os.path.getmtime(os.path.join(STATIC_DIR, "app.js")),
-        ]
-        return str(int(max(mtimes)))
-    except OSError:
-        return "1"
+    """نسخه‌ی خودکار برای cache-busting، بر اساس هش محتوای فایل‌های استاتیک."""
+    return static_version(STATIC_DIR)
+
+
+@app.get("/api/app-version")
+def app_version():
+    return {"v": get_asset_version()}
 
 
 @app.get("/", response_class=HTMLResponse)
