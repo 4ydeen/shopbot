@@ -414,7 +414,7 @@ def serve_index(tenant: Tenant = Depends(get_tenant)):
 
 @app.get("/api/me")
 def api_me(auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db, tenant = auth
     user = db.get_user(tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد. ابتدا /start را در بات بزنید.")
