@@ -91,3 +91,16 @@ def default_settings() -> dict:
             out[field["setting"]] = "0" if field["numeric"] else ""
         out[min_amount_setting(key)] = "0"
     return out
+
+
+def settings_groups() -> list:
+    """گروه‌های فرم تنظیمات (پنل وب/اپ موبایل) برای همه‌ی درگاه‌های این رجیستری."""
+    groups = []
+    for key in GATEWAY_ORDER:
+        meta = GATEWAYS[key]
+        fields = [{"key": enable_setting(key), "label": f"فعال بودن درگاه {meta['title']}", "type": "bool"}]
+        for field in meta["fields"]:
+            kind = "password" if field["secret"] else ("number" if field["numeric"] else "text")
+            fields.append({"key": field["setting"], "label": field["label"], "type": kind})
+        groups.append({"title": f"{meta['icon']} {meta['title']} (تایید آنی)", "fields": fields})
+    return groups
