@@ -1051,7 +1051,9 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
 
     tier_info = db.get_tier_price_info(tg_id, price, 1)
     price = tier_info["total_after"]
-    wallet_credit = db.get_wallet_credit(tg_id)
+    allowed_methods = db.get_effective_custom_config_payment_methods()
+    wallet_allowed = allowed_methods is None or "wallet" in allowed_methods
+    wallet_credit = db.get_wallet_credit(tg_id) if wallet_allowed else 0
     wallet_used = min(wallet_credit, price)
     if wallet_used > 0:
         db.add_wallet_credit(tg_id, -wallet_used)
@@ -1083,10 +1085,16 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
                 pass
             return {"status": "approved", "order_id": order_id, "link": result.subscription_url}
 
+        if not db.has_any_payable_method(order["final_price"], allowed_methods):
+            db.reject_order(order_id)
+            raise HTTPException(
+                status_code=400,
+                detail="در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست.",
+            )
         return {
             "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
             "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-            **_payment_flags(db, order["final_price"], None),
+            **_payment_flags(db, order["final_price"], None, order=order),
         }
     except HTTPException:
         raise
@@ -1598,12 +1606,18 @@ async def send_photo_to_admins(db: Database, bot_token: str, caption: str, reply
 # فقط همان چک را این‌جا (مینی‌اپ) هم اعمال می‌کنند تا هرجا خرید انجام شود
 # (بات یا مینی‌اپ)، یک قانون یکسان حاکم باشد.
 
-def _payment_method_error(db: Database, amount: int, method_key: str, product_id: int = None) -> Optional[str]:
+def _payment_method_error(db: Database, amount: int, method_key: str, product_id: int = None,
+                          order=None, custom_config: bool = False) -> Optional[str]:
     """اگر روش پرداخت method_key برای این مبلغ/محصول مجاز نباشد، پیام خطا را
     برمی‌گرداند؛ در غیر این صورت None (یعنی مجاز است). معادل _order_payment_method_error
     در handlers_user.py ربات - به‌عنوان یک لایه‌ی دفاعی سمت سرور (علاوه بر فیلترشدن
     گزینه‌ها در پاسخ API)."""
-    if product_id and not db.product_allows_payment_method(product_id, method_key):
+    is_custom_config = custom_config or (order is not None and bool(order["is_custom_config"]))
+    if is_custom_config:
+        custom_product_id = order["custom_product_id"] if order is not None else None
+        if not db.custom_config_allows_payment_method(custom_product_id, method_key):
+            return "این روش پرداخت برای ساخت کانفیگ شخصی مجاز نیست."
+    elif product_id and not db.product_allows_payment_method(product_id, method_key):
         return "این روش پرداخت برای این محصول مجاز نیست."
     min_amt = db.get_payment_method_min_amount(method_key)
     if min_amt and amount < min_amt:
@@ -1611,18 +1625,19 @@ def _payment_method_error(db: Database, amount: int, method_key: str, product_id
     return None
 
 
-def _require_payment_method_allowed(db: Database, amount: int, method_key: str, product_id: int = None) -> None:
-    err = _payment_method_error(db, amount, method_key, product_id)
+def _require_payment_method_allowed(db: Database, amount: int, method_key: str, product_id: int = None,
+                                    order=None) -> None:
+    err = _payment_method_error(db, amount, method_key, product_id, order=order)
     if err:
         raise HTTPException(status_code=400, detail=err)
 
 
-def _payment_flags(db: Database, amount: int, product_id: int = None) -> dict:
+def _payment_flags(db: Database, amount: int, product_id: int = None, order=None) -> dict:
     """فلگ‌های فعال/مجازبودن روش‌های پرداخت داخلی برای مبلغ/محصولِ سفارش جاری؛
     هم تنظیم فعال/غیرفعال کلی و هم محدودیت محصول/حداقل‌مبلغ را لحاظ می‌کند تا
     فرانت‌اند مینی‌اپ فقط دکمه‌های واقعاً قابل‌استفاده را نشان دهد."""
     def _ok(method_key: str) -> bool:
-        return _payment_method_error(db, amount, method_key, product_id) is None
+        return _payment_method_error(db, amount, method_key, product_id, order=order) is None
     return {
         "card_to_card_enabled": db.get_setting("card_to_card_enabled", "1") == "1" and _ok("card"),
         "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
@@ -1816,7 +1831,7 @@ async def api_order_crypto_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "crypto", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "crypto", order["product_id"], order=order)
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -1878,7 +1893,7 @@ async def api_order_abangateway_invoice(order_id: int, auth=Depends(require_join
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "abangateway", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "abangateway", order["product_id"], order=order)
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2152,7 +2167,7 @@ async def api_order_blupal_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "blupal", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "blupal", order["product_id"], order=order)
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2422,7 +2437,7 @@ async def api_order_noapay_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "noapay", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "noapay", order["product_id"], order=order)
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2780,7 +2795,8 @@ def api_admin_list_c2c_invoices(status: Optional[str] = None, auth=Depends(requi
 
 
 @app.get("/api/gateways")
-def api_list_public_gateways(auth=Depends(require_joined), amount: int = None, product_id: int = None):
+def api_list_public_gateways(auth=Depends(require_joined), amount: int = None, product_id: int = None,
+                             custom_config: bool = False):
     """لیست درگاه‌های فعال، برای نمایش به‌عنوان یک روش پرداخت در مینی‌اپ.
     اگر amount/product_id داده شود، همان محدودیت «حداقل مبلغ درگاه» و
     «روش‌های مجاز این محصول» که در چک‌اوت اعمال می‌شود، این‌جا هم برای فیلترکردن
@@ -2790,8 +2806,9 @@ def api_list_public_gateways(auth=Depends(require_joined), amount: int = None, p
     out = []
     for r in rows:
         key = f"custom:{r['gateway_key']}"
-        if amount is not None or product_id is not None:
-            if _payment_method_error(db, amount if amount is not None else 0, key, product_id) is not None:
+        if amount is not None or product_id is not None or custom_config:
+            if _payment_method_error(db, amount if amount is not None else 0, key, product_id,
+                                     custom_config=custom_config) is not None:
                 continue
         out.append({"key": r["gateway_key"], "name": r["name"]})
     return out
@@ -3009,7 +3026,7 @@ async def api_order_custom_gateway_invoice(order_id: int, gateway_key: str, auth
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], f"custom:{gateway_key}", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], f"custom:{gateway_key}", order["product_id"], order=order)
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -3136,7 +3153,7 @@ async def api_order_card_auto_invoice(order_id: int, auth=Depends(require_joined
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "card_auto", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "card_auto", order["product_id"], order=order)
     return _create_card_to_card_invoice_for(db, "order", order_id, tg_id, order["final_price"])
 
 
@@ -3610,7 +3627,7 @@ async def api_order_receipt(
         raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
-    _require_payment_method_allowed(db, order["final_price"], "card", order["product_id"])
+    _require_payment_method_allowed(db, order["final_price"], "card", order["product_id"], order=order)
     if not photo.content_type or not photo.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="فقط عکس رسید پذیرفته می‌شود.")
 
