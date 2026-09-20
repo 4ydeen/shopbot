@@ -19,6 +19,8 @@ GET /api/settings/schema) گرفت و هم در app.js و هم در اپ موب�
 مقدار هر فیلد از/به GET و POST /api/settings (کلید-مقدار ساده) خوانده/نوشته می‌شود.
 """
 
+import extra_gateway_registry
+
 SETTINGS_FORM_SECTIONS = [
     {
         "title": "📝 محتوا و متن‌ها",
@@ -82,6 +84,7 @@ SETTINGS_FORM_SECTIONS = [
                     {"key": "noapay_rate_toman_per_star", "label": "نرخ تومان به‌ازای هر استارز", "type": "number"},
                 ],
             },
+            *extra_gateway_registry.settings_groups(),
             {
                 "title": "📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)",
                 "fields": [

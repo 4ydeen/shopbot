@@ -6370,6 +6370,32 @@ const SETTINGS_GROUPS = [
     { key: 'noapay_webhook_secret', label: 'رمز HMAC وب‌هوک (X-Starbot-Signature)', type: 'password' },
     { key: 'noapay_rate_toman_per_star', label: 'نرخ تومان به‌ازای هر استارز', type: 'number' },
   ]},
+  { tab: 'payment', title: '🟡 زرین‌پال (تایید آنی)', fields: [
+    { key: 'zarinpal_payment_enabled', label: 'فعال بودن درگاه زرین‌پال', type: 'bool' },
+    { key: 'zarinpal_merchant_id', label: 'مرچنت کد', type: 'password' },
+  ]},
+  { tab: 'payment', title: '🔵 آقای پرداخت (تایید آنی)', fields: [
+    { key: 'aqayepardakht_payment_enabled', label: 'فعال بودن درگاه آقای پرداخت', type: 'bool' },
+    { key: 'aqayepardakht_pin', label: 'پین درگاه', type: 'password' },
+  ]},
+  { tab: 'payment', title: '💸 تترا۹۸ (تایید آنی)', fields: [
+    { key: 'tetra98_payment_enabled', label: 'فعال بودن درگاه تترا۹۸', type: 'bool' },
+    { key: 'tetra98_api_key', label: 'کلید API', type: 'password' },
+  ]},
+  { tab: 'payment', title: '💳 کیوب‌پی (تایید آنی)', fields: [
+    { key: 'cubepay_payment_enabled', label: 'فعال بودن درگاه کیوب‌پی', type: 'bool' },
+    { key: 'cubepay_token', label: 'توکن API', type: 'password' },
+    { key: 'cubepay_fee', label: 'کارمزد اضافه به مبلغ کاربر (درصد تا ۱۰۰، بالاتر یعنی مبلغ ثابت تومان)', type: 'number' },
+  ]},
+  { tab: 'payment', title: '💰 NowPayments (تایید آنی)', fields: [
+    { key: 'nowpayments_payment_enabled', label: 'فعال بودن درگاه NowPayments', type: 'bool' },
+    { key: 'nowpayments_api_key', label: 'کلید API', type: 'password' },
+    { key: 'nowpayments_ipn_secret', label: 'IPN Secret (پیشنهادی)', type: 'password' },
+  ]},
+  { tab: 'payment', title: '⭐ استارز داخلی تلگرام (تایید آنی)', fields: [
+    { key: 'tgstars_payment_enabled', label: 'فعال بودن درگاه استارز داخلی تلگرام', type: 'bool' },
+    { key: 'tgstars_rate_toman_per_star', label: 'نرخ هر استارز به تومان', type: 'number' },
+  ]},
   { tab: 'payment', title: '📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)', fields: [
     { key: 'card_to_card_auto_enabled', label: 'فعال بودن (نیازمند حداقل یک کارت فعال - پایین همین صفحه)', type: 'bool' },
     { key: 'card_to_card_auto_timeout_minutes', label: 'مهلت هر مبلغ (دقیقه) - بعدش می‌رود صف بررسی دستی', type: 'number' },
@@ -7908,6 +7934,8 @@ const ACTION_LABEL = {
   panel_server_usage_toggle: 'فعال/غیرفعال کردن مصرف سرور', plisio_key_change: 'تغییر کلید Plisio',
   abangateway_key_change: 'تغییر کلید آبان گیت‌وی',
   blupal_key_change: 'تغییر کلید بلوپال',
+  extra_gateway_setting: 'تغییر تنظیمات درگاه پرداخت',
+  extra_gateway_toggle: 'تغییر وضعیت درگاه پرداخت',
   pricing_tier_add: 'افزودن رده قیمتی', pricing_tier_delete: 'حذف رده قیمتی', product_add: 'افزودن محصول',
   product_delete: 'حذف محصول', product_edit: 'ویرایش محصول', product_price_edit: 'ویرایش قیمت محصول',
   product_server_edit: 'تغییر پنل/اینباند محصول', product_volume_edit: 'تغییر حجم محصول',
