@@ -6394,7 +6394,9 @@ const SETTINGS_GROUPS = [
   ]},
   { tab: 'payment', title: '⭐ استارز داخلی تلگرام (تایید آنی)', fields: [
     { key: 'tgstars_payment_enabled', label: 'فعال بودن درگاه استارز داخلی تلگرام', type: 'bool' },
-    { key: 'tgstars_rate_toman_per_star', label: 'نرخ هر استارز به تومان', type: 'number' },
+    { key: 'tgstars_rate_toman_per_star', label: 'نرخ دستی هر استارز (تومان) - ۰ یعنی خودکار', type: 'number' },
+    { key: 'tgstars_usd_per_star', label: 'ارزش هر استارز به دلار (نرخ خودکار)', type: 'number' },
+    { key: 'tgstars_margin_percent', label: 'درصد حاشیه سود روی نرخ خودکار', type: 'number' },
   ]},
   { tab: 'payment', title: '📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)', fields: [
     { key: 'card_to_card_auto_enabled', label: 'فعال بودن (نیازمند حداقل یک کارت فعال - پایین همین صفحه)', type: 'bool' },
@@ -6530,7 +6532,7 @@ function settingsFieldHtml(f, settings) {
       </label>`;
   }
   return `<label class="field"><span>${esc(f.label)}</span>
-    <input class="input" type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}" data-key="${f.key}" data-type="text" value="${esc(val)}"></label>`;
+    <input class="input" type="${f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}"${f.type === 'number' ? ' step="any"' : ''} data-key="${f.key}" data-type="text" value="${esc(val)}"></label>`;
 }
 
 let settingsActiveTab = 'content';
