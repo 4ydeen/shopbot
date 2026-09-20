@@ -1444,6 +1444,8 @@ class Database:
             ("reseller_requests", "wants_web_panel", "INTEGER DEFAULT 0"),
             ("reseller_requests", "wants_miniapp", "INTEGER DEFAULT 0"),
             ("reseller_requests", "payment_method", "TEXT"),
+            ("reseller_requests", "payment_methods", "TEXT"),
+            ("reseller_requests", "proposed_percent", "INTEGER"),
             ("reseller_requests", "commission_percent", "INTEGER"),
             ("reseller_requests", "discount_percent", "INTEGER"),
             # دیتابیس‌های قدیمی جدول reseller_tier_requests را بدون متن درخواست ساخته‌اند؛
@@ -7508,7 +7510,8 @@ class Database:
     def create_reseller_request(self, user_id: int, volume_gb: int, request_text: str, wants_custom_config: int = 0,
                                  supply_model: str = "volume_credit", supply_product_id: int = None,
                                  supply_qty: int = None, bot_choice: str = "dedicated",
-                                 wants_web_panel: int = 0, wants_miniapp: int = 0, tier_code: str = None) -> int:
+                                 wants_web_panel: int = 0, wants_miniapp: int = 0, tier_code: str = None,
+                                 proposed_percent: int = None) -> int:
         with self._get_conn() as conn:
             # status را صراحتاً اینجا ست می‌کنیم و به مقدار پیش‌فرض ستون در schema
             # تکیه نمی‌کنیم. روی دیتابیس‌های قدیمی‌تر که ستون status از قبل (قبل از
@@ -7523,6 +7526,7 @@ class Database:
                 "supply_model": supply_model, "supply_product_id": supply_product_id, "supply_qty": supply_qty,
                 "bot_choice": bot_choice, "wants_web_panel": 1 if wants_web_panel else 0,
                 "wants_miniapp": 1 if wants_miniapp else 0, "tier_code": tier_code,
+                "proposed_percent": proposed_percent,
             }
             fields = list(known.keys())
             values = list(known.values())
@@ -7652,10 +7656,25 @@ class Database:
         methods = list(dict.fromkeys(str(x) for x in (methods or []) if x))
         self.set_setting(f"reseller_payment_methods_{tier_code}", json.dumps(methods, ensure_ascii=False))
 
-    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int, commission_percent: int = None, discount_percent: int = None):
+    def get_effective_reseller_payment_methods(self, req):
+        """روش‌های پرداخت مجاز یک درخواست: انتخاب ادمین برای همان درخواست، وگرنه تنظیم سطح؛ None یعنی همه فعال‌ها."""
+        raw = req["payment_methods"] if "payment_methods" in req.keys() else None
+        if raw:
+            try:
+                value = json.loads(raw)
+                if isinstance(value, list) and value:
+                    return value
+            except Exception:
+                pass
+        return self.get_reseller_payment_methods(req["tier_code"] if req["tier_code"] else None)
+
+    def quote_reseller_request(self, request_id: int, price_toman: int, panel_server_id: int, admin_id: int, commission_percent: int = None, discount_percent: int = None, payment_methods=None):
         fields = {
             "price_toman": price_toman, "panel_server_id": panel_server_id, "reviewed_by": admin_id,
         }
+        methods = list(dict.fromkeys(str(x) for x in (payment_methods or []) if x))
+        if methods:
+            fields["payment_methods"] = json.dumps(methods, ensure_ascii=False)
         if commission_percent is not None:
             fields["commission_percent"] = int(commission_percent)
         if discount_percent is not None:

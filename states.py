@@ -413,6 +413,7 @@ class ResellerFlow(StatesGroup):
 
 class ResellerRequestFlow(StatesGroup):
     waiting_volume = State()
+    waiting_percent = State()
     waiting_text = State()
     waiting_bot_choice = State()
     waiting_web_panel = State()
@@ -429,6 +430,8 @@ class ResellerRequestFlow(StatesGroup):
 
 class AdminResellerRequestFlow(StatesGroup):
     waiting_price = State()
+    waiting_percent = State()
+    waiting_payment_methods = State()
     waiting_reject_reason = State()
 
 

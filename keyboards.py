@@ -2876,6 +2876,22 @@ def commission_reseller_request_review_kb(request_id) -> InlineKeyboardMarkup:
     ])
 
 
+def reseller_request_accept_percent_kb(percent) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ قبول پیشنهاد کاربر ({percent}٪)", callback_data="rrpct:accept")],
+    ])
+
+
+def reseller_request_payment_methods_kb(items, selected) -> InlineKeyboardMarkup:
+    """انتخاب چندگانه‌ی روش‌های پرداخت هزینه نمایندگی توسط ادمین؛ items: [(key, label), ...]."""
+    rows = []
+    for i, (key, label) in enumerate(items):
+        mark = "✅" if key in selected else "⬜️"
+        rows.append([InlineKeyboardButton(text=f"{mark} {label}", callback_data=f"rrpm:t:{i}")])
+    rows.append([InlineKeyboardButton(text="📨 تایید و ارسال به کاربر", callback_data="rrpm:ok")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def reseller_request_panel_pick_kb(request_id, panels) -> InlineKeyboardMarkup:
     rows = []
     for p in panels:

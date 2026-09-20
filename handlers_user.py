@@ -4574,15 +4574,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     def _senior_admin_ids():
         return [a["telegram_id"] for a in db.list_admins_with_roles() if a["role"] in ("owner", "admin")]
 
-    async def _reseller_payment_methods(tier_code):
-        allowed = await asyncio.to_thread(db.get_reseller_payment_methods, tier_code)
+    async def _reseller_payment_methods(req):
+        allowed = await asyncio.to_thread(db.get_effective_reseller_payment_methods, req)
         catalog = [x for x in (await asyncio.to_thread(db.get_payment_methods_catalog, True)) if x["key"] != "wallet"]
         enabled = {x["key"]: x for x in catalog}
         methods = [m for m in (allowed or [x["key"] for x in catalog]) if m in enabled]
         return [m for m in methods if not enabled[m].get("min_amount") or enabled[m]["min_amount"] <= 10**18]
 
     async def _send_reseller_payment_menu(target, req):
-        methods = await _reseller_payment_methods(req["tier_code"] if req["tier_code"] else None)
+        methods = await _reseller_payment_methods(req)
         if not methods:
             await target.answer("⚠️ هیچ روش پرداخت فعالی برای هزینه نمایندگی تنظیم نشده است. با مدیریت تماس بگیرید.")
             return
@@ -4610,7 +4610,22 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer("شما همین الان یک درخواست نمایندگی باز دارید؛ منتظر بررسی آن بمانید.")
             return
         await state.update_data(resreq_tier=tier["code"] if tier else None)
-        if tier is not None and tier["model"] in ("fixed_product", "commission", "discount"):
+        if tier is not None and tier["model"] in ("commission", "discount"):
+            await state.update_data(resreq_volume=0, resreq_text=_RESREQ_DEFAULT_TEXT)
+            low, high = _resreq_percent_bounds(tier)
+            await state.set_state(ResellerRequestFlow.waiting_percent)
+            if tier["model"] == "commission":
+                question = f"چند درصد کمیسیون از خرید مشتری‌ها پیشنهاد می‌کنید؟ (بین {low} تا {high})"
+            else:
+                question = f"چند درصد تخفیف دائمی برای خرید خودتان پیشنهاد می‌کنید؟ (بین {low} تا {high})"
+            await message.answer(
+                f"{tier['icon']} درخواست نمایندگی {tier['title']}\n\n"
+                f"پیشنهاد خودتان را ارسال کنید؛ مدیر بررسی می‌کند و نتیجه را اعلام می‌کند.\n"
+                f"{question}\nفقط عدد ارسال کنید:",
+                reply_markup=kb.cancel_kb(),
+            )
+            return
+        if tier is not None and tier["model"] == "fixed_product":
             await state.update_data(resreq_volume=0, resreq_text=_RESREQ_DEFAULT_TEXT)
             await _resreq_after_basics(message, state)
             return
@@ -4622,6 +4637,26 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"چند گیگ حجم برای شروع نیاز دارید؟ فقط عدد ارسال کنید (مثلاً 500):{min_hint}",
             reply_markup=kb.cancel_kb(),
         )
+
+    def _resreq_percent_bounds(tier):
+        if tier["model"] == "commission":
+            return int(tier["commission_min"] or 1), int(tier["commission_max"] or 100)
+        return 1, 100
+
+    @router.message(ResellerRequestFlow.waiting_percent)
+    async def reseller_request_percent(message: Message, state: FSMContext):
+        tier = await _resreq_tier(state)
+        if tier is None:
+            await state.clear()
+            await message.answer("⚠️ این درخواست منقضی شده. لطفاً دوباره روی «درخواست نمایندگی» بزنید.")
+            return
+        low, high = _resreq_percent_bounds(tier)
+        text = (message.text or "").strip().replace("%", "").replace("٪", "")
+        if not text.isdigit() or not (low <= int(text) <= high):
+            await message.answer(f"لطفاً یک عدد صحیح بین {low} تا {high} ارسال کنید.")
+            return
+        await state.update_data(resreq_proposed_percent=int(text))
+        await _resreq_after_basics(message, state)
 
     @router.message(ResellerRequestFlow.waiting_volume)
     async def reseller_request_volume(message: Message, state: FSMContext):
@@ -4782,12 +4817,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         supply_qty = data.get("resreq_supply_qty")
         wants_custom_config = 0  # همیشه غیرفعال؛ دلیل را در کامنت بالای این تابع ببینید.
         tier_code = data.get("resreq_tier")
+        proposed_percent = data.get("resreq_proposed_percent")
         tier = await asyncio.to_thread(db.get_reseller_tier, tier_code) if tier_code else None
         await state.clear()
         user_id = event.from_user.id
         bot_obj = event.bot
 
-        volume_missing = volume_gb is None or (supply_model != "fixed_product" and not volume_gb)
+        volume_missing = volume_gb is None or (supply_model not in ("fixed_product", "commission", "discount") and not volume_gb)
         if volume_missing or request_text is None:
             await _resreq_notify(event, "⚠️ این درخواست منقضی شده. لطفاً دوباره روی «درخواست نمایندگی» بزنید.")
             return
@@ -4796,13 +4832,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             request_id = (await asyncio.to_thread(
                 db.create_reseller_request, user_id, volume_gb, request_text, wants_custom_config,
                 supply_model, supply_product_id, supply_qty, bot_choice, wants_web_panel, wants_miniapp,
-                tier_code,
+                tier_code, proposed_percent,
             ))
             user_row = (await asyncio.to_thread(db.get_user, user_id))
             first_name = (user_row["first_name"] if user_row else "") or ""
             username = (user_row["username"] if user_row else "") or "---"
             if supply_model == "fixed_product":
                 supply_label = f"محصول آماده — {supply_product_name} × {supply_qty:,}"
+            elif supply_model == "commission":
+                supply_label = "کمیسیونی"
+            elif supply_model == "discount":
+                supply_label = "تخفیف دائمی"
             else:
                 supply_label = "اعتبار حجمی"
             bot_choice_label = {
@@ -4813,7 +4853,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 warning = await _switch_warning_line(user_id, tier["code"])
                 if warning:
                     tier_line += warning.lstrip("\n") + "\n"
-            volume_line = "" if supply_model == "fixed_product" and not volume_gb else f"📦 حجم درخواستی: {volume_gb:,} گیگ\n"
+            volume_line = "" if not volume_gb else f"📦 حجم درخواستی: {volume_gb:,} گیگ\n"
+            if proposed_percent is not None:
+                kind = "کمیسیون" if supply_model == "commission" else "تخفیف"
+                volume_line += f"💡 پیشنهاد کاربر: {kind} {proposed_percent}٪\n"
             caption = (
                 f"🏪 درخواست نمایندگی #{request_id}\n"
                 f"{tier_line}"
@@ -4940,7 +4983,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not req or req["status"] != "awaiting_payment":
             await call.answer("این درخواست دیگر در مرحله پرداخت نیست.", show_alert=True)
             return
-        allowed = await asyncio.to_thread(db.get_reseller_payment_methods, req["tier_code"])
+        allowed = await asyncio.to_thread(db.get_effective_reseller_payment_methods, req)
         catalog = [x for x in (await asyncio.to_thread(db.get_payment_methods_catalog, True)) if x["key"] != "wallet"]
         enabled = {x["key"]: x for x in catalog}
         if allowed is not None and method not in allowed:

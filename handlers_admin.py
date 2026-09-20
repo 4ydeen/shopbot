@@ -5793,27 +5793,153 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             data = await state.get_data()
             request_id, panel_id = data.get("resreq_request_id"), data.get("resreq_panel_id")
             req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
-            await state.clear()
             if not req or req["status"] != "pending_review":
+                await state.clear()
                 await message.answer("این درخواست دیگر معتبر نیست.")
                 return
             if req["claimed_by"] and req["claimed_by"] != message.from_user.id:
+                await state.clear()
                 await message.answer("این درخواست توسط ادمین دیگری در حال بررسی است.")
                 return
+            await state.update_data(resreq_price=price)
+            tier = (await asyncio.to_thread(db.get_reseller_tier, req["tier_code"])) if req["tier_code"] else None
+            if tier and tier["model"] == "commission":
+                low = int(tier["commission_min"] or 1)
+                high = int(tier["commission_max"] or 100)
+                await state.update_data(resreq_percent_kind="commission", resreq_percent_low=low, resreq_percent_high=high)
+                await state.set_state(AdminResellerRequestFlow.waiting_percent)
+                proposed = req["proposed_percent"]
+                accept_kb = kb.reseller_request_accept_percent_kb(proposed) if proposed is not None and low <= int(proposed) <= high else None
+                hint = f"\n💡 پیشنهاد کاربر: {proposed}٪" if proposed is not None else ""
+                await message.answer(f"📈 درصد کمیسیون تاییدشده برای این نماینده برنزی را بفرستید (بین {low} تا {high}):{hint}", reply_markup=accept_kb)
+                return
+            if tier and tier["model"] == "discount":
+                await state.update_data(resreq_percent_kind="discount", resreq_percent_low=1, resreq_percent_high=100)
+                await state.set_state(AdminResellerRequestFlow.waiting_percent)
+                proposed = req["proposed_percent"]
+                accept_kb = kb.reseller_request_accept_percent_kb(proposed) if proposed is not None and 1 <= int(proposed) <= 100 else None
+                hint = f"\n💡 پیشنهاد کاربر: {proposed}٪" if proposed is not None else ""
+                await message.answer(f"🏷 درصد تخفیف دائمی تاییدشده برای این نماینده نقره‌ای را بفرستید (بین 1 تا 100):{hint}", reply_markup=accept_kb)
+                return
+            await _resreq_show_payment_methods(message, state, req, price)
 
-            (await asyncio.to_thread(db.quote_reseller_request, request_id, price, panel_id, message.from_user.id))
-            (await asyncio.to_thread(db.log_admin_action, 
-                message.from_user.id, "reseller_request_quote",
-                f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {price:,}",
+        async def _resreq_show_payment_methods(message: Message, state: FSMContext, req, price: int):
+            catalog = [x for x in (await asyncio.to_thread(db.get_payment_methods_catalog, True)) if x["key"] != "wallet"]
+            if not catalog:
+                await state.clear()
+                await message.answer("⚠️ هیچ روش پرداخت فعالی وجود ندارد. ابتدا یک روش پرداخت را فعال کنید و دوباره تلاش کنید.")
+                return
+            keys = [x["key"] for x in catalog]
+            tier_default = await asyncio.to_thread(db.get_reseller_payment_methods, req["tier_code"] if req["tier_code"] else None)
+            selected = [k for k in (tier_default or keys) if k in keys] or keys
+            await state.update_data(resreq_pm_items=[[x["key"], x["label"]] for x in catalog], resreq_pm_selected=selected)
+            await state.set_state(AdminResellerRequestFlow.waiting_payment_methods)
+            await message.answer(
+                f"💳 روش‌های پرداخت مجاز برای این درخواست ({price:,} تومان) را انتخاب کنید:",
+                reply_markup=kb.reseller_request_payment_methods_kb([(x["key"], x["label"]) for x in catalog], selected),
+            )
+
+        async def _resreq_apply_percent(message: Message, state: FSMContext, admin_id: int, value: int):
+            data = await state.get_data()
+            request_id, price = data.get("resreq_request_id"), data.get("resreq_price")
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
+            if not req or not price or req["status"] != "pending_review":
+                await state.clear()
+                await message.answer("این درخواست دیگر معتبر نیست.")
+                return
+            if req["claimed_by"] and req["claimed_by"] != admin_id:
+                await state.clear()
+                await message.answer("این درخواست توسط ادمین دیگری در حال بررسی است.")
+                return
+            key = "resreq_commission_percent" if data.get("resreq_percent_kind") == "commission" else "resreq_discount_percent"
+            await state.update_data(**{key: value})
+            await _resreq_show_payment_methods(message, state, req, price)
+
+        @router.message(AdminResellerRequestFlow.waiting_percent)
+        async def process_resreq_percent(message: Message, state: FSMContext):
+            text = (message.text or "").strip().replace("%", "").replace("٪", "")
+            data = await state.get_data()
+            low, high = int(data.get("resreq_percent_low") or 1), int(data.get("resreq_percent_high") or 100)
+            if not text.isdigit() or not (low <= int(text) <= high):
+                await message.answer(f"لطفاً یک عدد صحیح بین {low} تا {high} ارسال کنید.")
+                return
+            await _resreq_apply_percent(message, state, message.from_user.id, int(text))
+
+        @router.callback_query(AdminResellerRequestFlow.waiting_percent, F.data == "rrpct:accept")
+        async def cb_resreq_accept_percent(call: CallbackQuery, state: FSMContext):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            data = await state.get_data()
+            req = (await asyncio.to_thread(db.get_reseller_request, data.get("resreq_request_id"))) if data.get("resreq_request_id") else None
+            proposed = req["proposed_percent"] if req else None
+            low, high = int(data.get("resreq_percent_low") or 1), int(data.get("resreq_percent_high") or 100)
+            if proposed is None or not (low <= int(proposed) <= high):
+                await call.answer("پیشنهاد کاربر معتبر نیست؛ درصد را دستی بفرستید.", show_alert=True)
+                return
+            await call.answer()
+            await _resreq_apply_percent(call.message, state, call.from_user.id, int(proposed))
+
+        @router.callback_query(AdminResellerRequestFlow.waiting_payment_methods, F.data.startswith("rrpm:"))
+        async def cb_resreq_payment_methods(call: CallbackQuery, state: FSMContext, bot: Bot):
+            if not senior_admin_only(call.from_user.id):
+                return await deny_mid(call)
+            parts = call.data.split(":")
+            data = await state.get_data()
+            items = [(k, label) for k, label in (data.get("resreq_pm_items") or [])]
+            selected = list(data.get("resreq_pm_selected") or [])
+            if parts[1] == "t" and len(parts) > 2 and parts[2].isdigit():
+                idx = int(parts[2])
+                if 0 <= idx < len(items):
+                    key = items[idx][0]
+                    selected = [k for k in selected if k != key] if key in selected else selected + [key]
+                    await state.update_data(resreq_pm_selected=selected)
+                    try:
+                        await call.message.edit_reply_markup(reply_markup=kb.reseller_request_payment_methods_kb(items, selected))
+                    except TelegramBadRequest:
+                        pass
+                await call.answer()
+                return
+            if parts[1] != "ok":
+                await call.answer()
+                return
+            if not selected:
+                await call.answer("حداقل یک روش پرداخت انتخاب کنید.", show_alert=True)
+                return
+            price = data.get("resreq_price")
+            request_id, panel_id = data.get("resreq_request_id"), data.get("resreq_panel_id")
+            req = (await asyncio.to_thread(db.get_reseller_request, request_id)) if request_id else None
+            await state.clear()
+            if not req or not price or req["status"] != "pending_review":
+                await call.answer("این درخواست دیگر معتبر نیست.", show_alert=True)
+                return
+            if req["claimed_by"] and req["claimed_by"] != call.from_user.id:
+                await call.answer("این درخواست توسط ادمین دیگری در حال بررسی است.", show_alert=True)
+                return
+
+            commission_percent = data.get("resreq_commission_percent")
+            discount_percent = data.get("resreq_discount_percent")
+            (await asyncio.to_thread(db.quote_reseller_request, request_id, price, panel_id, call.from_user.id, commission_percent, discount_percent, selected))
+            percent_log = f" | کمیسیون: {commission_percent}٪" if commission_percent is not None else (f" | تخفیف: {discount_percent}٪" if discount_percent is not None else "")
+            (await asyncio.to_thread(db.log_admin_action,
+                call.from_user.id, "reseller_request_quote",
+                f"درخواست #{request_id} | کاربر {req['user_id']} | هزینه: {price:,}{percent_log} | روش‌ها: {', '.join(selected)}",
             ))
-            await message.answer(f"✅ هزینه برای کاربر ارسال شد ({price:,} تومان).")
+            labels = {k: label for k, label in items}
+            await safe_edit(call, f"✅ هزینه برای کاربر ارسال شد ({price:,} تومان).\n💳 روش‌های پرداخت: " + "، ".join(labels.get(k, k) for k in selected))
+            await call.answer()
             volume_line = f"📦 حجم: {req['volume_gb']:,} گیگ\n" if req["volume_gb"] else ""
+            approved_percent = commission_percent if commission_percent is not None else discount_percent
+            proposed_percent = req["proposed_percent"] if "proposed_percent" in req.keys() else None
+            percent_label = "📈 کمیسیون" if commission_percent is not None else "🏷 تخفیف نماینده"
+            percent_line = f"{percent_label} تاییدشده: {approved_percent}٪\n" if approved_percent is not None else ""
+            if approved_percent is not None and proposed_percent is not None and int(proposed_percent) != int(approved_percent):
+                percent_line += f"💡 پیشنهاد شما: {proposed_percent}٪ (مدیر عدد بالا را تایید کرد)\n"
             try:
                 await bot.send_message(
                     req["user_id"],
                     f"🏪 درخواست نمایندگی #{request_id} شما تایید شد!\n\n"
                     f"💰 هزینه‌ی نمایندگی: {price:,} تومان\n"
-                    f"{volume_line}\n"
+                    f"{percent_line}{volume_line}\n"
                     f"در صورت موافقت روی «پرداخت می‌کنم» بزنید:",
                     reply_markup=kb.reseller_request_pay_kb(request_id),
                 )
@@ -5891,6 +6017,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         @router.message(AdminResellerRequestFlow.waiting_reject_reason)
         async def process_resreq_reject_reason(message: Message, state: FSMContext, bot: Bot):
             reason = (message.text or "").strip()
+            if not reason:
+                await message.answer("لطفاً دلیل را به‌صورت متن بنویسید.")
+                return
             data = await state.get_data()
             request_id = data.get("resreq_reject_id")
             status = data.get("resreq_reject_status", "rejected")
