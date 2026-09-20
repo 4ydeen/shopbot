@@ -5655,8 +5655,10 @@ function openResellerRequestModal(req) {
     actionsHtml = `
       <div><b>هزینه‌ی نمایندگی (تومان)</b></div>
       <input class="input" id="rq-price" type="number" placeholder="مبلغ به تومان">
-      ${req.tier_code === 'bronze' ? `<div><b>درصد کمیسیون برنزی</b></div><input class="input" id="rq-percent" type="number" min="1" max="100" placeholder="درصد کمیسیون">` : ''}
-      ${req.tier_code === 'silver' ? `<div><b>درصد تخفیف نقره‌ای</b></div><input class="input" id="rq-discount" type="number" min="1" max="100" placeholder="مثلاً 15٪"><div style="opacity:.65;font-size:12px">این درصد برای همین نماینده ثبت می‌شود؛ پلکان خرید عمده می‌تواند تخفیف را بیشتر کند.</div>` : ''}
+      ${req.tier_code === 'bronze' ? `<div><b>درصد کمیسیون برنزی</b></div><input class="input" id="rq-percent" type="number" min="1" max="100" placeholder="درصد کمیسیون" value="${req.proposed_percent ?? ''}">` : ''}
+      ${req.tier_code === 'silver' ? `<div><b>درصد تخفیف نقره‌ای</b></div><input class="input" id="rq-discount" type="number" min="1" max="100" placeholder="مثلاً 15٪" value="${req.proposed_percent ?? ''}"><div style="opacity:.65;font-size:12px">این درصد برای همین نماینده ثبت می‌شود؛ پلکان خرید عمده می‌تواند تخفیف را بیشتر کند.</div>` : ''}
+      <div><b>روش‌های پرداخت مجاز</b></div>
+      <div id="rq-methods" style="display:flex;flex-direction:column;gap:6px"></div>
       <div><b>پنل اختصاصی (اختیاری)</b></div>
       <select class="input" id="rq-panel"><option value="">پیش‌فرض خودکار</option></select>
       <button class="btn btn-primary" id="rq-quote">✅ تایید و ارسال هزینه به کاربر</button>
@@ -5675,6 +5677,7 @@ function openResellerRequestModal(req) {
     <div class="form-grid">
       <div><b>کاربر:</b> ${esc(req.username ? '@' + req.username : '—')} (<span class="mono">${req.user_id}</span>)</div>
       <div><b>حجم درخواستی:</b> ${fmt(req.volume_gb)} گیگ</div>
+      ${req.proposed_percent != null ? `<div><b>پیشنهاد کاربر:</b> ${fmt(req.proposed_percent)}٪</div>` : ''}
       ${req.request_text ? `<div><b>توضیحات کاربر:</b> ${esc(req.request_text)}</div>` : ''}
       <div><b>وضعیت:</b> ${RESELLER_REQ_STATUS_LABEL[req.status] || req.status}</div>
       ${req.price_toman ? `<div><b>هزینه‌ی ثبت‌شده:</b> ${fmt(req.price_toman)} تومان</div>` : ''}
@@ -5689,6 +5692,11 @@ function openResellerRequestModal(req) {
         const sel = $('#rq-panel', body);
         if (sel) sel.insertAdjacentHTML('beforeend', panels.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join(''));
       }).catch(() => {});
+      if (req.tier_code) apiGet(`/reseller-tiers/${encodeURIComponent(req.tier_code)}/payment-methods`).then(r => {
+        const box = $('#rq-methods', body);
+        if (!box) return;
+        box.innerHTML = r.methods.filter(m => m.enabled).map(m => `<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="rq-method" value="${esc(m.key)}" ${r.selected.includes(m.key) ? 'checked' : ''}><span>${esc(m.label)}</span></label>`).join('');
+      }).catch(() => {});
       $('#rq-quote', body).addEventListener('click', async () => {
         const price_toman = Number($('#rq-price', body).value);
         const panelVal = $('#rq-panel', body).value;
@@ -5697,7 +5705,10 @@ function openResellerRequestModal(req) {
           const commission_percent = $('#rq-percent', body) ? Number($('#rq-percent', body).value) || null : null;
           const discount_percent = $('#rq-discount', body) ? Number($('#rq-discount', body).value) || null : null;
           if (req.tier_code === 'silver' && (!discount_percent || discount_percent < 1 || discount_percent > 100)) { toast('درصد تخفیف نقره‌ای را بین ۱ تا ۱۰۰ وارد کنید.', true); return; }
-          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null, commission_percent, discount_percent });
+          const payment_methods = $$('.rq-method:checked', body).map(i => i.value);
+          const hasMethodBoxes = $$('.rq-method', body).length > 0;
+          if (hasMethodBoxes && !payment_methods.length) { toast('حداقل یک روش پرداخت انتخاب کنید.', true); return; }
+          await apiPost(`/reseller-requests/${req.id}/quote`, { price_toman, panel_server_id: panelVal ? Number(panelVal) : null, commission_percent, discount_percent, payment_methods: hasMethodBoxes ? payment_methods : null });
           toast('هزینه برای کاربر ارسال شد.'); close(); renderResellers();
         } catch (e) { handleErr(e); }
       });
