@@ -67,6 +67,7 @@ import blupal_client
 import blupal_payment
 import noapay_client
 import noapay_payment
+import extra_gateway_clients
 import payment_engine
 import card_to_card_payment
 from asset_versioning import static_version, ApiNoStoreMiddleware
@@ -2469,6 +2470,48 @@ async def api_wallet_noapay_invoice(body: NoapayWalletInvoiceRequest, auth=Depen
     )
     result["topup_id"] = body.topup_id
     return result
+
+
+@app.api_route("/api/pay-return/{gateway}", methods=["GET", "POST"], response_class=HTMLResponse)
+async def api_extra_gateway_return_page(gateway: str):
+    return HTMLResponse(
+        "<!doctype html><html lang=\"fa\" dir=\"rtl\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>وضعیت پرداخت</title>"
+        "<style>body{font-family:sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;"
+        "justify-content:center;min-height:100vh;margin:0;padding:16px;text-align:center}"
+        ".c{max-width:420px;background:#1e293b;border-radius:16px;padding:28px}</style></head>"
+        "<body><div class=\"c\"><h2>پرداخت شما ثبت شد</h2>"
+        "<p>پرداخت در حال بررسی است و به‌محض تایید، نتیجه داخل ربات برایتان ارسال می‌شود.</p>"
+        "<p>اگر چند دقیقه طول کشید، به ربات برگردید و روی «بررسی وضعیت پرداخت» بزنید.</p>"
+        "</div></body></html>",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/webhooks/nowpayments")
+async def api_nowpayments_ipn(request: Request, tenant: Tenant = Depends(get_tenant)):
+    db = tenant.db
+    try:
+        body = json.loads((await request.body()) or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid json")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid body")
+    secret = ((await asyncio.to_thread(db.get_setting, "nowpayments_ipn_secret", "")) or "").strip()
+    if secret and not extra_gateway_clients.nowpayments_verify_ipn_signature(
+        secret, body, request.headers.get("x-nowpayments-sig", "")
+    ):
+        raise HTTPException(status_code=401, detail="invalid signature")
+    order_number = str(body.get("order_id") or "")
+    payment_id = body.get("payment_id")
+    invoice = await asyncio.to_thread(db.get_extra_invoice_by_order_number, order_number) if order_number else None
+    if invoice and invoice["gateway"] == "nowpayments" and payment_id:
+        await asyncio.to_thread(
+            db.merge_extra_invoice_meta, invoice["id"],
+            {"payment_id": str(payment_id), "payment_status": str(body.get("payment_status") or "")},
+        )
+    return {"ok": True}
 
 
 @app.post("/api/webhooks/noapay")
