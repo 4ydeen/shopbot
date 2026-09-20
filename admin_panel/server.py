@@ -5808,6 +5808,28 @@ def api_add_pricing_tier(body: PricingTierBody, admin=Depends(require_permission
     return {"id": tier_id}
 
 
+@app.get("/api/custom-config/payment-methods")
+def api_get_custom_config_payment_methods(admin=Depends(require_any_permission("settings", "panels")), _fa=Depends(require_full_access_tenant)):
+    return {"allowed": db.get_custom_config_payment_methods()}
+
+
+class CustomConfigPaymentMethodsBody(BaseModel):
+    methods: Optional[List[str]] = None
+
+
+@app.post("/api/custom-config/payment-methods")
+def api_set_custom_config_payment_methods(body: CustomConfigPaymentMethodsBody, admin=Depends(require_any_permission("settings", "panels")), _fa=Depends(require_full_access_tenant)):
+    valid = {x["key"] for x in db.get_payment_methods_catalog()}
+    methods = [m for m in (body.methods or []) if m in valid]
+    if body.methods and not methods:
+        raise HTTPException(400, "روش پرداخت نامعتبر است.")
+    db.set_custom_config_payment_methods(methods or None)
+    db.log_admin_action(admin["id"], "custom_config_payment_methods",
+                        f"{methods or 'همه'} (پنل وب - {admin['username']})",
+                        "setting", "custom_config_payment_methods")
+    return {"ok": True}
+
+
 @app.delete("/api/custom-config/pricing-tiers/{tier_id}")
 def api_delete_pricing_tier(tier_id: int, admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
     db.delete_pricing_tier(tier_id)
