@@ -16,6 +16,25 @@ function withTenant(path) {
   return `${path}${sep}b=${encodeURIComponent(TENANT_ID)}`;
 }
 
+const ASSET_VERSION = (document.querySelector('meta[name="asset-version"]') || {}).content || "";
+
+(function watchAppVersion() {
+  if (!ASSET_VERSION || ASSET_VERSION.startsWith("{{")) return;
+  const isTyping = () => {
+    const el = document.activeElement;
+    return !!el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable);
+  };
+  const check = async () => {
+    try {
+      const res = await fetch("/api/app-version", { cache: "no-store" });
+      const data = await res.json();
+      if (data.v && data.v !== ASSET_VERSION && !isTyping()) window.location.reload();
+    } catch (e) {}
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  setInterval(() => { if (!document.hidden) check(); }, 120000);
+})();
+
 // ---------------------------------------------------------------------------
 // تبدیل میلادی به شمسی (فقط برای نمایش؛ منطق داخلی همچنان میلادی/ISO است)
 // ---------------------------------------------------------------------------
@@ -5950,11 +5969,11 @@ async function renderAdminFinanceSection() {
     `;
 
     document.getElementById("fin-open-card-auto").onclick = () => {
-      window.location.href = withTenant("card-to-card-auto.html");
+      window.location.href = withTenant("card-to-card-auto.html?v=" + ASSET_VERSION);
     };
 
     document.getElementById("fin-open-custom-gateways").onclick = () => {
-      window.location.href = withTenant("gateways.html");
+      window.location.href = withTenant("gateways.html?v=" + ASSET_VERSION);
     };
 
     document.getElementById("fin-card-save").onclick = async () => {
