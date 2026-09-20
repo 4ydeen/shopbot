@@ -39,6 +39,9 @@ import crypto_payment
 import abangateway_payment
 import blupal_payment
 import noapay_payment
+import extra_gateway_payment
+import extra_gateway_registry
+import extra_gateway_user
 import custom_gateway_payment
 import card_to_card_payment
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
@@ -161,6 +164,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
 
     router = Router()
+    extra_gateway_user.register_early(router, db, is_main_bot)
 
     async def _safe_edit(message: Message, text: str, reply_markup=None, parse_mode=None) -> None:
         """ویرایش امن یک پیام (برای منوهای «بازگشت»/«لغو» و مشابه).
@@ -911,6 +915,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             if sent:
                 (await asyncio.to_thread(db.set_order_admin_message, order_id, admin_id, sent.message_id))
 
+    extra_gateway_user.register(
+        router, db, is_main_bot, _order_payment_method_error, _wallet_topup_method_error, _notify_admins_of_order,
+    )
+
     @router.callback_query(F.data.startswith("check_aban:"))
     async def cb_check_abangateway(call: CallbackQuery, bot: Bot):
         try:
@@ -1223,6 +1231,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     allowed_methods=allowed_methods,
                     noapay_enabled=noapay_payment.noapay_payment_available(db),
                     blupal_enabled=blupal_payment.blupal_payment_available(db),
+                    extra_gateways=extra_gateway_payment.available_keys(db, is_main_bot),
                 ),
             )
             await call.answer()
@@ -1899,6 +1908,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     allowed_methods=allowed_methods,
                     noapay_enabled=noapay_payment.noapay_payment_available(db),
                     blupal_enabled=blupal_payment.blupal_payment_available(db),
+                    extra_gateways=extra_gateway_payment.available_keys(db, is_main_bot),
                 ),
             )
         except Exception:
@@ -3516,6 +3526,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     db=db,
                     noapay_enabled=noapay_payment.noapay_payment_available(db),
                     blupal_enabled=blupal_payment.blupal_payment_available(db),
+                    extra_gateways=extra_gateway_payment.available_keys(db, is_main_bot),
                 ),
             )
         except Exception:
@@ -4174,6 +4185,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 allowed_methods=wallet_allowed_methods,
                 noapay_enabled=noapay_payment.noapay_payment_available(db),
                 blupal_enabled=blupal_payment.blupal_payment_available(db),
+                extra_gateways=extra_gateway_payment.available_keys(db, is_main_bot),
             ),
         )
 
@@ -5006,7 +5018,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await call.answer("درخواست همچنان منتظر پرداخت شماست.")
 
     @router.callback_query(F.data.startswith("respay:"))
-    async def reseller_request_choose_payment(call: CallbackQuery, state: FSMContext):
+    async def reseller_request_choose_payment(call: CallbackQuery, state: FSMContext, bot: Bot):
         method = call.data.split(":", 1)[1]
         req = await asyncio.to_thread(db.get_open_reseller_request, call.from_user.id)
         if not req or req["status"] != "awaiting_payment":
@@ -5059,6 +5071,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     return
                 inv = await custom_gateway_payment.create_invoice_for(db, tenant_id, call.from_user.id, key, "reseller_request", req["id"], amount, label)
                 await call.message.answer("💠 فاکتور درگاه سفارشی ساخته شد.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 پرداخت", url=inv["invoice_url"])]]))
+            elif method in extra_gateway_registry.GATEWAYS:
+                inv = await extra_gateway_payment.create_invoice_for(db, tenant_id, call.from_user.id, method, "reseller_request", req["id"], amount, label)
+                await extra_gateway_user.present_invoice(call.message, bot, method, inv, "reseller_request", label, amount)
             else:
                 raise ValueError("روش پرداخت پشتیبانی نمی‌شود")
             await call.answer("روش پرداخت انتخاب شد.")

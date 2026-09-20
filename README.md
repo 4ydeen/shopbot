@@ -157,6 +157,12 @@
 | 💎 Plisio | خودکار | پرداخت کریپتو، کال‌بک امن با اعتبارسنجی امضا |
 | 🔵 بلوپال (Blupal) | خودکار | کارت‌به‌کارت خودکار جایگزین؛ ساخت فاکتور و استعلام وضعیت مستقیم از API |
 | ⭐ NoaPay (استارز تلگرام) | خودکار | پرداخت با استارز تلگرام؛ نرخ تبدیل واقعی از خود سرویس خوانده می‌شود |
+| 🟡 زرین‌پال | خودکار | فقط بات اصلی؛ مرچنت کد از منوی «تنظیم درگاه‌های جدید» در پنل مالی |
+| 🔵 آقای پرداخت | خودکار | فقط بات اصلی؛ پین درگاه؛ دامنه‌ی برگشت باید با دامنه‌ی ثبت‌شده‌ی درگاه یکی باشد |
+| 💸 تترا۹۸ | خودکار | فقط بات اصلی؛ مبلغ به ریال ارسال می‌شود؛ لینک پرداخت داخل ربات تترا۹۸ هم نمایش داده می‌شود |
+| 💳 کیوب‌پی | خودکار | فقط بات اصلی؛ کارت‌به‌کارت خودکار؛ کارمزد اختیاری روی مبلغ کاربر |
+| 💰 NowPayments | خودکار | فقط بات اصلی؛ فاکتور به دلار با نرخ تنظیم کریپتو؛ تایید با IPN (`/api/webhooks/nowpayments`) |
+| ⭐ استارز داخلی تلگرام | خودکار | فقط بات اصلی؛ فاکتور `XTR` داخل خود تلگرام؛ نرخ هر استارز به تومان از تنظیمات درگاه |
 | 🧩 موتور درگاه پرداخت سفارشی/پویا (Generic Gateway) | خودکار، بدون کد | ادمین بدون نوشتن حتی یک خط کد، هر درگاهی با HTTP API را از پنل تعریف می‌کند: آدرس API، هدر/بدنه با پلیس‌هولدر (`{amount}`, `{callback_url}`, `{api_key}`)، مسیر خواندن پاسخ (شبیه JSONPath)، و وب‌هوک با چند حالت احراز هویت (`header_secret`, `query_secret`, `hmac_sha256`) |
 
 همه‌ی درگاه‌های خودکار مستقل از هم عمل می‌کنند و می‌توان چند تا را هم‌زمان فعال نگه داشت.
@@ -497,6 +503,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 | `abangateway_client.py` / `abangateway_payment.py` | کلاینت و منطق درگاه [آبان گیت وی](https://abangateway.ir) |
 | `blupal_client.py` / `blupal_payment.py` | کلاینت و منطق درگاه [بلوپال](https://www.blupal.net) |
 | `noapay_client.py` / `noapay_payment.py` | کلاینت و منطق درگاه NoaPay (پرداخت با استارز تلگرام) |
+| `extra_gateway_*.py` | درگاه‌های زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments و استارز داخلی (رجیستری، کلاینت‌ها، منطق پرداخت، هندلرهای کاربر و ادمین؛ فقط بات اصلی) |
 | `card_to_card_payment.py` | منطق کارت‌به‌کارت با تایید خودکار از روی پیامک بانک |
 | `payment_engine.py` | موتور عمومی درگاه پرداخت پویا (`GenericGateway`) بر اساس یک config جیسون |
 | `custom_gateway_payment.py` | منطق مشترک ساخت فاکتور با یک درگاه سفارشی (`payment_engine.GenericGateway`) |
@@ -534,7 +541,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mehdirafatpanah/Shopvpn/main
 | فرانت‌اند Mini App / پنل وب | HTML, CSS, JavaScript خالص + PWA |
 | اپ مدیریت اندروید | Kotlin + Jetpack Compose (SDUI) |
 | هوش مصنوعی | Gemini / Groq / OpenRouter (function calling) |
-| پرداخت آنلاین/کریپتو | آبان گیت وی، Plisio، بلوپال، NoaPay |
+| پرداخت آنلاین/کریپتو | آبان گیت وی، Plisio، بلوپال، NoaPay، زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments، استارز داخلی |
 | اعلان Push | Web Push (VAPID) + Firebase Cloud Messaging |
 | مدیریت سرور | systemd, Bash, Nginx |
 | کنترل نسخه | Git / GitHub |

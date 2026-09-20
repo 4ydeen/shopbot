@@ -22,6 +22,8 @@ import json
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
+import extra_gateway_registry
+
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +292,7 @@ DEFAULT_SETTINGS = {
     "card_to_card_sms_amount_unit": "rial",     # واحد مبلغ داخل پیامک بانک: rial یا toman
     "card_to_card_sms_webhook_token": "",       # توکن احراز هویت وب‌هوک اپ BankSmsForwarder
 }
+DEFAULT_SETTINGS.update(extra_gateway_registry.default_settings())
 
 # روش‌های پرداخت «داخلی» (غیر از درگاه‌های سفارشی) که در همه‌جای پروژه
 # (بات، پنل ادمین وب، مینی‌اپ) به همین شکل شناخته می‌شوند. کلید تنظیم حداقل
@@ -303,6 +306,13 @@ BUILTIN_PAYMENT_METHODS = [
     {"key": "crypto", "label": "🪙 ارز دیجیتال (تایید آنی)", "enable_setting": "crypto_payment_enabled"},
     {"key": "card_auto", "label": "💳 کارت‌به‌کارت (تایید خودکار پیامکی)", "enable_setting": "card_to_card_auto_enabled"},
 ]
+for _gw_key in extra_gateway_registry.GATEWAY_ORDER:
+    _gw = extra_gateway_registry.GATEWAYS[_gw_key]
+    BUILTIN_PAYMENT_METHODS.append({
+        "key": _gw_key,
+        "label": f"{_gw['icon']} {_gw['title']} (تایید آنی)",
+        "enable_setting": extra_gateway_registry.enable_setting(_gw_key),
+    })
 
 
 # تعریف کامل دکمه‌های قابل‌مدیریت در منوی اصلی: کلید -> متادیتا
@@ -360,7 +370,10 @@ PAYMENT_METHOD_META = {
     "noapay": {"label": "NoapayBot (استارز تلگرام)", "default_text": "⭐ NoapayBot - استارز تلگرام (تایید آنی)"},
     "crypto": {"label": "ارز دیجیتال (Plisio)", "default_text": "🪙 پرداخت با ارز دیجیتال (تایید آنی)"},
 }
-DEFAULT_PAYMENT_METHOD_ORDER = ["card", "card_auto", "abangateway", "blupal", "noapay", "crypto"]
+for _gw_key in extra_gateway_registry.GATEWAY_ORDER:
+    _gw = extra_gateway_registry.GATEWAYS[_gw_key]
+    PAYMENT_METHOD_META[_gw_key] = {"label": _gw["title"], "default_text": _gw["default_text"]}
+DEFAULT_PAYMENT_METHOD_ORDER = ["card", "card_auto", "abangateway", "blupal", "noapay", "crypto"] + list(extra_gateway_registry.GATEWAY_ORDER)
 
 ACCOUNT_HUB_META = {
     "acct_orders": {"label": "سرویس‌ها و سفارش‌های من", "default_text": "📦 سرویس‌ها و سفارش‌های من"},
@@ -879,6 +892,26 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_noapay_invoices_token ON noapay_invoices(invoice_token);
                 CREATE INDEX IF NOT EXISTS idx_noapay_invoices_ref ON noapay_invoices(kind, ref_id);
 
+                CREATE TABLE IF NOT EXISTS extra_gateway_invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    gateway TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    ref_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    amount_toman INTEGER NOT NULL,
+                    payable_amount INTEGER,
+                    remote_id TEXT,
+                    order_number TEXT UNIQUE,
+                    payment_url TEXT,
+                    meta TEXT,
+                    status TEXT DEFAULT 'new',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_extra_gw_invoices_remote ON extra_gateway_invoices(gateway, remote_id);
+                CREATE INDEX IF NOT EXISTS idx_extra_gw_invoices_ref ON extra_gateway_invoices(kind, ref_id);
+
 
                 -- ===================== ساخت کانفیگ شخصی (پنل‌های VPN) =====================
                 -- ===== درگاه‌های پرداخت سفارشی/پویا (تعریف‌شده توسط ادمین، بدون کد) =====
@@ -1283,7 +1316,7 @@ class Database:
         "test_config_plans", "orders", "discount_codes", "wallet_topups",
         "crypto_invoices", "support_messages", "support_conversations",
         "admin_presence", "tickets", "ticket_messages", "admin_logs",
-        "abangateway_invoices", "blupal_invoices", "noapay_invoices", "custom_gateways", "custom_gateway_invoices",
+        "abangateway_invoices", "blupal_invoices", "noapay_invoices", "extra_gateway_invoices", "custom_gateways", "custom_gateway_invoices",
         "card_to_card_cards", "card_to_card_invoices", "panel_servers",
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
@@ -3473,6 +3506,7 @@ class Database:
                 "AND NOT EXISTS (SELECT 1 FROM abangateway_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM blupal_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM noapay_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status IN ('new','pending')) "
+                "AND NOT EXISTS (SELECT 1 FROM extra_gateway_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM custom_gateway_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM card_to_card_invoices gi WHERE gi.kind='order' AND gi.ref_id=o.id AND gi.status='pending') "
                 "ORDER BY o.id"
@@ -3828,6 +3862,8 @@ class Database:
                 "UNION ALL "
                 "SELECT 'ارز دیجیتال', status, amount_toman, created_at FROM crypto_invoices WHERE kind='order' "
                 "UNION ALL "
+                + self._extra_gateway_stats_select() +
+                " UNION ALL "
                 "SELECT cg.name, cgi.status, cgi.amount_toman, cgi.created_at "
                 "FROM custom_gateway_invoices cgi JOIN custom_gateways cg ON cg.id=cgi.gateway_id "
                 "WHERE cgi.kind='order'"
@@ -4665,6 +4701,7 @@ class Database:
                 "AND NOT EXISTS (SELECT 1 FROM abangateway_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM blupal_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM noapay_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status IN ('new','pending')) "
+                "AND NOT EXISTS (SELECT 1 FROM extra_gateway_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM custom_gateway_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status IN ('new','pending')) "
                 "AND NOT EXISTS (SELECT 1 FROM card_to_card_invoices gi WHERE gi.kind='wallet_topup' AND gi.ref_id=t.id AND gi.status='pending') "
                 "ORDER BY t.id"
@@ -5058,6 +5095,10 @@ class Database:
             noapay = conn.execute(
                 "SELECT COUNT(*) c, COALESCE(SUM(amount_toman),0) s FROM noapay_invoices WHERE status='completed'"
             ).fetchone()
+            extra_rows = conn.execute(
+                "SELECT gateway, COUNT(*) c, COALESCE(SUM(amount_toman),0) s "
+                "FROM extra_gateway_invoices WHERE status IN ('paid','completed') GROUP BY gateway"
+            ).fetchall()
             custom_rows = conn.execute(
                 "SELECT cg.name AS name, COUNT(*) c, COALESCE(SUM(cgi.amount_toman),0) s "
                 "FROM custom_gateway_invoices cgi JOIN custom_gateways cg ON cg.id = cgi.gateway_id "
@@ -5069,6 +5110,12 @@ class Database:
             {"gateway": "blupal", "label": "بلوپال", "count": blupal["c"], "amount_toman": blupal["s"]},
             {"gateway": "noapay", "label": "NoapayBot (استارز)", "count": noapay["c"], "amount_toman": noapay["s"]},
         ]
+        for row in extra_rows:
+            gw_meta = extra_gateway_registry.GATEWAYS.get(row["gateway"])
+            result.append({
+                "gateway": row["gateway"], "label": gw_meta["title"] if gw_meta else row["gateway"],
+                "count": row["c"], "amount_toman": row["s"],
+            })
         for row in custom_rows:
             result.append({
                 "gateway": f"custom:{row['name']}", "label": row["name"] or "درگاه سفارشی",
@@ -5348,6 +5395,132 @@ class Database:
                 (cutoff,),
             )
 
+    def _extra_gateway_stats_select(self) -> str:
+        cases = " ".join(
+            f"WHEN '{key}' THEN '{extra_gateway_registry.GATEWAYS[key]['title']}'"
+            for key in extra_gateway_registry.GATEWAY_ORDER
+        )
+        return (
+            f"SELECT CASE gateway {cases} ELSE gateway END, status, amount_toman, created_at "
+            "FROM extra_gateway_invoices WHERE kind='order'"
+        )
+
+    def create_extra_invoice(self, gateway: str, kind: str, ref_id: int, user_id: int,
+                              amount_toman: int, payable_amount: int = None, remote_id: str = None,
+                              order_number: str = None, payment_url: str = None, meta: dict = None) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO extra_gateway_invoices (gateway, kind, ref_id, user_id, amount_toman, "
+                "payable_amount, remote_id, order_number, payment_url, meta, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+                (gateway, kind, ref_id, user_id, amount_toman, payable_amount, remote_id, order_number,
+                 payment_url, json.dumps(meta or {}, ensure_ascii=False)),
+            )
+            return cur.lastrowid
+
+    def get_extra_invoice(self, id_: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM extra_gateway_invoices WHERE id=?", (id_,)).fetchone()
+
+    def get_extra_invoice_by_remote(self, gateway: str, remote_id: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM extra_gateway_invoices WHERE gateway=? AND remote_id=? ORDER BY id DESC LIMIT 1",
+                (gateway, str(remote_id)),
+            ).fetchone()
+
+    def get_extra_invoice_by_order_number(self, order_number: str):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM extra_gateway_invoices WHERE order_number=?", (order_number,)
+            ).fetchone()
+
+    def get_pending_extra_invoice_for_ref(self, gateway: str, kind: str, ref_id: int):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM extra_gateway_invoices WHERE gateway=? AND kind=? AND ref_id=? "
+                "AND status IN ('new','pending') ORDER BY id DESC LIMIT 1",
+                (gateway, kind, ref_id),
+            ).fetchone()
+
+    def update_extra_invoice_status(self, id_: int, status: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE extra_gateway_invoices SET status=?, updated_at=? WHERE id=?",
+                (status, datetime.utcnow().isoformat(), id_),
+            )
+
+    def claim_extra_invoice(self, id_: int) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE extra_gateway_invoices SET status='completed', updated_at=? "
+                "WHERE id=? AND status IN ('new','pending')",
+                (datetime.utcnow().isoformat(), id_),
+            )
+            return cur.rowcount == 1
+
+    def release_extra_invoice(self, id_: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE extra_gateway_invoices SET status='pending', updated_at=? "
+                "WHERE id=? AND status='completed'",
+                (datetime.utcnow().isoformat(), id_),
+            )
+
+    def merge_extra_invoice_meta(self, id_: int, updates: dict):
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT meta FROM extra_gateway_invoices WHERE id=?", (id_,)).fetchone()
+            if not row:
+                return
+            try:
+                meta = json.loads(row["meta"] or "{}")
+            except (TypeError, ValueError):
+                meta = {}
+            meta.update(updates)
+            conn.execute(
+                "UPDATE extra_gateway_invoices SET meta=?, updated_at=? WHERE id=?",
+                (json.dumps(meta, ensure_ascii=False), datetime.utcnow().isoformat(), id_),
+            )
+
+    def list_extra_invoices(self, limit: int = 50):
+        limit = max(1, min(int(limit or 50), 200))
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM extra_gateway_invoices ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+
+    def list_open_extra_invoices(self, limit: int = 100):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM extra_gateway_invoices WHERE status IN ('new','pending') "
+                "AND gateway != 'tgstars' ORDER BY id LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+
+    def expire_stale_extra_invoices(self):
+        now = datetime.utcnow()
+        with self._get_conn() as conn:
+            for key, meta in extra_gateway_registry.GATEWAYS.items():
+                cutoff = (now - timedelta(minutes=int(meta["ttl_minutes"]))).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "UPDATE extra_gateway_invoices SET status='expired', updated_at=? "
+                    "WHERE gateway=? AND status IN ('new','pending') AND created_at < ?",
+                    (now.isoformat(), key, cutoff),
+                )
+
+    def cancel_and_delete_extra_invoice(self, id_: int):
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM extra_gateway_invoices WHERE id=?", (id_,))
+
+    def purge_old_extra_invoices(self, days: int = 7):
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM extra_gateway_invoices WHERE status IN ('completed','expired','cancelled') "
+                "AND COALESCE(updated_at, created_at) < ?",
+                (cutoff,),
+            )
+
     # -----------------------------------------------------------------------
     # درگاه‌های پرداخت سفارشی/پویا (بدون کد، تعریف‌شده توسط ادمین)
     # -----------------------------------------------------------------------
@@ -5484,6 +5657,10 @@ class Database:
         "blupal": ("blupal_invoices", "status IN ('new','pending')"),
         "noapay": ("noapay_invoices", "status IN ('new','pending')"),
         "card_auto": ("card_to_card_invoices", "status='pending'"),
+        **{
+            _k: ("extra_gateway_invoices", f"gateway='{_k}' AND status IN ('new','pending')")
+            for _k in extra_gateway_registry.GATEWAY_ORDER
+        },
     }
 
     def list_stuck_gateway_invoices(self, method_key: str, minutes: int):
@@ -5533,6 +5710,12 @@ class Database:
                 "SELECT 1 FROM noapay_invoices WHERE kind=? AND ref_id=? LIMIT 1", (kind, ref_id)
             ).fetchone():
                 return "noapay"
+            extra_row = conn.execute(
+                "SELECT gateway FROM extra_gateway_invoices WHERE kind=? AND ref_id=? ORDER BY id DESC LIMIT 1",
+                (kind, ref_id),
+            ).fetchone()
+            if extra_row:
+                return extra_row["gateway"]
             row = conn.execute(
                 "SELECT cg.gateway_key FROM custom_gateway_invoices cgi "
                 "JOIN custom_gateways cg ON cg.id = cgi.gateway_id "

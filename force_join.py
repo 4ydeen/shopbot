@@ -57,6 +57,9 @@ class ForceJoinMiddleware(BaseMiddleware):
         if not user:
             return await handler(event, data)
 
+        if isinstance(event, Message) and event.successful_payment:
+            return await handler(event, data)
+
         # ادمین‌های بات از این محدودیت معاف هستند
         if self.db.is_admin(user.id):
             return await handler(event, data)

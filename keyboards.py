@@ -16,6 +16,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+import extra_gateway_registry
 from config import MINIAPP_URL
 from panel_providers import PANEL_TYPE_LABELS, INBOUND_SELECT_PANEL_TYPES
 from database import MENU_BUTTON_META, ACCOUNT_TOGGLE_KEYS
@@ -646,7 +647,7 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
                        custom_gateways: list = None, card_to_card_enabled: bool = True,
                        amount: int = None, db=None, allowed_methods=None,
                        card_auto_enabled: bool = False, noapay_enabled: bool = False,
-                       blupal_enabled: bool = False) -> InlineKeyboardMarkup:
+                       blupal_enabled: bool = False, extra_gateways: list = None) -> InlineKeyboardMarkup:
     """کیبورد مرحله‌ی انتخاب روش پرداخت: کاربر ابتدا این لیست را می‌بیند و روش پرداخت را
     انتخاب می‌کند (به‌جای اینکه مستقیم شماره کارت نمایش داده شود). اگر درگاه کریپتو/آبان
     گیت وی/درگاه‌های سفارشی/کارت‌به‌کارت خودکار فعال باشند، دکمه‌ی مربوطه هم نمایش داده
@@ -678,6 +679,8 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
         "abangateway": abangateway_enabled, "blupal": blupal_enabled,
         "noapay": noapay_enabled, "crypto": crypto_enabled,
     }
+    for _extra_key in (extra_gateways or []):
+        static_enabled[_extra_key] = True
     gw_by_key = {f"customgw:{gw['id']}": gw for gw in (custom_gateways or [])}
     valid_keys = list(DEFAULT_PAYMENT_METHOD_ORDER) + list(gw_by_key.keys())
     order = db.get_custom_order("payment_methods", valid_keys) if db is not None else valid_keys
@@ -688,6 +691,8 @@ def payment_choice_kb(crypto_enabled: bool, abangateway_enabled: bool = False,
     rows = []
     static_cb = {"card": "pay_card2card", "card_auto": "pay_card_auto", "abangateway": "pay_abangateway",
                  "blupal": "pay_blupal", "noapay": "pay_noapay", "crypto": "pay_crypto"}
+    for _extra_key in extra_gateway_registry.GATEWAY_ORDER:
+        static_cb[_extra_key] = f"pay_{_extra_key}"
     for key in order:
         if key in PAYMENT_METHOD_META:
             if not static_enabled.get(key) or not _ok(key):
@@ -1006,6 +1011,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_abangateway_payments", "💳 پرداخت‌های آبان گیت وی", "adm_abangateway_payments"),
     ("adm_blupal_payments", "💳 پرداخت‌های بلوپال", "adm_blupal_payments"),
     ("adm_noapay_payments", "⭐ پرداخت‌های NoapayBot", "adm_noapay_payments"),
+    ("adm_xgw_payments", "💠 پرداخت‌های درگاه‌های جدید", "adm_xgw_payments"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
@@ -1030,6 +1036,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_set_abangateway", "💳 تنظیم درگاه آبان گیت وی", "adm_set_abangateway"),
     ("adm_set_blupal", "💳 تنظیم درگاه بلوپال", "adm_set_blupal"),
     ("adm_set_noapay", "⭐ تنظیم درگاه NoapayBot", "adm_set_noapay"),
+    ("adm_set_xgw", "🧩 تنظیم درگاه‌های زرین‌پال/آقای پرداخت/...", "adm_set_xgw"),
     ("adm_card_auto", "📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "adm_card_auto"),
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
@@ -1066,6 +1073,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_abangateway_payments",
         "adm_blupal_payments",
         "adm_noapay_payments",
+        "adm_xgw_payments",
         "adm_reseller_requests_menu",
     ]),
     ("products", "📦 محصولات و کانفیگ", [
@@ -1099,6 +1107,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_set_abangateway",
         "adm_set_blupal",
         "adm_set_noapay",
+        "adm_set_xgw",
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
@@ -1149,6 +1158,8 @@ def _admin_item_label_and_cb(key: str):
 
 
 def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
+    if key in ("adm_set_xgw", "adm_xgw_payments") and not is_main_bot:
+        return False
     if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu", "adm_commission_resellers_menu") and not is_main_bot:
         # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت
         # درخواست‌های نمایندگی سطح ۲ (که فقط از بات اصلی قابل درخواست است) را ندارند
@@ -2512,6 +2523,10 @@ MIN_AMOUNT_SETTINGS_ITEMS = [
     ("min_amount_blupal", "💳 حداقل مبلغ بلوپال"),
     ("min_amount_noapay", "⭐ حداقل مبلغ NoapayBot"),
     ("min_amount_crypto", "🪙 حداقل مبلغ پرداخت کریپتو"),
+] + [
+    (extra_gateway_registry.min_amount_setting(_k),
+     f"{extra_gateway_registry.GATEWAYS[_k]['icon']} حداقل مبلغ {extra_gateway_registry.GATEWAYS[_k]['title']}")
+    for _k in extra_gateway_registry.GATEWAY_ORDER
 ]
 
 

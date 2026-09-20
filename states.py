@@ -138,6 +138,10 @@ class AdminSetNoapay(StatesGroup):
     waiting_rate = State()
 
 
+class AdminSetExtraGateway(StatesGroup):
+    waiting_value = State()
+
+
 class AdminC2CCard(StatesGroup):
     waiting_number = State()
     waiting_holder = State()

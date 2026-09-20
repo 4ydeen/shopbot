@@ -38,6 +38,7 @@ import crypto_payment
 import abangateway_payment
 import blupal_payment
 import noapay_payment
+import extra_gateway_admin
 import ai_support
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
@@ -9181,5 +9182,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.clear()
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    extra_gateway_admin.register(
+        router, db, is_main_bot, admin_only, full_admin_only, deny_support, replace_admin_view,
+        safe_edit, callback_id,
+    )
 
     return router

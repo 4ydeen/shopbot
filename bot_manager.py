@@ -33,6 +33,7 @@ from renewal_reminders import renewal_reminder_loop
 from connect_alerts import connect_alert_loop
 from backup import backup_loop
 from temp_messages import temp_message_cleanup_loop
+import extra_gateway_payment
 from force_join import ForceJoinMiddleware
 from blocked_user import BlockedUserMiddleware
 import keyboards as kb
@@ -279,12 +280,15 @@ class BotManager:
         # به توضیح داخل Database.cache_autorefresh_loop)
         cache_refresh_task = asyncio.create_task(db.cache_autorefresh_loop())
         temp_msg_task = asyncio.create_task(temp_message_cleanup_loop(bot, db))
+        extra_gateway_task = (
+            asyncio.create_task(extra_gateway_payment.poll_loop(bot, db)) if is_main_bot else None
+        )
 
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
             "connect_alert_task": connect_alert_task,
             "backup_task": backup_task, "cache_refresh_task": cache_refresh_task,
-            "temp_msg_task": temp_msg_task, "db_path": db_path,
+            "temp_msg_task": temp_msg_task, "extra_gateway_task": extra_gateway_task, "db_path": db_path,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
         return True
@@ -331,6 +335,13 @@ class BotManager:
             temp_msg_task.cancel()
             try:
                 await temp_msg_task
+            except Exception:
+                pass
+        extra_gateway_task = inst.get("extra_gateway_task")
+        if extra_gateway_task:
+            extra_gateway_task.cancel()
+            try:
+                await extra_gateway_task
             except Exception:
                 pass
         if BOT_MODE == "webhook" and self.webhook_server is not None:
