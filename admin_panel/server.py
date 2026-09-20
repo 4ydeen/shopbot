@@ -43,6 +43,7 @@ from pydantic import BaseModel
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, resolve_db_path, API_BASE_URL, RESELLER_DBS_DIR
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 import button_registry
+import extra_gateway_registry
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel import mobile_auth
 from asset_versioning import file_digest, static_version, ApiNoStoreMiddleware
@@ -1295,7 +1296,7 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "noapay_api_key", "label": "کلید API NoapayBot", "type": "password"},
                     {"key": "noapay_webhook_secret", "label": "رمز HMAC وب‌هوک (X-Starbot-Signature)", "type": "password"},
                     {"key": "noapay_rate_toman_per_star", "label": "نرخ تومان به‌ازای هر استارز", "type": "number"},
-                ]}, {"title": "📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "fields": [
+                ]}, *extra_gateway_registry.settings_groups(), {"title": "📡 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "fields": [
                     {"key": "card_to_card_auto_enabled", "label": "فعال بودن (نیازمند حداقل یک کارت فعال)", "type": "bool"},
                     {"key": "card_to_card_auto_timeout_minutes", "label": "مهلت هر مبلغ (دقیقه)", "type": "number"},
                     {"key": "card_to_card_auto_amount_digits", "label": "تعداد رقم آخر برای یکتاسازی مبلغ", "type": "number"},
