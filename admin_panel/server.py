@@ -4467,30 +4467,11 @@ class MakeResellerBody(BaseModel):
     note: Optional[str] = None
 
 
-@app.post("/api/users/{tg_id}/make-reseller")
-async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Request, admin=Depends(require_permission("resellers"))):
-    """نماینده‌کردن مستقیم یک کاربر از پنل ادمین، با همان گزینه‌های چندسطحیِ فرم
-    درخواست نمایندگی کاربر (بند ۶ اسپک) - بدون نیاز به این‌که خودِ کاربر
-    درخواست بدهد. برای هر گزینه یک reseller_request با reviewed_by این ادمین ثبت
-    می‌شود تا هم در تاریخچه‌ی «درخواست‌های نمایندگی» دیده شود و هم منطق تکمیل
-    (اعتبار/موجودی، پنل وب، مینی‌اپ، لینک اینلاین) دقیقاً همان مسیر تاییدشده‌ی
-    فعلی را طی کند - نه یک کپیِ جدا که ممکن است رفتارش با گذر زمان از مسیر اصلی
-    جدا بیفتد."""
-    tier = (await asyncio.to_thread(db.get_reseller_tier, body.tier_code))
-    if not tier or not tier["is_enabled"]:
-        raise HTTPException(400, "سطح نمایندگی نامعتبر یا غیرفعال است.")
-    user = (await asyncio.to_thread(db.get_user, tg_id))
-    if not user:
-        raise HTTPException(404, "کاربر یافت نشد.")
-    if (
-        (await asyncio.to_thread(db.is_reseller, tg_id))
-        or (await asyncio.to_thread(db.is_inline_reseller, tg_id))
-        or (await asyncio.to_thread(db.get_agent_tier, tg_id))
-    ):
-        raise HTTPException(400, "این کاربر همین الان هم نماینده است.")
-    if (await asyncio.to_thread(db.get_open_reseller_request, tg_id)):
-        raise HTTPException(400, "این کاربر یک درخواست نمایندگی باز دارد؛ ابتدا از تب «درخواست‌های نمایندگی» آن را ببندید.")
-
+async def _provision_reseller_tier(tg_id: int, tier, body: "MakeResellerBody", request: Request, admin, *, is_change: bool = False):
+    """منطق مشترک اعمال یک سطح نمایندگی روی کاربر - هم برای «نماینده کردن»ِ
+    کاربر تازه و هم برای «تغییر سطح» یک نماینده‌ی موجود (که پیش از فراخوانیِ
+    این تابع باید وضعیت نمایندگیِ قبلی‌اش پاک‌سازی شده باشد) استفاده می‌شود تا
+    هر دو مسیر دقیقاً یک رفتار داشته باشند."""
     tier_label = f"{tier['icon']} {tier['title']}"
     if tier["model"] == "commission":
         percent = body.percent or 0
@@ -4501,14 +4482,15 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         (await asyncio.to_thread(db.enable_inline_reseller, tg_id, percent))
         (await asyncio.to_thread(db.set_user_reseller_tier, tg_id, tier["code"]))
         (await asyncio.to_thread(db.log_admin_action,
-            admin["id"], "reseller_make_direct",
-            f"کاربر {tg_id} مستقیم در سطح {tier['code']} نماینده شد ({percent}٪) (پنل وب - {admin['username']})",
+            admin["id"], "reseller_change_tier" if is_change else "reseller_make_direct",
+            f"کاربر {tg_id} {'به سطح جدید' if is_change else 'مستقیم در سطح'} {tier['code']} نماینده شد ({percent}٪) (پنل وب - {admin['username']})",
             "user", tg_id,
         ))
         await notify_user(
             tg_id,
-            f"✅ شما توسط مدیریت به‌عنوان نماینده‌ی سطح {tier_label} انتخاب شدید!\n\n"
-            f"روی هر خرید مشتریانی که با لینک اختصاصی‌تان وارد شوند، {percent}٪ کارمزد به کیف پول شما اضافه می‌شود.\n"
+            (f"✅ سطح نمایندگی شما توسط مدیریت به {tier_label} تغییر کرد!\n\n" if is_change
+             else f"✅ شما توسط مدیریت به‌عنوان نماینده‌ی سطح {tier_label} انتخاب شدید!\n\n")
+            + f"روی هر خرید مشتریانی که با لینک اختصاصی‌تان وارد شوند، {percent}٪ کارمزد به کیف پول شما اضافه می‌شود.\n"
             "برای دیدن لینک و آمار، دستور /reseller_link را در بات بفرستید.",
         )
         return {"ok": True}
@@ -4523,13 +4505,14 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
             raise HTTPException(400, "درصد تخفیف فقط برای سطح نقره‌ای قابل تنظیم است.")
         (await asyncio.to_thread(db.set_user_reseller_tier, tg_id, tier["code"], discount_percent))
         (await asyncio.to_thread(db.log_admin_action,
-            admin["id"], "reseller_make_direct",
-            f"کاربر {tg_id} مستقیم در سطح {tier['code']} نماینده شد | تخفیف: {discount_percent}% (پنل وب - {admin['username']})",
+            admin["id"], "reseller_change_tier" if is_change else "reseller_make_direct",
+            f"کاربر {tg_id} {'به سطح جدید' if is_change else 'مستقیم در سطح'} {tier['code']} نماینده شد | تخفیف: {discount_percent}% (پنل وب - {admin['username']})",
             "user", tg_id,
         ))
         await notify_user(
             tg_id,
-            f"✅ شما توسط مدیریت در سطح {tier_label} قرار گرفتید.\n🏷 تخفیف اختصاصی نمایندگی: {discount_percent}٪\nتخفیف خرید عمده نیز در صورت رسیدن به پلکان مربوطه اعمال می‌شود.",
+            (f"✅ سطح نمایندگی شما توسط مدیریت به {tier_label} تغییر کرد.\n" if is_change else f"✅ شما توسط مدیریت در سطح {tier_label} قرار گرفتید.\n")
+            + f"🏷 تخفیف اختصاصی نمایندگی: {discount_percent}٪\nتخفیف خرید عمده نیز در صورت رسیدن به پلکان مربوطه اعمال می‌شود.",
         )
         return {"ok": True}
     if tier["model"] not in ("volume_credit", "fixed_product"):
@@ -4591,8 +4574,8 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         int(body.wants_web_panel), int(body.wants_miniapp), tier["code"],
     ))
     (await asyncio.to_thread(db.log_admin_action,
-        admin["id"], "reseller_make_direct",
-        f"کاربر {tg_id} مستقیم نماینده شد (درخواست #{request_id}) (پنل وب - {admin['username']})",
+        admin["id"], "reseller_change_tier" if is_change else "reseller_make_direct",
+        f"کاربر {tg_id} {'به سطح جدید نماینده شد' if is_change else 'مستقیم نماینده شد'} (درخواست #{request_id}) (پنل وب - {admin['username']})",
         "user", tg_id,
     ))
 
@@ -4604,8 +4587,9 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         _set_main_bot_fsm_state(tg_id, "ResellerRequestFlow:waiting_bot_token", {"resreq_request_id": request_id})
         await notify_user(
             tg_id,
-            f"✅ شما توسط مدیریت به‌عنوان نماینده‌ی سطح {tier_label} انتخاب شدید!\n\n"
-            "برای تکمیل، توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
+            (f"✅ سطح نمایندگی شما توسط مدیریت به {tier_label} تغییر کرد!\n\n" if is_change
+             else f"✅ شما توسط مدیریت به‌عنوان نماینده‌ی سطح {tier_label} انتخاب شدید!\n\n")
+            + "برای تکمیل، توکن بات نماینده‌ی خودتان را ارسال کنید (همانی که از @BotFather گرفته‌اید):",
         )
     else:
         (await asyncio.to_thread(
@@ -4616,6 +4600,57 @@ async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Re
         await _finalize_no_bot_reseller_request_web(req, request)
 
     return {"ok": True, "request_id": request_id}
+
+
+@app.post("/api/users/{tg_id}/make-reseller")
+async def api_make_user_reseller(tg_id: int, body: MakeResellerBody, request: Request, admin=Depends(require_permission("resellers"))):
+    """نماینده‌کردن مستقیم یک کاربر از پنل ادمین، با همان گزینه‌های چندسطحیِ فرم
+    درخواست نمایندگی کاربر (بند ۶ اسپک) - بدون نیاز به این‌که خودِ کاربر
+    درخواست بدهد. برای هر گزینه یک reseller_request با reviewed_by این ادمین ثبت
+    می‌شود تا هم در تاریخچه‌ی «درخواست‌های نمایندگی» دیده شود و هم منطق تکمیل
+    (اعتبار/موجودی، پنل وب، مینی‌اپ، لینک اینلاین) دقیقاً همان مسیر تاییدشده‌ی
+    فعلی را طی کند - نه یک کپیِ جدا که ممکن است رفتارش با گذر زمان از مسیر اصلی
+    جدا بیفتد."""
+    tier = (await asyncio.to_thread(db.get_reseller_tier, body.tier_code))
+    if not tier or not tier["is_enabled"]:
+        raise HTTPException(400, "سطح نمایندگی نامعتبر یا غیرفعال است.")
+    user = (await asyncio.to_thread(db.get_user, tg_id))
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    if (
+        (await asyncio.to_thread(db.is_reseller, tg_id))
+        or (await asyncio.to_thread(db.is_inline_reseller, tg_id))
+        or (await asyncio.to_thread(db.get_agent_tier, tg_id))
+    ):
+        raise HTTPException(400, "این کاربر همین الان هم نماینده است.")
+    if (await asyncio.to_thread(db.get_open_reseller_request, tg_id)):
+        raise HTTPException(400, "این کاربر یک درخواست نمایندگی باز دارد؛ ابتدا از تب «درخواست‌های نمایندگی» آن را ببندید.")
+    return await _provision_reseller_tier(tg_id, tier, body, request, admin, is_change=False)
+
+
+@app.post("/api/users/{tg_id}/change-reseller-tier")
+async def api_change_user_reseller_tier(tg_id: int, body: MakeResellerBody, request: Request, admin=Depends(require_permission("resellers"))):
+    """تغییر سطح نمایندگیِ یک نماینده‌ی موجود (مثلاً برنزی -> طلایی)، بدون این‌که
+    ادمین مجبور باشد اول کاملاً حذفش کند و بعد از نو بسازد: وضعیت نمایندگیِ
+    قبلی (بات اختصاصی، اعتبار/موجودی، کمیسیون، سطح تخفیف) کامل با همان موتور
+    مرکزیِ حذف نمایندگی (wipe_agent_state) پاک می‌شود و سپس سطح جدید درست مثل
+    «نماینده کردن» از ابتدا برایش تنظیم می‌شود. کیف پول و سابقه‌ی مالی کاربر
+    دست‌نخورده باقی می‌مانند."""
+    tier = (await asyncio.to_thread(db.get_reseller_tier, body.tier_code))
+    if not tier or not tier["is_enabled"]:
+        raise HTTPException(400, "سطح نمایندگی نامعتبر یا غیرفعال است.")
+    user = (await asyncio.to_thread(db.get_user, tg_id))
+    if not user:
+        raise HTTPException(404, "کاربر یافت نشد.")
+    current_tier = await asyncio.to_thread(db.get_agent_tier, tg_id)
+    if not current_tier:
+        raise HTTPException(400, "این کاربر در حال حاضر نماینده‌ی هیچ سطحی نیست؛ از گزینه‌ی «نماینده کردن» استفاده کنید.")
+    if current_tier == tier["code"]:
+        raise HTTPException(400, "این کاربر همین الان هم در همین سطح است.")
+    if (await asyncio.to_thread(db.get_open_reseller_request, tg_id)):
+        raise HTTPException(400, "این کاربر یک درخواست نمایندگی باز دارد؛ ابتدا از تب «درخواست‌های نمایندگی» آن را ببندید.")
+    await asyncio.to_thread(db.wipe_agent_state, tg_id)
+    return await _provision_reseller_tier(tg_id, tier, body, request, admin, is_change=True)
 
 
 class ResellerRequestRejectBody(BaseModel):
