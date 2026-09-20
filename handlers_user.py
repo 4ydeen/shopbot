@@ -1861,7 +1861,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         capacity_ok = await asyncio.to_thread(db.panel_has_capacity, server["id"], 1)
         if not capacity_ok:
             cap = await asyncio.to_thread(db.get_panel_capacity_info, server["id"])
-            await message.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]} سرویس فعال).")
+            await message.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap['active_services']}/{cap['max_services']} سرویس فعال).")
             await state.clear()
             return
 
@@ -3518,7 +3518,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await call.answer("⛔️ سرویس هنوز استفاده نشده و قابل انتقال نیست.", show_alert=True)
             return
         cap = await asyncio.to_thread(db.get_panel_capacity_info, target_id)
-        if cap and cap.get("max_services") is not None and cap["active_services"] + 1 > cap["max_services"]:
+        if cap and cap.get("max_services") is not None and cap['active_services'] + 1 > cap['max_services']:
             await call.answer("⛔️ ظرفیت لوکیشن مقصد تکمیل است.", show_alert=True)
             return
         remaining_days = _location_remaining_days(cc)

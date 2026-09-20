@@ -2029,7 +2029,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             if not await asyncio.to_thread(db.panel_has_capacity, server["id"], 1):
                 await asyncio.to_thread(db.release_order_claim, order_id)
                 cap = await asyncio.to_thread(db.get_panel_capacity_info, server["id"])
-                await call.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap["active_services"]}/{cap["max_services"]}).", show_alert=True)
+                await call.answer(f"⛔️ ظرفیت پنل تکمیل است ({cap['active_services']}/{cap['max_services']}).", show_alert=True)
                 return
             try:
                 provider = get_provider(server)
@@ -5074,7 +5074,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         status = "🟢 فعال" if server["is_active"] else "🔴 غیرفعال"
         template_status = panel_server_readiness_text(server)
         cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
-        capacity_status = "♾️ ظرفیت: نامحدود" if not cap or cap["max_services"] is None else f"📊 ظرفیت: {cap["active_services"]}/{cap["max_services"]} ({cap["percent"]:.0f}٪)" + (" ⚠️ نزدیک سقف" if cap["near_limit"] else "")
+        capacity_status = "♾️ ظرفیت: نامحدود" if not cap or cap['max_services'] is None else f"📊 ظرفیت: {cap['active_services']}/{cap['max_services']} ({cap['percent']:.0f}٪)" + (" ⚠️ نزدیک سقف" if cap['near_limit'] else "")
         usage_status = (
             f"مصرف: {'✅ خرید شخصی' if server['used_for_custom_config'] else '◻️ خرید شخصی'} | "
             f"{'✅ کانفیگ تست' if server['used_for_test_config'] else '◻️ کانفیگ تست'}"
@@ -5104,7 +5104,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer("سرور یافت نشد.", show_alert=True)
             return
         cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
-        current = "نامحدود" if not cap or cap["max_services"] is None else str(cap["max_services"])
+        current = "نامحدود" if not cap or cap['max_services'] is None else str(cap['max_services'])
         await state.update_data(panel_server_id=server_id)
         await state.set_state(AdminSetPanelCapacity.waiting_limit)
         await safe_edit(call, f"سقف فعلی: {current}\n\nسقف جدید تعداد سرویس فعال این پنل را بفرست.\nعدد مثبت = سقف مشخص\n۰ = نامحدود", reply_markup=kb.admin_back_kb(f"adm_panel_server_view:{server_id}"))
@@ -5120,8 +5120,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         server_id = data.get("panel_server_id")
         cap = await asyncio.to_thread(db.get_panel_capacity_info, server_id)
-        if cap and limit > 0 and limit < cap["active_services"]:
-            await message.answer(f"⛔️ سقف نمی‌تواند کمتر از تعداد سرویس‌های فعال فعلی ({cap["active_services"]}) باشد.")
+        if cap and limit > 0 and limit < cap['active_services']:
+            await message.answer(f"⛔️ سقف نمی‌تواند کمتر از تعداد سرویس‌های فعال فعلی ({cap['active_services']}) باشد.")
             return
         await asyncio.to_thread(db.update_panel_server, server_id, max_services=(limit or None), capacity_alert_sent=0)
         await asyncio.to_thread(db.log_admin_action, message.from_user.id, "panel_server_capacity_set", f"سرور #{server_id} ← {limit or 'unlimited'}")
