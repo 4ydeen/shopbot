@@ -1303,6 +1303,8 @@ async function openRenewFullOverlay(customConfigId, onChanged) {
               createAbangatewayInvoice: async () => api(`/api/orders/${result.order_id}/abangateway-invoice`, { method: "POST" }),
               blupalEnabled: result.blupal_enabled,
               createBlupalInvoice: async () => api(`/api/orders/${result.order_id}/blupal-invoice`, { method: "POST" }),
+              extraGateways: result.extra_gateways,
+              createExtraGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/extra-invoice/${key}`, { method: "POST" }),
               customGateways,
               createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
             });
@@ -1658,13 +1660,14 @@ async function fetchCustomGateways(amount, productId, customConfig = false) {
   return _customGatewaysCache[cacheKey];
 }
 
-function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice, customGateways, createCustomGatewayInvoice, cardToCardEnabled, cardAutoEnabled, createCardAutoInvoice, checkCardAutoStatus, noapayEnabled, createNoapayInvoice, abangatewayEnabled, createAbangatewayInvoice, blupalEnabled, createBlupalInvoice }) {
+function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, successText, cryptoEnabled, createCryptoInvoice, customGateways, createCustomGatewayInvoice, cardToCardEnabled, cardAutoEnabled, createCardAutoInvoice, checkCardAutoStatus, noapayEnabled, createNoapayInvoice, abangatewayEnabled, createAbangatewayInvoice, blupalEnabled, createBlupalInvoice, extraGateways, createExtraGatewayInvoice }) {
   customGateways = customGateways || [];
+  extraGateways = extraGateways || [];
   // اگر ادمین کارت‌به‌کارت دستی را غیرفعال کرده باشد (card_to_card_enabled=0)، این بخش
   // باید مثل بات اصلی مخفی شود؛ پیش‌فرض (undefined، برای سازگاری با پاسخ‌های قدیمی) فعال است.
   const cardEnabled = cardToCardEnabled !== false && !!cardNumber;
   const noPaymentMethod = !cardEnabled && !cryptoEnabled && !cardAutoEnabled && !noapayEnabled
-    && !abangatewayEnabled && !blupalEnabled && !customGateways.length;
+    && !abangatewayEnabled && !blupalEnabled && !customGateways.length && !extraGateways.length;
   const customGatewaysHtml = customGateways.length ? `
     <div style="display:flex;align-items:center;gap:8px;margin:16px 0">
       <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
@@ -1675,6 +1678,18 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
       <button class="btn outline custom-gw-btn" data-key="${gw.key}" style="width:100%;margin-bottom:8px">🔌 پرداخت با ${escHtml(gw.name)}</button>
     `).join("")}
     <div id="custom-gw-error" class="field-error"></div>
+  ` : "";
+
+  const extraGatewaysHtml = extraGateways.length ? `
+    <div style="display:flex;align-items:center;gap:8px;margin:16px 0">
+      <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+      <span class="hint-text" style="margin:0">یا</span>
+      <div style="flex:1;height:1px;background:var(--border,rgba(255,255,255,.1))"></div>
+    </div>
+    ${extraGateways.map(gw => `
+      <button class="btn outline extra-gw-btn" data-key="${escHtml(gw.key)}" style="width:100%;margin-bottom:8px">${escHtml(gw.text)}</button>
+    `).join("")}
+    <div id="extra-gw-error" class="field-error"></div>
   ` : "";
 
   if (noPaymentMethod) {
@@ -1764,6 +1779,7 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
       <button class="btn outline" id="pay-blupal-btn" style="width:100%">💠 پرداخت با بلوپال</button>
       <div id="blupal-pay-error" class="field-error"></div>
     ` : ""}
+    ${extraGatewaysHtml}
     ${customGatewaysHtml}
   `;
 
@@ -1944,6 +1960,27 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
     };
   }
 
+  if (extraGateways.length && createExtraGatewayInvoice) {
+    const xgErr = box.querySelector("#extra-gw-error");
+    box.querySelectorAll(".extra-gw-btn").forEach((btn) => {
+      const btnText = btn.textContent;
+      btn.onclick = async () => {
+        xgErr.textContent = "";
+        box.querySelectorAll(".extra-gw-btn").forEach((b) => (b.disabled = true));
+        btn.textContent = "در حال ساخت فاکتور...";
+        try {
+          const res = await createExtraGatewayInvoice(btn.dataset.key);
+          tg.HapticFeedback.notificationOccurred("success");
+          renderExtraGatewayInvoiceState(box, extraGateways.find((g) => g.key === btn.dataset.key), res);
+        } catch (e) {
+          xgErr.textContent = e.message;
+          box.querySelectorAll(".extra-gw-btn").forEach((b) => (b.disabled = false));
+          btn.textContent = btnText;
+        }
+      };
+    });
+  }
+
   if (customGateways.length && createCustomGatewayInvoice) {
     const cgErr = box.querySelector("#custom-gw-error");
     box.querySelectorAll(".custom-gw-btn").forEach((btn) => {
@@ -1977,6 +2014,35 @@ function renderReceiptCard(box, { amount, cardNumber, cardHolder, sendReceipt, s
       };
     });
   }
+}
+
+// نمایش فاکتور ساخته‌شده‌ی درگاه‌های افزوده‌شده (زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments، استارز)
+function renderExtraGatewayInvoiceState(box, gw, res) {
+  const exact = res.exact_amount_toman ? `<br/>💰 مبلغ دقیق قابل پرداخت: ${fmt(res.exact_amount_toman)} تومان` : "";
+  const stars = res.is_stars ? `<br/>⭐ ${fmt(res.payable_amount)} استارز` : "";
+  box.innerHTML = `
+    <div class="state-msg">
+      <span class="ic">${escHtml(gw.icon)}</span>
+      فاکتور پرداخت «${escHtml(gw.title)}» ساخته شد. روی دکمه‌ی زیر بزن و پرداخت رو تکمیل کن.${exact}${stars}
+      <br/>به‌محض تایید پرداخت، سفارش/کیف‌پول شما خودکار تسویه می‌شود و نتیجه داخل ربات ارسال می‌شود.
+    </div>
+    <button class="btn" id="open-invoice-btn" style="width:100%;margin-top:12px">${res.is_stars ? "⭐ پرداخت با استارز" : "🔗 رفتن به صفحه‌ی پرداخت"}</button>
+    ${res.bot_url ? `<button class="btn outline" id="open-bot-invoice-btn" style="width:100%;margin-top:8px">🤖 پرداخت از داخل ربات تترا۹۸</button>` : ""}
+  `;
+  const open = () => {
+    if (res.is_stars) {
+      tg.openInvoice(res.payment_url, (status) => {
+        if (status === "paid") {
+          box.innerHTML = `<div class="state-msg"><span class="ic">✅</span>پرداخت انجام شد. نتیجه به‌زودی داخل ربات ارسال می‌شود.</div>`;
+        }
+      });
+    } else {
+      tg.openLink(res.payment_url);
+    }
+  };
+  box.querySelector("#open-invoice-btn").onclick = open;
+  if (res.bot_url) box.querySelector("#open-bot-invoice-btn").onclick = () => tg.openTelegramLink(res.bot_url);
+  open();
 }
 
 // نمایش «مبلغ یکتا + شماره کارت» بعد از انتخاب کارت‌به‌کارت خودکار، و بررسی دوره‌ای
@@ -2271,6 +2337,8 @@ async function buyProduct(productId, quantity, code) {
         createAbangatewayInvoice: async () => api(`/api/orders/${result.order_id}/abangateway-invoice`, { method: "POST" }),
         blupalEnabled: result.blupal_enabled,
         createBlupalInvoice: async () => api(`/api/orders/${result.order_id}/blupal-invoice`, { method: "POST" }),
+        extraGateways: result.extra_gateways,
+        createExtraGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/extra-invoice/${key}`, { method: "POST" }),
         customGateways,
         createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
       });
@@ -2415,6 +2483,8 @@ async function submitCustomConfig(username, volumeGb, useCredit, info) {
         createAbangatewayInvoice: async () => api(`/api/orders/${result.order_id}/abangateway-invoice`, { method: "POST" }),
         blupalEnabled: result.blupal_enabled,
         createBlupalInvoice: async () => api(`/api/orders/${result.order_id}/blupal-invoice`, { method: "POST" }),
+        extraGateways: result.extra_gateways,
+        createExtraGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/extra-invoice/${key}`, { method: "POST" }),
         customGateways: customGateways2,
         createCustomGatewayInvoice: async (key) => api(`/api/orders/${result.order_id}/custom-invoice/${key}`, { method: "POST" }),
       });
@@ -2557,7 +2627,7 @@ async function renderWallet() {
       btn.disabled = true;
       try {
         const r = await api("/api/wallet/topup-request", { method: "POST", body: JSON.stringify({ amount }) });
-        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled, r.card_to_card_enabled, r.card_to_card_auto_enabled, r.noapay_enabled, r.abangateway_enabled, r.blupal_enabled);
+        renderTopupPaymentStep(r.topup_id, amount, r.card_number, r.card_holder, r.crypto_enabled, r.card_to_card_enabled, r.card_to_card_auto_enabled, r.noapay_enabled, r.abangateway_enabled, r.blupal_enabled, r.extra_gateways);
       } catch (e) {
         notify("خطا: " + e.message);
         btn.disabled = false;
@@ -2568,7 +2638,7 @@ async function renderWallet() {
   }
 }
 
-async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled, cardToCardEnabled, cardAutoEnabled, noapayEnabled, abangatewayEnabled, blupalEnabled) {
+async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled, cardToCardEnabled, cardAutoEnabled, noapayEnabled, abangatewayEnabled, blupalEnabled, extraGateways) {
   const box = document.getElementById("topup-card");
   const customGateways = await fetchCustomGateways(amount, null);
   renderReceiptCard(box, {
@@ -2591,6 +2661,8 @@ async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, c
     createAbangatewayInvoice: async () => api("/api/wallet/abangateway-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
     blupalEnabled,
     createBlupalInvoice: async () => api("/api/wallet/blupal-invoice", { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
+    extraGateways,
+    createExtraGatewayInvoice: async (key) => api(`/api/wallet/extra-invoice/${key}`, { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
     customGateways,
     createCustomGatewayInvoice: async (key) => api(`/api/wallet/custom-invoice/${key}`, { method: "POST", body: JSON.stringify({ topup_id: topupId }) }),
   });
@@ -5123,6 +5195,8 @@ const ADMIN_ACTION_LABELS = {
   blupal_key_change: "💳 تغییر کلید بلوپال",
   noapay_key_change: "⭐ تغییر تنظیمات NoapayBot",
   noapay_toggle: "⭐ تغییر وضعیت NoapayBot",
+  extra_gateway_setting: "💠 تغییر تنظیمات درگاه پرداخت",
+  extra_gateway_toggle: "💠 تغییر وضعیت درگاه پرداخت",
   backup_create: "🗄 دریافت بکاپ",
   backup_restore: "♻️ بازیابی بکاپ",
   factory_reset: "🏭 بازگشت به حالت کارخانه",
@@ -5851,12 +5925,13 @@ async function renderAdminFinanceSection() {
   const body = document.getElementById("admin-section-body");
   body.innerHTML = skeleton(3);
   try {
-    const [card, crypto, aban, blupal, noapay] = await Promise.all([
+    const [card, crypto, aban, blupal, noapay, extra] = await Promise.all([
       api("/api/admin/settings/card"),
       api("/api/admin/settings/crypto"),
       api("/api/admin/settings/abangateway"),
       api("/api/admin/settings/blupal"),
       api("/api/admin/settings/noapay"),
+      api("/api/admin/settings/extra-gateways"),
     ]);
 
     body.innerHTML = `
@@ -5955,6 +6030,24 @@ async function renderAdminFinanceSection() {
         <div class="field-error" id="fin-noapay-error"></div>
         <button class="btn" id="fin-noapay-save" style="margin-top:8px">💾 ذخیره</button>
       </div>
+
+      ${(extra.gateways || []).map((gw) => `
+      <div class="card" data-xgw="${escHtml(gw.key)}">
+        <div class="eyebrow" style="margin-top:0">${escHtml(gw.icon)} ${escHtml(gw.title)} (تایید آنی)</div>
+        <p class="hint-text">${escHtml(gw.help)}</p>
+        ${gw.fields.map((f) => `
+        <label class="field-label">${escHtml(f.label)}</label>
+        <input class="input xgw-field" data-setting="${escHtml(f.setting)}" type="${f.secret ? "password" : f.numeric ? "number" : "text"}" placeholder="${f.secret ? escHtml(f.has_value ? f.masked || "•••• تنظیم شده" : "مقدار را وارد کن") : ""}" value="${escHtml(f.value)}" style="direction:ltr;text-align:left;margin-bottom:4px" />
+        `).join("")}
+        ${gw.hint_url ? `
+        <label class="field-label">${gw.key === "nowpayments" ? "آدرس IPN (خودکار در فاکتور ارسال می‌شود)" : "آدرس برگشت (باید با دامنه‌ی ثبت‌شده در درگاه یکی باشد)"}</label>
+        <input class="input" type="text" readonly value="${escHtml(gw.hint_url)}" style="direction:ltr;text-align:left;margin-bottom:10px;opacity:0.85" onclick="this.select()" />
+        ` : gw.needs_base_url ? `<p class="hint-text">⚠️ MINIAPP_URL روی سرور تنظیم نشده؛ بدون آن این درگاه فعال نمی‌شود.</p>` : ""}
+        <div class="field-switch-row"><span>${escHtml(gw.title)} فعال باشد</span><label class="switch"><input type="checkbox" class="xgw-enabled" ${gw.enabled ? "checked" : ""} /><span class="switch-slider"></span></label></div>
+        <div class="field-error xgw-error"></div>
+        <button class="btn xgw-save" style="margin-top:8px">💾 ذخیره</button>
+      </div>
+      `).join("")}
 
       <div class="card">
         <div class="eyebrow" style="margin-top:0">📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)</div>
@@ -6160,6 +6253,26 @@ async function renderAdminFinanceSection() {
         notify("تنظیمات NoapayBot ذخیره شد."); renderAdminFinanceSection();
       } catch (e) { errBox.textContent = e.message; }
     };
+
+    body.querySelectorAll("[data-xgw]").forEach((cardEl) => {
+      cardEl.querySelector(".xgw-save").onclick = async () => {
+        const errBox = cardEl.querySelector(".xgw-error"); errBox.textContent = "";
+        const values = {};
+        cardEl.querySelectorAll(".xgw-field").forEach((input) => {
+          const isSecret = input.type === "password";
+          values[input.dataset.setting] = isSecret && input.value === "" ? null : input.value;
+        });
+        try {
+          await api("/api/admin/settings/extra-gateways", { method: "POST", body: JSON.stringify({
+            gateway: cardEl.dataset.xgw,
+            enabled: cardEl.querySelector(".xgw-enabled").checked,
+            values,
+          })});
+          tg.HapticFeedback.notificationOccurred("success");
+          notify("تنظیمات درگاه ذخیره شد."); renderAdminFinanceSection();
+        } catch (e) { errBox.textContent = e.message; }
+      };
+    });
   } catch (e) {
     body.innerHTML = errorState(e.message);
   }
