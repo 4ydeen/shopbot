@@ -51,6 +51,7 @@ from admin_panel.telegram_notify import send_message as tg_send, send_document a
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 import fcm_client
+import report_router
 from reseller_auto_provision import provision_auto_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from stock_alerts import check_and_notify_low_stock
@@ -297,6 +298,7 @@ async def _notifier_loop():
     last_topup_id = max((t["id"] for t in init_topups), default=0)
     last_ticket_id = max((t["id"] for t in init_tickets), default=0)
     last_support_id = (await asyncio.to_thread(db.get_latest_user_support_message_id))
+    last_panel_event_id = (await asyncio.to_thread(db.get_latest_panel_health_event_id))
     # سفارش/شارژهایی که دیده شده‌اند ولی هنوز روش پرداختشان مشخص نیست (نه
     # فاکتور درگاهی برایشان ساخته شده، نه رسیدی ارسال شده) - هر دور دوباره
     # چک می‌شوند تا همین که روش مشخص شد (و اگر پوش آن روش فعال بود) پوش برود.
@@ -382,6 +384,17 @@ async def _notifier_loop():
                     }, category="support")
                 last_support_id = latest_support_id
 
+            panel_events = (await asyncio.to_thread(db.get_panel_health_events_since, last_panel_event_id))
+            for ev in panel_events:
+                is_down = ev["kind"] == "down"
+                server_name = ev["server_name"] or f"#{ev['server_id']}"
+                await _notify_admins("panels", {
+                    "title": "🔴 قطعی پنل" if is_down else "🟢 پنل دوباره وصل شد",
+                    "body": f"پنل «{server_name}» " + ("در دسترس نیست." if is_down else "دوباره در دسترس است."),
+                    "tag": "panel_health",
+                })
+                last_panel_event_id = ev["id"]
+
             await _check_stuck_gateway_payments()
         except Exception:
             logger.exception("خطا در حلقه‌ی اعلان زنده‌ی پنل وب")
@@ -461,6 +474,16 @@ async def _server_status_loop():
                                     "body": f"کانفیگ «{key}» آفلاین شده است.",
                                     "tag": f"server-status-{key}",
                                 })
+                                # قبلاً این هشدار فقط Web Push بود و به تلگرام نمی‌رسید؛
+                                # این پروسه (پنل وب مستقل) شیء Bot از aiogram ندارد، پس
+                                # با HTTP خام (توکن بات) به تاپیک «سرویس» ارسال می‌شود.
+                                try:
+                                    await report_router.send_raw_to_group(
+                                        _bot_token(), db, "service",
+                                        f"🔴 قطعی کانفیگ\n\nکانفیگ «{key}» آفلاین شده است.",
+                                    )
+                                except Exception:
+                                    logger.warning("ارسال هشدار قطعی کانفیگ به تلگرام ناموفق بود.", exc_info=True)
                                 notified_offline.add(key)
                         else:
                             offline_streak[key] = 0
@@ -470,6 +493,13 @@ async def _server_status_loop():
                                     "body": f"کانفیگ «{key}» دوباره آنلاین شد.",
                                     "tag": f"server-status-{key}",
                                 })
+                                try:
+                                    await report_router.send_raw_to_group(
+                                        _bot_token(), db, "service",
+                                        f"🟢 اتصال مجدد کانفیگ\n\nکانفیگ «{key}» دوباره آنلاین شد.",
+                                    )
+                                except Exception:
+                                    logger.warning("ارسال اعلان بازیابی کانفیگ به تلگرام ناموفق بود.", exc_info=True)
                                 notified_offline.discard(key)
         except Exception:
             logger.exception("خطا در حلقه‌ی بررسی وضعیت سرورها")
@@ -2227,7 +2257,9 @@ async def api_approve_order(order_id: int, admin=Depends(require_permission("ord
         f"سفارش #{order_id} | کاربر {order['user_id']} | محصول «{product['name'] if product else '---'}» (پنل وب - {admin['username']})",
         "order", order_id,
     ))
-    await check_and_notify_low_stock(lambda aid, text: tg_send(_bot_token(), aid, text), db, order["product_id"])
+    await check_and_notify_low_stock(
+        lambda aid, text: tg_send(_bot_token(), aid, text), db, order["product_id"], bot_token=_bot_token(),
+    )
     (await asyncio.to_thread(db.reward_referrer_if_first_purchase, order["user_id"], order["final_price"] or (product["price"] if product else 0)))
     links = [r["link"] for r in results]
     await notify_user(order["user_id"], "✅ خرید شما تایید شد!")
@@ -3161,6 +3193,9 @@ class DiscountBody(BaseModel):
     max_purchase: Optional[int] = None
     product_id: Optional[int] = None
     category_id: Optional[int] = None
+    per_user_limit: Optional[int] = None
+    first_purchase_only: bool = False
+    audience: str = "all"
 
 
 @app.get("/api/discounts")
@@ -3174,6 +3209,8 @@ def api_add_discount(body: DiscountBody, admin=Depends(require_permission("disco
         body.code, body.percent, body.fixed_amount, body.max_uses, body.expires_at,
         min_purchase=body.min_purchase, max_purchase=body.max_purchase,
         product_id=body.product_id, category_id=body.category_id,
+        per_user_limit=body.per_user_limit, first_purchase_only=body.first_purchase_only,
+        audience=body.audience,
     )
     db.log_admin_action(admin["id"], "discount_add", body.code, "discount", code_id)
     return {"id": code_id}
@@ -4725,7 +4762,7 @@ class PanelServerXuiConfigBody(BaseModel):
     sub_base_url: str
 
 
-def _panel_server_public(s) -> dict:
+def _panel_server_public(s, health=None) -> dict:
     is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
     xui_inbound_ids = parse_xui_inbound_ids(s) if s["panel_type"] in INBOUND_SELECT_PANEL_TYPES else []
     if is_sub_base_type:
@@ -4743,12 +4780,17 @@ def _panel_server_public(s) -> dict:
         "used_for_custom_config": bool(s["used_for_custom_config"]),
         "used_for_test_config": bool(s["used_for_test_config"]),
         "default_group": s["default_group"], "is_active": bool(s["is_active"]),
+        "health_status": h["status"] if h else None,
+        "health_last_check": h["last_check"] if h else None,
+        "health_last_change": h["last_change"] if h else None,
+        "health_error": (h["last_error"] or None) if h else None,
     }
 
 
 @app.get("/api/panel-servers")
 def api_panel_servers(admin=Depends(require_permission("panels")), _fa=Depends(require_full_access_tenant)):
-    return [_panel_server_public(s) for s in db.get_panel_servers()]
+    health = db.list_panel_health()
+    return [_panel_server_public(s, health) for s in db.get_panel_servers()]
 
 
 @app.get("/api/panel-servers/panel-types")
