@@ -68,10 +68,12 @@ import blupal_payment
 import noapay_client
 import noapay_payment
 import extra_gateway_clients
+import extra_gateway_payment
+import extra_gateway_registry
 import payment_engine
 import card_to_card_payment
 from asset_versioning import static_version, ApiNoStoreMiddleware
-from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER
+from database import Database, MENU_BUTTON_META, DEFAULT_MENU_ORDER, PAYMENT_METHOD_META
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from miniapp.auth import validate_init_data
 from sub_info import fetch_sub_info
@@ -836,7 +838,7 @@ class RenewFullBody(BaseModel):
 
 @app.post("/api/custom-configs/{custom_config_id}/renew-full")
 async def api_custom_config_renew_full(custom_config_id: int, body: RenewFullBody, auth=Depends(get_verified_user)):
-    tg_id, db, _ = auth
+    tg_id, db, tenant = auth
     _require_svc_feature(db, "svc_show_renew_full")
     cc = _owned_custom_config_or_404(db, custom_config_id, tg_id)
     product = db.get_product(body.product_id)
@@ -879,7 +881,7 @@ async def api_custom_config_renew_full(custom_config_id: int, body: RenewFullBod
         return {
             "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
             "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-            **_payment_flags(db, order["final_price"], None),
+            **_payment_flags(db, order["final_price"], None, tenant=tenant),
         }
     except HTTPException:
         raise
@@ -1095,7 +1097,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
         return {
             "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
             "card_number": db.get_setting("card_number"), "card_holder": db.get_setting("card_holder"),
-            **_payment_flags(db, order["final_price"], None, order=order),
+            **_payment_flags(db, order["final_price"], None, order=order, tenant=tenant),
         }
     except HTTPException:
         raise
@@ -1633,7 +1635,24 @@ def _require_payment_method_allowed(db: Database, amount: int, method_key: str, 
         raise HTTPException(status_code=400, detail=err)
 
 
-def _payment_flags(db: Database, amount: int, product_id: int = None, order=None) -> dict:
+def _extra_gateway_options(db: Database, tenant, ok) -> list:
+    """درگاه‌های افزوده‌شده (زرین‌پال، آقای پرداخت، ...) که برای این مبلغ/محصول قابل‌استفاده‌اند؛ فقط بات اصلی."""
+    if tenant is None or tenant.tenant_id:
+        return []
+    options = []
+    for key in extra_gateway_payment.available_keys(db, True):
+        if not ok(key):
+            continue
+        meta = extra_gateway_registry.GATEWAYS[key]
+        default_text = PAYMENT_METHOD_META[key]["default_text"]
+        options.append({
+            "key": key, "title": meta["title"], "icon": meta["icon"],
+            "text": db.get_setting(f"paymeth_{key}_text", default_text),
+        })
+    return options
+
+
+def _payment_flags(db: Database, amount: int, product_id: int = None, order=None, tenant=None) -> dict:
     """فلگ‌های فعال/مجازبودن روش‌های پرداخت داخلی برای مبلغ/محصولِ سفارش جاری؛
     هم تنظیم فعال/غیرفعال کلی و هم محدودیت محصول/حداقل‌مبلغ را لحاظ می‌کند تا
     فرانت‌اند مینی‌اپ فقط دکمه‌های واقعاً قابل‌استفاده را نشان دهد."""
@@ -1649,6 +1668,7 @@ def _payment_flags(db: Database, amount: int, product_id: int = None, order=None
         "noapay_enabled": noapay_payment.noapay_payment_available(db) and _ok("noapay"),
         "card_to_card_auto_enabled": db.get_setting("card_to_card_auto_enabled", "0") == "1"
         and bool(db.list_card_to_card_cards(only_active=True)) and _ok("card_auto"),
+        "extra_gateways": _extra_gateway_options(db, tenant, _ok),
     }
 
 
@@ -1768,7 +1788,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
             }
 
         # مبلغی باقی مانده - کاربر باید مثل قبل از طریق بات رسید کارت‌به‌کارت بفرستد
-        flags = _payment_flags(db, order["final_price"], body.product_id)
+        flags = _payment_flags(db, order["final_price"], body.product_id, tenant=tenant)
         return {
             "status": "pending_payment", "order_id": order_id, "final_price": order["final_price"],
             "quantity": quantity,
@@ -2470,6 +2490,104 @@ async def api_wallet_noapay_invoice(body: NoapayWalletInvoiceRequest, auth=Depen
     )
     result["topup_id"] = body.topup_id
     return result
+
+
+# ---------------------------------------------------------------------------
+# درگاه‌های افزوده‌شده: زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments، استارز داخلی
+# (فقط بات اصلی؛ بررسی و تحویل فاکتورها با extra_gateway_payment.poll_loop در بات انجام می‌شود)
+# ---------------------------------------------------------------------------
+
+def _require_extra_gateway(db: Database, tenant, gateway: str) -> None:
+    if (
+        gateway not in extra_gateway_registry.GATEWAYS
+        or tenant.tenant_id
+        or not extra_gateway_payment.is_available(db, gateway, True)
+    ):
+        raise HTTPException(status_code=400, detail="این روش پرداخت در حال حاضر در دسترس نیست.")
+
+
+def _extra_order_label(db: Database, order) -> str:
+    keys = order.keys()
+    if "is_renewal" in keys and order["is_renewal"]:
+        return f"تمدید سرویس #{order['id']}"
+    if "is_custom_config" in keys and order["is_custom_config"]:
+        return f"کانفیگ شخصی #{order['id']} - {order['custom_username']}"
+    product = db.get_product(order["product_id"])
+    return f"سفارش #{order['id']} - {product['name'] if product else ''}"
+
+
+async def _stars_invoice_link(tenant, result: dict, label: str, amount_toman: int) -> str:
+    stars = int(result["payable_amount"])
+    payload = {
+        "title": "پرداخت با استارز تلگرام",
+        "description": f"{label} - {amount_toman:,} تومان معادل {stars} استارز"[:255],
+        "payload": extra_gateway_payment.stars_payload(result["invoice_id"]),
+        "provider_token": "",
+        "currency": "XTR",
+        "prices": [{"label": label[:60] or "پرداخت", "amount": stars}],
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/createInvoiceLink", json=payload,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                data = await resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="ارتباط با تلگرام برقرار نشد. دوباره تلاش کن.")
+    if not data.get("ok"):
+        raise HTTPException(status_code=400, detail=f"ساخت فاکتور استارز ناموفق بود: {data.get('description', '')}")
+    return data["result"]
+
+
+async def _create_extra_gateway_invoice(
+    db: Database, tenant, tg_id: int, gateway: str, kind: str, ref_id: int, amount_toman: int, label: str,
+) -> dict:
+    try:
+        result = await extra_gateway_payment.create_invoice_for(
+            db, tenant.tenant_id, tg_id, gateway, kind, ref_id, amount_toman, label,
+        )
+    except extra_gateway_payment.ExtraGatewayError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    is_stars = gateway == "tgstars"
+    payment_url = await _stars_invoice_link(tenant, result, label, amount_toman) if is_stars else result["payment_url"]
+    meta = result["meta"] or {}
+    return {
+        "gateway": gateway, "invoice_id": result["invoice_id"], "payment_url": payment_url,
+        "is_stars": is_stars, "payable_amount": result["payable_amount"],
+        "exact_amount_toman": meta.get("pay_amount_toman") if gateway == "cubepay" else None,
+        "bot_url": meta.get("bot_url") if gateway == "tetra98" else None,
+    }
+
+
+@app.post("/api/orders/{order_id}/extra-invoice/{gateway}")
+async def api_order_extra_gateway_invoice(order_id: int, gateway: str, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    _require_extra_gateway(db, tenant, gateway)
+    order = db.get_order(order_id)
+    if not order or order["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="سفارش یافت نشد.")
+    if order["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این سفارش قبلاً بررسی شده است.")
+    _require_payment_method_allowed(db, order["final_price"], gateway, order["product_id"], order=order)
+    return await _create_extra_gateway_invoice(
+        db, tenant, tg_id, gateway, "order", order_id, order["final_price"], _extra_order_label(db, order),
+    )
+
+
+@app.post("/api/wallet/extra-invoice/{gateway}")
+async def api_wallet_extra_gateway_invoice(gateway: str, body: NoapayWalletInvoiceRequest, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    _require_extra_gateway(db, tenant, gateway)
+    topup = db.get_topup(body.topup_id)
+    if not topup or topup["user_id"] != tg_id:
+        raise HTTPException(status_code=404, detail="درخواست شارژ یافت نشد.")
+    if topup["status"] != "pending":
+        raise HTTPException(status_code=400, detail="این درخواست شارژ قبلاً بررسی شده است.")
+    _require_payment_method_allowed(db, topup["amount"], gateway)
+    return await _create_extra_gateway_invoice(
+        db, tenant, tg_id, gateway, "wallet_topup", body.topup_id, topup["amount"], f"شارژ کیف پول #{body.topup_id}",
+    )
 
 
 @app.api_route("/api/pay-return/{gateway}", methods=["GET", "POST"], response_class=HTMLResponse)
@@ -3587,7 +3705,7 @@ def api_wheel_spin(auth=Depends(require_joined)):
 
 @app.post("/api/wallet/topup-request")
 def api_topup_request(body: TopupCreate, auth=Depends(require_joined)):
-    tg_id, db, _ = auth
+    tg_id, db, tenant = auth
     user_row = db.get_user(tg_id)
     if user_row and user_row["is_blocked"]:
         raise HTTPException(status_code=403, detail="حساب شما مسدود شده است.")
@@ -3600,7 +3718,7 @@ def api_topup_request(body: TopupCreate, auth=Depends(require_joined)):
         "card_number": db.get_setting("card_number"),
         "card_holder": db.get_setting("card_holder"),
         "note": "مبلغ را واریز کرده و عکس رسید را همینجا ارسال کنید.",
-        **_payment_flags(db, body.amount, None),
+        **_payment_flags(db, body.amount, None, tenant=tenant),
     }
 
 
@@ -5358,6 +5476,81 @@ def api_admin_set_noapay_settings(body: NoapaySettingsUpdate, auth=Depends(requi
         if not (_key_ok and _secret_ok and _rate_ok and API_BASE_URL):
             raise HTTPException(status_code=400, detail="ابتدا کلید API، رمز وب‌هوک و نرخ تبدیل NoapayBot را تنظیم کن. (اگر بازم فعال نمی‌شه، یعنی MINIAPP_URL روی سرور تنظیم نشده.)")
     db.set_setting("noapay_payment_enabled", "1" if body.enabled else "0")
+    return {"status": "ok"}
+
+
+class ExtraGatewaySettingsUpdate(BaseModel):
+    gateway: str
+    enabled: bool
+    values: Optional[dict] = None
+
+
+@app.get("/api/admin/settings/extra-gateways")
+def api_admin_get_extra_gateways(auth=Depends(require_senior_admin)):
+    _, db, tenant = auth
+    if tenant.tenant_id:
+        return {"supported": False, "gateways": []}
+    gateways = []
+    for key in extra_gateway_registry.GATEWAY_ORDER:
+        meta = extra_gateway_registry.GATEWAYS[key]
+        fields = []
+        for field in meta["fields"]:
+            raw = (db.get_setting(field["setting"], "") or "").strip()
+            has_value = bool(raw) and not (field["numeric"] and extra_gateway_payment._to_float(raw) <= 0)
+            fields.append({
+                "setting": field["setting"], "label": field["label"], "secret": field["secret"],
+                "numeric": field["numeric"], "required": field["required"], "has_value": has_value,
+                "masked": (f"...{raw[-4:]}" if len(raw) > 4 else "•••") if field["secret"] and raw else "",
+                "value": "" if field["secret"] else raw,
+            })
+        hint_url = ""
+        if API_BASE_URL and meta["needs_base_url"]:
+            hint_url = (
+                extra_gateway_payment.ipn_url(tenant.tenant_id) if key == "nowpayments"
+                else extra_gateway_payment.callback_url(tenant.tenant_id, key)
+            )
+        gateways.append({
+            "key": key, "title": meta["title"], "icon": meta["icon"], "help": meta["help"],
+            "enabled": db.get_setting(extra_gateway_registry.enable_setting(key), "0") == "1",
+            "configured": extra_gateway_payment.is_configured(db, key),
+            "needs_base_url": meta["needs_base_url"], "hint_url": hint_url, "fields": fields,
+        })
+    return {"supported": True, "base_url_ok": bool(API_BASE_URL), "gateways": gateways}
+
+
+@app.post("/api/admin/settings/extra-gateways")
+def api_admin_set_extra_gateway(body: ExtraGatewaySettingsUpdate, auth=Depends(require_senior_admin)):
+    admin_id, db, tenant = auth
+    if tenant.tenant_id:
+        raise HTTPException(status_code=400, detail="این درگاه‌ها فقط برای بات اصلی در دسترس هستند.")
+    meta = extra_gateway_registry.GATEWAYS.get(body.gateway)
+    if not meta:
+        raise HTTPException(status_code=404, detail="درگاه نامعتبر است.")
+    fields = {f["setting"]: f for f in meta["fields"]}
+    for setting, raw in (body.values or {}).items():
+        field = fields.get(setting)
+        if not field:
+            raise HTTPException(status_code=400, detail="فیلد نامعتبر است.")
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if field["numeric"]:
+            number = extra_gateway_payment._to_float(value) if value else 0.0
+            if number < 0:
+                raise HTTPException(status_code=400, detail=f"«{field['label']}» باید عددی بزرگ‌تر یا مساوی صفر باشد.")
+            value = str(int(number)) if number == int(number) else str(number)
+        db.set_setting(setting, value)
+        db.log_admin_action(admin_id, "extra_gateway_setting", f"{body.gateway}: {setting} از مینی‌اپ تغییر کرد.")
+    if body.enabled:
+        missing = extra_gateway_payment.missing_fields(db, body.gateway)
+        if missing:
+            raise HTTPException(status_code=400, detail="ابتدا این موارد را تنظیم کن: " + "، ".join(missing))
+        if not extra_gateway_payment.is_configured(db, body.gateway):
+            raise HTTPException(status_code=400, detail="MINIAPP_URL روی سرور تنظیم نشده است.")
+    setting = extra_gateway_registry.enable_setting(body.gateway)
+    if (db.get_setting(setting, "0") == "1") != body.enabled:
+        db.log_admin_action(admin_id, "extra_gateway_toggle", f"{body.gateway}: {'فعال' if body.enabled else 'غیرفعال'} (مینی‌اپ)")
+    db.set_setting(setting, "1" if body.enabled else "0")
     return {"status": "ok"}
 
 
