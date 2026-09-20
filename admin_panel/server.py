@@ -4213,6 +4213,7 @@ class ResellerRequestQuoteBody(BaseModel):
     panel_server_id: Optional[int] = None
     commission_percent: Optional[int] = None
     discount_percent: Optional[int] = None
+    payment_methods: Optional[List[str]] = None
 
 
 @app.post("/api/reseller-requests/{request_id}/quote")
@@ -4235,8 +4236,14 @@ async def api_quote_reseller_request(request_id: int, body: ResellerRequestQuote
             raise HTTPException(400, "برای نمایندگی نقره‌ای درصد تخفیف را مشخص کنید.")
         if not (1 <= body.discount_percent <= 100):
             raise HTTPException(400, "درصد تخفیف باید بین ۱ تا ۱۰۰ باشد.")
+    payment_methods = None
+    if body.payment_methods is not None:
+        valid = {x["key"] for x in (await asyncio.to_thread(db.get_payment_methods_catalog)) if x["key"] != "wallet"}
+        payment_methods = [m for m in body.payment_methods if m in valid]
+        if not payment_methods:
+            raise HTTPException(400, "حداقل یک روش پرداخت انتخاب کنید.")
     try:
-        await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"], body.commission_percent, body.discount_percent)
+        await asyncio.to_thread(db.quote_reseller_request, request_id, body.price_toman, body.panel_server_id, admin["id"], body.commission_percent, body.discount_percent, payment_methods)
     except ValueError as e:
         raise HTTPException(400, str(e))
     (await asyncio.to_thread(db.log_admin_action, 
