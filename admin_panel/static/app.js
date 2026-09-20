@@ -3189,6 +3189,41 @@ async function openWalletPaymentMethodsModal() {
   });
 }
 
+async function openCustomConfigPaymentMethodsModal() {
+  let methods, current;
+  try {
+    [methods, current] = await Promise.all([
+      apiGet('/payment-methods'),
+      apiGet('/custom-config/payment-methods'),
+    ]);
+  } catch (e) { return handleErr(e); }
+  const allowed = current.allowed;
+  const isAllowed = (key) => !allowed || !allowed.length || allowed.includes(key);
+  openModal('🛠 روش‌های پرداخت مجاز: ساخت کانفیگ شخصی', `
+    <p class="card-sub">اگر همه تیک بخورند، یعنی ساخت کانفیگ شخصی با همه‌ی روش‌های پرداخت فعال ممکن است
+      (بدون محدودیت). این تنظیم برای مینی‌اپ و بات (وقتی پلن اختصاصی محدودیت خودش را ندارد) اعمال می‌شود.</p>
+    <div class="form-grid">
+      ${methods.map(m => `
+        <label class="field field-row">
+          <span>${esc(m.label)}${!m.enabled ? ' (غیرفعال)' : ''}${m.min_amount ? ` — حداقل ${fmt(m.min_amount)} تومان` : ''}</span>
+          <input type="checkbox" data-ccpm="${esc(m.key)}" ${isAllowed(m.key) ? 'checked' : ''}>
+        </label>`).join('') || '<div class="card-sub">هیچ روش پرداختی تعریف نشده.</div>'}
+    </div>
+    <button class="btn btn-primary" id="ccpm-save" style="margin-top:12px">ذخیره</button>
+  `, (b, close) => {
+    $('#ccpm-save', b).addEventListener('click', async () => {
+      const boxes = $$('[data-ccpm]', b);
+      const checked = boxes.filter(i => i.checked).map(i => i.dataset.ccpm);
+      if (checked.length === 0) { toast('حداقل یک روش پرداخت باید فعال بماند.', true); return; }
+      const methodsPayload = (checked.length === boxes.length) ? null : checked;
+      try {
+        await apiPost('/custom-config/payment-methods', { methods: methodsPayload });
+        toast('ذخیره شد.'); close();
+      } catch (e) { handleErr(e); }
+    });
+  });
+}
+
 function productProvisionFieldsHtml(panelServers, prefill) {
   if (!panelServers || !panelServers.length) return '';
   const isDirect = !!(prefill && prefill.provision_server_id);
@@ -7437,6 +7472,12 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
     </div>
 
     <div class="card">
+      <div class="card-sub" style="margin-bottom:10px"><b>🛠 روش‌های پرداخت مجاز برای ساخت کانفیگ شخصی</b> — مشخص کن
+        کاربر هنگام ساخت کانفیگ شخصی کدام روش‌ها (کیف پول، کارت‌به‌کارت، درگاه‌ها) را ببیند.</div>
+      <button class="btn btn-sm" id="cc-pm-edit">✏️ مدیریت روش‌های پرداخت کانفیگ شخصی</button>
+    </div>
+
+    <div class="card">
       <div class="card-sub" style="margin-bottom:10px"><b>💵 حداقل مبلغ مجاز هر روش پرداخت</b> — اگر مبلغ سفارش
         از این عدد کمتر باشد، آن روش برای کاربر نمایش داده نمی‌شود (۰ یعنی بدون محدودیت).
         در بات و مینی‌اپ هر دو یکسان اعمال می‌شود.</div>
@@ -7541,6 +7582,7 @@ function paymentExtrasHtml({ methods, gateways, c2cCards, c2cWebhook, c2cInvoice
 function bindPaymentExtrasEvents(root, { gateways, c2cCards, c2cWebhook }) {
   $('#sms-forwarder-guide', root)?.addEventListener('click', () => openModal('📖 راهنمای کامل فوروارد پیامک', _smsForwarderGuideHtml(), null, { wide: true }));
   $('#wallet-pm-edit', root)?.addEventListener('click', () => openWalletPaymentMethodsModal());
+  $('#cc-pm-edit', root)?.addEventListener('click', () => openCustomConfigPaymentMethodsModal());
   $$('[data-save-min]', root).forEach(b => b.addEventListener('click', async () => {
     const key = b.dataset.saveMin;
     const value = Math.max(0, Number($(`[data-min-amount="${key}"]`, root).value) || 0);
