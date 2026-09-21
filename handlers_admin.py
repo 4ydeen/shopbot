@@ -41,6 +41,7 @@ import blupal_payment
 import noapay_payment
 import extra_gateway_admin
 import ai_support
+import admin_tools
 import bulk_gifts
 import report_router
 from panel_providers import (
@@ -3881,111 +3882,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "wheel_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, "🎡 مدیریت گردونه شانس:", reply_markup=kb.wheel_settings_kb(db))
         await call.answer("وضعیت تغییر کرد.")
-
-    @router.callback_query(F.data == "adm_lottery_settings")
-    async def cb_admin_lottery_settings(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        s = await asyncio.to_thread(db.get_lottery_settings)
-        prize_label = "کیف پول" if s["prize_type"] == "wallet" else "کد تخفیف"
-        text = (
-            "🏆 مدیریت امتیاز و قرعه‌کشی شبانه\n\n"
-            f"امتیاز: {'🟢 فعال' if s['score_enabled'] else '🔴 غیرفعال'}\n"
-            f"قرعه‌کشی: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}\n"
-            f"شمول نماینده‌ها: {'🟢 بله' if s['agent_enabled'] else '🔴 خیر'}\n"
-            f"نوع جایزه: {prize_label}\n"
-            f"جوایز رتبه‌ها: {', '.join(map(str, s['prizes']))}\n"
-            f"گزارش: {s['report_chat_id'] or 'ادمین‌ها'}"
-        )
-        buttons = [
-            [InlineKeyboardButton(text="🔄 روشن/خاموش امتیاز", callback_data="adm_lottery_score_toggle")],
-            [InlineKeyboardButton(text="🎲 روشن/خاموش قرعه‌کشی", callback_data="adm_lottery_toggle")],
-            [InlineKeyboardButton(text="👥 شمول نماینده‌ها", callback_data="adm_lottery_agent_toggle")],
-            [InlineKeyboardButton(text="💰/🎟 تغییر نوع جایزه", callback_data="adm_lottery_prize_type")],
-            [InlineKeyboardButton(text="✏️ تغییر جوایز رتبه ۱،۲،۳", callback_data="adm_lottery_prizes")],
-            [InlineKeyboardButton(text="📣 تغییر آیدی گروه گزارش", callback_data="adm_lottery_report_chat")],
-            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_wheel_settings")],
-        ]
-        await replace_admin_view(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-        await call.answer()
-
-    async def _edit_lottery_view(call):
-        s = await asyncio.to_thread(db.get_lottery_settings)
-        prize_label = "کیف پول" if s["prize_type"] == "wallet" else "کد تخفیف"
-        text = (f"🏆 مدیریت امتیاز و قرعه‌کشی شبانه\n\nامتیاز: {'🟢 فعال' if s['score_enabled'] else '🔴 غیرفعال'}\n"
-                f"قرعه‌کشی: {'🟢 فعال' if s['enabled'] else '🔴 غیرفعال'}\n"
-                f"شمول نماینده‌ها: {'🟢 بله' if s['agent_enabled'] else '🔴 خیر'}\nنوع جایزه: {prize_label}\n"
-                f"جوایز: {', '.join(map(str, s['prizes']))}\nگزارش: {s['report_chat_id'] or 'ادمین‌ها'}")
-        buttons = [
-            [InlineKeyboardButton(text="🔄 روشن/خاموش امتیاز", callback_data="adm_lottery_score_toggle")],
-            [InlineKeyboardButton(text="🎲 روشن/خاموش قرعه‌کشی", callback_data="adm_lottery_toggle")],
-            [InlineKeyboardButton(text="👥 شمول نماینده‌ها", callback_data="adm_lottery_agent_toggle")],
-            [InlineKeyboardButton(text="💰/🎟 تغییر نوع جایزه", callback_data="adm_lottery_prize_type")],
-            [InlineKeyboardButton(text="✏️ تغییر جوایز رتبه ۱،۲،۳", callback_data="adm_lottery_prizes")],
-            [InlineKeyboardButton(text="📣 تغییر آیدی گروه گزارش", callback_data="adm_lottery_report_chat")],
-            [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_wheel_settings")],
-        ]
-        await safe_edit(call, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-    @router.callback_query(F.data.in_({"adm_lottery_score_toggle", "adm_lottery_toggle", "adm_lottery_agent_toggle", "adm_lottery_prize_type"}))
-    async def cb_admin_lottery_toggle(call: CallbackQuery):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        mapping = {"adm_lottery_score_toggle": "score_enabled", "adm_lottery_toggle": "lottery_enabled", "adm_lottery_agent_toggle": "lottery_agent_enabled"}
-        if call.data == "adm_lottery_prize_type":
-            cur = await asyncio.to_thread(db.get_setting, "lottery_prize_type", "wallet")
-            await asyncio.to_thread(db.set_setting, "lottery_prize_type", "discount" if cur == "wallet" else "wallet")
-        else:
-            key = mapping[call.data]
-            cur = await asyncio.to_thread(db.get_setting, key, "1")
-            await asyncio.to_thread(db.set_setting, key, "0" if cur == "1" else "1")
-        await _edit_lottery_view(call)
-        await call.answer("تنظیم ذخیره شد.")
-
-    @router.callback_query(F.data == "adm_lottery_prizes")
-    async def cb_admin_lottery_prizes(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        await state.set_state(AdminWheelSettings.waiting_lottery_prizes)
-        await safe_edit(call, "سه جایزه رتبه‌های ۱، ۲ و ۳ را با کاما وارد کنید.\nکیف پول: تومان؛ کد تخفیف: درصد. مثال: 50000,30000,20000", reply_markup=kb.admin_back_kb("adm_lottery_settings"))
-        await call.answer()
-
-    @router.message(AdminWheelSettings.waiting_lottery_prizes)
-    async def process_lottery_prizes(message: Message, state: FSMContext):
-        parts = [p.strip() for p in (message.text or "").split(",")]
-        if len(parts) != 3 or not all(p.isdigit() and 0 < int(p) <= 1000000000 for p in parts):
-            await message.answer("لطفاً دقیقاً سه عدد مثبت وارد کنید؛ مثال: 50000,30000,20000")
-            return
-        if (await asyncio.to_thread(db.get_setting, "lottery_prize_type", "wallet")) == "discount" and any(int(p) > 100 for p in parts):
-            await message.answer("در حالت کد تخفیف، هر جایزه باید بین 1 تا 100 درصد باشد.")
-            return
-        await asyncio.to_thread(db.set_setting, "lottery_prizes", ",".join(parts))
-        await state.clear()
-        await message.answer("✅ جوایز قرعه‌کشی ذخیره شد.")
-
-    @router.callback_query(F.data == "adm_lottery_report_chat")
-    async def cb_admin_lottery_report_chat(call: CallbackQuery, state: FSMContext):
-        if not senior_admin_only(call.from_user.id):
-            return await deny_mid(call)
-        await state.set_state(AdminWheelSettings.waiting_lottery_report_chat)
-        await safe_edit(call, "آیدی عددی گروه گزارش را بفرستید. برای بازگشت به ارسال گزارش برای ادمین‌ها، 0 بفرستید.", reply_markup=kb.admin_back_kb("adm_lottery_settings"))
-        await call.answer()
-
-    @router.message(AdminWheelSettings.waiting_lottery_report_chat)
-    async def process_lottery_report_chat(message: Message, state: FSMContext):
-        text = (message.text or "").strip()
-        if text == "0":
-            value = ""
-        else:
-            try:
-                int(text)
-                value = text
-            except ValueError:
-                await message.answer("آیدی گروه باید عددی باشد؛ مثال: -1001234567890")
-                return
-        await asyncio.to_thread(db.set_setting, "lottery_report_chat_id", value)
-        await state.clear()
-        await message.answer("✅ مقصد گزارش قرعه‌کشی ذخیره شد.")
 
     @router.callback_query(F.data == "adm_wheel_edit_percent")
     async def cb_admin_wheel_edit_percent(call: CallbackQuery, state: FSMContext):
@@ -10034,69 +9930,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.answer()
 
     # -------------------------------------------------------------------
-    # هدیه‌ی گروهی حجم/زمان
-    # -------------------------------------------------------------------
-
-    @router.callback_query(F.data == "adm_bulk_gift")
-    async def cb_bulk_gift(call: CallbackQuery, state: FSMContext):
-        if not full_admin_only(call.from_user.id):
-            return await deny_support(call)
-        await state.set_state(AdminBulkGift.waiting_params)
-        await safe_edit(
-            call,
-            "🎁 <b>هدیه‌ی گروهی</b>\n\n"
-            "فرمت: <code>panel=ID volume=5 days=0</code> یا <code>users=123,456 volume=0 days=7</code>\n"
-            "می‌توانی panel و users را هم‌زمان بدهی. حداقل یکی از volume/days باید بیشتر از صفر باشد.\n\n"
-            "مثال: <code>panel=3 volume=10 days=0</code>",
-            reply_markup=kb.admin_back_kb("adm_cat:management"),
-        )
-        await call.answer()
-
-    @router.message(AdminBulkGift.waiting_params)
-    async def msg_bulk_gift(message: Message, state: FSMContext):
-        if not full_admin_only(message.from_user.id):
-            return
-        text = (message.text or "").strip()
-        vals = {}
-        for token in text.split():
-            if "=" not in token:
-                continue
-            k,v = token.split("=",1)
-            vals[k.lower().strip()] = v.strip()
-        try:
-            panel_id = int(vals["panel"]) if vals.get("panel") else None
-            users = [int(x) for x in vals.get("users", "").split(",") if x.strip()]
-            volume = float(vals.get("volume", "0"))
-            days = int(vals.get("days", "0"))
-            if volume < 0 or days < 0 or (volume <= 0 and days <= 0):
-                raise ValueError
-            if panel_id is None and not users:
-                raise ValueError
-            job = await asyncio.to_thread(
-                bulk_gifts.start_job, db, admin_id=message.from_user.id,
-                panel_server_id=panel_id, user_ids=users, volume_gb=volume, days=days,
-            )
-        except Exception as exc:
-            await message.answer(f"⛔️ ایجاد عملیات ناموفق بود: {exc}\nفرمت نمونه: <code>panel=3 volume=5 days=0</code>")
-            return
-        await state.clear()
-        await message.answer(
-            f"✅ عملیات هدیه‌ی گروهی #{job['id']} ساخته شد.\n"
-            f"تعداد سرویس: {job['total']}\n"
-            f"حجم: {volume:g} گیگ | زمان: {days} روز\n\n"
-            "پردازش با صف پایدار انجام می‌شود و بعد از ری‌استارت ادامه پیدا می‌کند."
-        )
-
-    @router.callback_query(F.data.startswith("adm_bulk_gift_cancel:"))
-    async def cb_bulk_gift_cancel(call: CallbackQuery):
-        if not full_admin_only(call.from_user.id):
-            return await deny_support(call)
-        try: job_id=int(call.data.split(":",1)[1])
-        except ValueError: return await call.answer("شناسه نامعتبر", show_alert=True)
-        ok=await asyncio.to_thread(db.cancel_bulk_gift_job, job_id)
-        await call.answer("عملیات لغو شد." if ok else "عملیات قابل لغو نیست.", show_alert=True)
-
-    # -------------------------------------------------------------------
     # دستور متنی برای دسترسی سریع
     # -------------------------------------------------------------------
 
@@ -10133,6 +9966,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.clear()
         await message.answer("🔧 پنل مدیریت:", reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    admin_tools.register(
+        router, db, is_main_bot, full_admin_only, senior_admin_only,
+        deny_support, deny_mid, safe_edit, replace_admin_view,
+    )
 
     extra_gateway_admin.register(
         router, db, is_main_bot, admin_only, full_admin_only, deny_support, replace_admin_view,

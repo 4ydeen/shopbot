@@ -517,4 +517,12 @@ class AdminTempMessage(StatesGroup):
 
 
 class AdminBulkGift(StatesGroup):
-    waiting_params = State()
+    waiting_users = State()
+    waiting_volume = State()
+    waiting_days = State()
+
+
+class AdminSettingInput(StatesGroup):
+    waiting_value = State()
+    waiting_prizes = State()
+    waiting_report_chat = State()

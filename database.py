@@ -212,6 +212,9 @@ DEFAULT_SETTINGS = {
     "lottery_prizes": "50000,30000,20000",  # رتبه‌های ۱ تا ۳؛ تومان یا درصد تخفیف
     "lottery_discount_expiry_hours": "24",
     "lottery_report_chat_id": "",  # آیدی گروه گزارش؛ خالی = ارسال برای ادمین‌ها
+    "score_purchase_points": "2",  # امتیاز هر خرید تاییدشده
+    "score_renewal_points": "1",  # امتیاز هر تمدید تاییدشده
+    "score_referral_points": "1",  # امتیاز هر دعوت موفق
     "btn_wheel": "🎡 گردونه شانس",
     # پرداخت کریپتو (Plisio)
     "crypto_payment_enabled": "0",
@@ -3812,13 +3815,14 @@ class Database:
 
     def approve_custom_config_order(self, order_id: int) -> bool:
         """فقط اگر سفارش pending یا processing (بعد از claim_order) باشد اعمال می‌شود."""
+        purchase_points = self.get_score_points("purchase")
         with self._get_conn() as conn:
             cur = conn.execute(
                 "UPDATE orders SET status='approved', updated_at=? WHERE id=? AND status IN ('pending','processing')",
                 (datetime.utcnow().isoformat(), order_id),
             )
             if cur.rowcount:
-                conn.execute("UPDATE users SET score=COALESCE(score,0)+2 WHERE telegram_id=(SELECT user_id FROM orders WHERE id=?)", (order_id,))
+                self._award_order_score(conn, order_id, purchase_points)
             return cur.rowcount > 0
 
     def create_renewal_order(
@@ -3849,6 +3853,8 @@ class Database:
         """تایید اتمیک تمدید و پرداخت یک‌باره‌ی کش‌بک؛ فقط از مبلغ پرداخت‌شده‌ی
         غیرکیف‌پول محاسبه می‌شود تا کش‌بک باعث چرخه‌ی کیف‌پول نشود."""
         now = datetime.utcnow().isoformat()
+        percent = max(0, min(int(self.get_setting("renewal_cashback_percent", "0") or 0), 100))
+        renewal_points = self.get_score_points("renewal")
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
             if not row or not row["is_renewal"]:
@@ -3859,7 +3865,6 @@ class Database:
             )
             if cur.rowcount == 0:
                 return False
-            percent = max(0, min(int(self.get_setting("renewal_cashback_percent", "0") or 0), 100))
             eligible = max(int(row["final_price"] or 0), 0)
             amount = (eligible * percent) // 100
             if amount > 0:
@@ -3872,7 +3877,8 @@ class Database:
                         "UPDATE users SET referral_credit=MAX(referral_credit + ?,0) WHERE telegram_id=?",
                         (amount, row["user_id"]),
                     )
-            conn.execute("UPDATE users SET score=COALESCE(score,0)+1 WHERE telegram_id=?", (row["user_id"],))
+            if renewal_points > 0:
+                conn.execute("UPDATE users SET score=COALESCE(score,0)+? WHERE telegram_id=?", (renewal_points, row["user_id"]))
             return True
 
     def get_order_cashback(self, order_id: int):
@@ -3928,6 +3934,7 @@ class Database:
         فقط اگر سفارش pending یا processing (بعد از claim_order) باشد اعمال می‌شود."""
         if isinstance(config_ids, int):
             config_ids = [config_ids]
+        purchase_points = self.get_score_points("purchase")
         with self._get_conn() as conn:
             cur = conn.execute(
                 "UPDATE orders SET status='approved', config_id=?, updated_at=? WHERE id=? AND status IN ('pending','processing')",
@@ -3939,7 +3946,7 @@ class Database:
                 "UPDATE configs SET order_id=? WHERE id=?",
                 [(order_id, cid) for cid in config_ids],
             )
-            conn.execute("UPDATE users SET score=COALESCE(score,0)+2 WHERE telegram_id=(SELECT user_id FROM orders WHERE id=?)", (order_id,))
+            self._award_order_score(conn, order_id, purchase_points)
             return True
 
     def approve_order_auto(self, order_id: int) -> bool:
@@ -4582,6 +4589,7 @@ class Database:
     def set_referred_by(self, user_tg_id: int, referrer_tg_id: int):
         if user_tg_id == referrer_tg_id:
             return
+        referral_points = self.get_score_points("referral")
         with self._get_conn() as conn:
             row = conn.execute("SELECT referred_by FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
             if row and row["referred_by"] is None:
@@ -4592,8 +4600,8 @@ class Database:
                     cur = conn.execute(
                         "UPDATE users SET referred_by=? WHERE telegram_id=? AND referred_by IS NULL", (referrer_tg_id, user_tg_id)
                     )
-                    if cur.rowcount and self.get_setting("score_enabled", "1") == "1":
-                        conn.execute("UPDATE users SET score=COALESCE(score,0)+1 WHERE telegram_id=?", (referrer_tg_id,))
+                    if cur.rowcount and referral_points > 0:
+                        conn.execute("UPDATE users SET score=COALESCE(score,0)+? WHERE telegram_id=?", (referral_points, referrer_tg_id))
 
     # -------------------------------------------------------------------
     # نمایندگی با «لینک اختصاصی داخل بات اصلی» (بند ۳.۱ اسپک)
@@ -5025,7 +5033,7 @@ class Database:
         reward = (paid_amount * percent) // 100
         if reward > 0:
             self.add_wallet_credit(referrer_id, reward)
-            self.add_score(referrer_id, 1)
+            self.add_score(referrer_id, self.get_score_points("referral"))
             return reward, referrer_id
         return None
 
@@ -6783,6 +6791,54 @@ class Database:
             row = conn.execute("SELECT COALESCE(score,0) score FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
         return int(row["score"]) if row else 0
 
+    def get_score_points(self, kind: str) -> int:
+        """امتیاز هر رویداد (purchase/renewal/referral)؛ با خاموش بودن امتیاز یا مقدار صفر، صفر برمی‌گرداند."""
+        if self.get_setting("score_enabled", "1") != "1":
+            return 0
+        default = {"purchase": 2, "renewal": 1, "referral": 1}.get(kind, 0)
+        try:
+            return max(0, min(int(self.get_setting(f"score_{kind}_points", str(default)) or 0), 1000))
+        except (TypeError, ValueError):
+            return default
+
+    def _award_order_score(self, conn, order_id: int, points: int):
+        """points باید قبل از باز کردن conn محاسبه شود؛ get_setting داخل قفل _get_conn ممکن است deadlock بدهد."""
+        if points > 0:
+            conn.execute(
+                "UPDATE users SET score=COALESCE(score,0)+? WHERE telegram_id=(SELECT user_id FROM orders WHERE id=?)",
+                (points, order_id),
+            )
+
+    def get_score_leaderboard(self, limit: int = 10, include_agents: bool = True):
+        clause = "" if include_agents else "AND COALESCE(reseller_tier,'') = '' AND COALESCE(inline_reseller_enabled,0)=0"
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT telegram_id, username, first_name, COALESCE(score,0) score FROM users "
+                f"WHERE is_blocked=0 AND COALESCE(score,0)>0 {clause} ORDER BY score DESC, telegram_id LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+
+    def count_score_participants(self, include_agents: bool = True) -> int:
+        clause = "" if include_agents else "AND COALESCE(reseller_tier,'') = '' AND COALESCE(inline_reseller_enabled,0)=0"
+        with self._get_conn() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) c FROM users WHERE is_blocked=0 AND COALESCE(score,0)>0 {clause}"
+            ).fetchone()
+        return int(row["c"]) if row else 0
+
+    def get_cashback_totals(self) -> dict:
+        with self._get_conn() as conn:
+            renewal = conn.execute(
+                "SELECT COALESCE(SUM(cashback_amount),0) t, COUNT(*) c FROM orders WHERE cashback_paid=1 AND COALESCE(cashback_amount,0)>0"
+            ).fetchone()
+            topup = conn.execute(
+                "SELECT COALESCE(SUM(cashback_amount),0) t, COUNT(*) c FROM wallet_topups WHERE cashback_paid=1 AND COALESCE(cashback_amount,0)>0"
+            ).fetchone()
+        return {
+            "renewal_total": int(renewal["t"]), "renewal_count": int(renewal["c"]),
+            "topup_total": int(topup["t"]), "topup_count": int(topup["c"]),
+        }
+
     def get_user_score(self, user_tg_id: int) -> int:
         with self._get_conn() as conn:
             row = conn.execute("SELECT COALESCE(score,0) score FROM users WHERE telegram_id=?", (user_tg_id,)).fetchone()
@@ -8201,6 +8257,20 @@ class Database:
             )
             conn.execute("UPDATE bulk_gift_jobs SET status='running', started_at=CURRENT_TIMESTAMP WHERE id=?", (job_id,))
             return {"id": job_id, "total": len(rows)}
+
+    def count_bulk_gift_targets(self, panel_server_id=None, user_ids=None) -> int:
+        cond = ["cc.status='active'", "COALESCE(cc.source, '') != 'test'"]
+        params = []
+        if panel_server_id:
+            cond.append("cc.panel_server_id=?")
+            params.append(int(panel_server_id))
+        user_ids = [int(x) for x in (user_ids or [])]
+        if user_ids:
+            cond.append(f"cc.user_id IN ({','.join('?' for _ in user_ids)})")
+            params.extend(user_ids)
+        with self._get_conn() as conn:
+            row = conn.execute(f"SELECT COUNT(*) c FROM custom_configs cc WHERE {' AND '.join(cond)}", params).fetchone()
+        return int(row["c"]) if row else 0
 
     def get_bulk_gift_job(self, job_id):
         with self._get_conn() as conn:

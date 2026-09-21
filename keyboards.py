@@ -1050,6 +1050,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_add_configs", "🔗 افزودن کانفیگ به محصول", "adm_add_configs"),
     ("adm_random_cfg", "🎲 دریافت کانفیگ رندوم", "adm_random_cfg"),
     ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
+    ("adm_cleanup_settings", "🧹 پاکسازی خودکار منقضی‌ها", "adm_cleanup_settings"),
     ("adm_forcejoin_menu", "📢 عضویت اجباری در کانال", "adm_forcejoin_menu"),
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
     ("adm_tickets_menu", "🎫 تیکت‌های پشتیبانی", "adm_tickets_menu"),
@@ -1061,6 +1062,8 @@ ADMIN_PANEL_ITEMS = [
     ("adm_noapay_payments", "⭐ پرداخت‌های NoapayBot", "adm_noapay_payments"),
     ("adm_discounts_menu", "🎟 مدیریت کدهای تخفیف", "adm_discounts_menu"),
     ("adm_wheel_settings", "🎡 مدیریت گردونه شانس", "adm_wheel_settings"),
+    ("adm_lottery_settings", "🏆 امتیاز و قرعه‌کشی شبانه", "adm_lottery_settings"),
+    ("adm_cashback_settings", "💸 کش‌بک تمدید و شارژ", "adm_cashback_settings"),
     ("adm_renewal_settings", "🔔 یادآوری تمدید سرویس", "adm_renewal_settings"),
     ("adm_volume_reminder_settings", "📉 یادآوری اتمام حجم", "adm_volume_reminder_settings"),
     ("adm_connect_alert_settings", "🔌 هشدار اتصال/عدم‌اتصال کانفیگ", "adm_connect_alert_settings"),
@@ -1097,6 +1100,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
     ("adm_report_group", "📣 گروه گزارش تاپیک‌دار", "adm_report_group"),
     ("adm_bulk_gift", "🎁 هدیه‌ی گروهی", "adm_bulk_gift"),
+    ("adm_spam_settings", "🛡 ضداسپم کاربران", "adm_spam_settings"),
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
     ("adm_set_support_contact", "🆔 آیدی مدیر برای چت مستقیم", "adm_set_support_contact"),
     ("adm_ai_support_settings", "🤖 دستیار هوشمند (سوالات متداول)", "adm_ai_support_settings"),
@@ -1139,6 +1143,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_add_configs",
         "adm_random_cfg",
         "adm_test_menu",
+        "adm_cleanup_settings",
         "adm_custom_config_settings",
         "adm_delivery_settings",
         "adm_renewal_pricing",
@@ -1152,6 +1157,9 @@ ADMIN_PANEL_CATEGORIES = [
     ("marketing", "🎯 بازاریابی و رشد", [
         "adm_discounts_menu",
         "adm_wheel_settings",
+        "adm_lottery_settings",
+        "adm_cashback_settings",
+        "adm_bulk_gift",
         "adm_referral_settings",
         "adm_broadcast",
         "adm_deeplink_tools",
@@ -1196,7 +1204,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_stats",
         "adm_backup_menu",
         "adm_report_group",
-        "adm_bulk_gift",
+        "adm_spam_settings",
     ]),
 ]
 
@@ -2014,7 +2022,6 @@ def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         )])
 
     rows.append([InlineKeyboardButton(text="🔁 بازنشانی کانفیگ تست برای همه", callback_data="adm_reset_test_configs")])
-    rows.append([InlineKeyboardButton(text="🧹 پاکسازی خودکار سرویس‌های منقضی", callback_data="adm_cleanup_settings")])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -2029,7 +2036,7 @@ def admin_cleanup_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"🧪 مهلت حذف تست: {tests} روز (۰=خاموش)", callback_data="adm_cleanup_test")],
         [InlineKeyboardButton(text=f"⚠️ هشدار قبل از انقضا: {warning} روز", callback_data="adm_cleanup_warning")],
         [InlineKeyboardButton(text=("🟢 dry-run روشن" if dry else "🔴 dry-run خاموش"), callback_data="adm_cleanup_dryrun")],
-        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_test_menu")],
+        [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:products")],
     ])
 
 
@@ -2629,7 +2636,6 @@ def wheel_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تغییر لیست جوایز", callback_data="adm_wheel_edit_prizes")],
         [InlineKeyboardButton(text="✏️ تغییر اعتبار کد", callback_data="adm_wheel_edit_expiry")],
         [InlineKeyboardButton(text="✏️ تغییر فاصله چرخش", callback_data="adm_wheel_edit_cooldown")],
-        [InlineKeyboardButton(text="🏆 مدیریت امتیاز و قرعه‌کشی شبانه", callback_data="adm_lottery_settings")],
         [InlineKeyboardButton(text="⬅️ بازگشت", callback_data="adm_cat:marketing")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
