@@ -29,23 +29,44 @@ async def _db(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
+async def _live_info(link, cache):
+    if link in cache:
+        return cache[link]
+    info = await fetch_sub_info(link)
+    cache[link] = info
+    return info
+
+
+async def _prefetch_live_info(rows, cache, limit: int = 10) -> None:
+    sem = asyncio.Semaphore(limit)
+
+    async def one(link):
+        async with sem:
+            cache[link] = await fetch_sub_info(link)
+
+    links = {r["link"] for r in rows if r["link"] and r["link"] not in cache}
+    if links:
+        await asyncio.gather(*(one(link) for link in links))
+
+
+async def _send_single_reminder(bot, db, row, mark_fn, cache) -> bool:
     user_id = row["assigned_user_id"]
     if not user_id:
-        await _db(mark_fn, row["config_id"])
         return False
 
     settings = await _db(db.get_renewal_settings)
 
     # زمان انقضا فقط از Subscription واقعی خوانده می‌شود.
     # cf.expires_at دیتابیس نباید روی زمان ارسال یادآوری اثر بگذارد.
-    info = await fetch_sub_info(row["link"])
-    if not info.get("ok") or not info.get("expire"):
+    info = await _live_info(row["link"], cache)
+    if not info.get("ok"):
         logger.warning(
             "زمان انقضای واقعی Subscription برای config=%s قابل دریافت نیست؛ "
             "یادآوری ارسال نمی‌شود.",
             row["config_id"],
         )
+        return False
+    if not info.get("expire"):
         return False
 
     try:
@@ -62,12 +83,17 @@ async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
     seconds_left = expire_ts - now.timestamp()
     reminder_window = settings["days_before"] * 24 * 60 * 60
 
-    # هنوز وارد بازه یادآوری نشده است.
+    # هنوز وارد بازه یادآوری نشده است (مثلاً تمدید شده)؛ پرچم قبلی آزاد می‌شود.
     if seconds_left > reminder_window:
+        if row["sent"]:
+            await _db(mark_fn, row["config_id"], 0)
         return False
 
     # کانفیگ منقضی شده است؛ یادآوری ارسال نکن.
     if seconds_left <= 0:
+        return False
+
+    if row["sent"]:
         return False
 
     # محاسبه فقط برای نمایش پیام است؛ شرط ارسال با ثانیه انجام می‌شود.
@@ -103,41 +129,42 @@ async def _send_single_reminder(bot, db, row, mark_fn) -> bool:
     return True
 
 
-async def check_and_send_renewal_reminders(bot, db) -> int:
+async def check_and_send_renewal_reminders(bot, db, cache=None) -> int:
     """یک بار کانفیگ‌ها را بررسی می‌کند و زمان‌بندی را فقط از Subscription واقعی می‌خواند.
     هم انبار کانفیگ ثابت و هم کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN بررسی می‌شوند.
     تعداد یادآوری‌هایی که واقعاً ارسال شدند را برمی‌گرداند."""
     sent = 0
+    cache = {} if cache is None else cache
     try:
         rows = await _db(db.get_configs_due_for_renewal_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های تمدید سرویس (انبار کانفیگ)")
         rows = []
-    for row in rows:
-        if await _send_single_reminder(bot, db, row, db.mark_renewal_reminder_sent):
-            sent += 1
-
     try:
         custom_rows = await _db(db.get_custom_configs_due_for_renewal_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های تمدید سرویس (کانفیگ‌های پنلی)")
         custom_rows = []
+    await _prefetch_live_info(list(rows) + list(custom_rows), cache)
+
+    for row in rows:
+        if await _send_single_reminder(bot, db, row, db.mark_renewal_reminder_sent, cache):
+            sent += 1
     for row in custom_rows:
-        if await _send_single_reminder(bot, db, row, db.mark_custom_config_renewal_reminder_sent):
+        if await _send_single_reminder(bot, db, row, db.mark_custom_config_renewal_reminder_sent, cache):
             sent += 1
 
     return sent
 
 
-async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
+async def _send_single_volume_reminder(bot, db, row, mark_fn, cache) -> bool:
     user_id = row["assigned_user_id"]
     if not user_id:
-        await _db(mark_fn, row["config_id"])
         return False
 
     settings = await _db(db.get_volume_reminder_settings)
 
-    info = await fetch_sub_info(row["link"])
+    info = await _live_info(row["link"], cache)
     if not info.get("ok"):
         logger.warning(
             "اطلاعات مصرف Subscription برای config=%s قابل دریافت نیست؛ "
@@ -161,6 +188,11 @@ async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
         due = percent_used >= settings["percent"]
 
     if not due:
+        if row["sent"]:
+            await _db(mark_fn, row["config_id"], 0)
+        return False
+
+    if row["sent"]:
         return False
 
     code, discount_expires_at, percent, expiry_hours = await _db(db.generate_volume_discount_code, user_id)
@@ -182,31 +214,33 @@ async def _send_single_volume_reminder(bot, db, row, mark_fn) -> bool:
     except Exception:
         logger.warning("ارسال یادآوری اتمام حجم به کاربر %s ناموفق بود.", user_id)
 
-    await _db(db.mark_volume_reminder_sent, row["config_id"])
+    await _db(mark_fn, row["config_id"])
     return True
 
 
-async def check_and_send_volume_reminders(bot, db) -> int:
+async def check_and_send_volume_reminders(bot, db, cache=None) -> int:
     """یک بار کانفیگ‌ها را بررسی می‌کند و بر اساس مصرف زنده‌ی Subscription، یادآوری اتمام حجم می‌فرستد.
     هم انبار کانفیگ ثابت و هم کانفیگ‌های ساخته‌شده مستقیم روی پنل VPN بررسی می‌شوند.
     تعداد یادآوری‌هایی که واقعاً ارسال شدند را برمی‌گرداند."""
     sent = 0
+    cache = {} if cache is None else cache
     try:
         rows = await _db(db.get_configs_due_for_volume_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های اتمام حجم (انبار کانفیگ)")
         rows = []
-    for row in rows:
-        if await _send_single_volume_reminder(bot, db, row, db.mark_volume_reminder_sent):
-            sent += 1
-
     try:
         custom_rows = await _db(db.get_custom_configs_due_for_volume_reminder)
     except Exception:
         logger.exception("خطا در دریافت لیست یادآوری‌های اتمام حجم (کانفیگ‌های پنلی)")
         custom_rows = []
+    await _prefetch_live_info(list(rows) + list(custom_rows), cache)
+
+    for row in rows:
+        if await _send_single_volume_reminder(bot, db, row, db.mark_volume_reminder_sent, cache):
+            sent += 1
     for row in custom_rows:
-        if await _send_single_volume_reminder(bot, db, row, db.mark_custom_config_volume_reminder_sent):
+        if await _send_single_volume_reminder(bot, db, row, db.mark_custom_config_volume_reminder_sent, cache):
             sent += 1
 
     return sent
@@ -264,7 +298,7 @@ async def check_and_process_auto_renewals(bot, db) -> int:
             continue
 
         await _db(db.add_wallet_credit, user_id, -price)
-        await _db(db.apply_custom_config_renewal, row["id"], add_volume_gb=0, add_days=duration_days)
+        await _db(db.apply_custom_config_renewal, row["id"], add_volume_gb=0, add_days=duration_days, full_reset=True)
         await _db(
             db.add_custom_config_history,
             row["id"], "auto_renew", f"{volume_gb} گیگ / {duration_days} روز — {price:,} تومان از کیف پول",
@@ -288,16 +322,17 @@ async def renewal_reminder_loop(bot, db, interval_seconds: int = 3600) -> None:
     while True:
         date_sent = 0
         volume_sent = 0
+        cache = {}
         try:
             await check_and_process_auto_renewals(bot, db)
         except Exception:
             logger.exception("خطا در چرخه‌ی تمدید خودکار کانفیگ‌های پنلی")
         try:
-            date_sent = await check_and_send_renewal_reminders(bot, db)
+            date_sent = await check_and_send_renewal_reminders(bot, db, cache)
         except Exception:
             logger.exception("خطا در چرخه‌ی یادآوری تمدید سرویس")
         try:
-            volume_sent = await check_and_send_volume_reminders(bot, db)
+            volume_sent = await check_and_send_volume_reminders(bot, db, cache)
         except Exception:
             logger.exception("خطا در چرخه‌ی یادآوری اتمام حجم")
         try:

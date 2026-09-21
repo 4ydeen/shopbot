@@ -6975,7 +6975,7 @@ class Database:
         }
 
     def get_configs_due_for_renewal_reminder(self):
-        """کانفیگ‌های فعال و بدون یادآوری را برمی‌گرداند.
+        """کانفیگ‌های فعال را همراه با پرچم sent (یادآوری قبلاً ارسال شده یا نه) برمی‌گرداند.
 
         نکته مهم: زمان انقضای ذخیره‌شده در cf.expires_at عمداً در اینجا
         برای زمان‌بندی یادآوری استفاده نمی‌شود. زمان واقعی انقضا از لینک
@@ -6987,15 +6987,16 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, cf.expires_at, "
+                "cf.renewal_reminder_sent as sent, "
                 "p.id as product_id, p.name as product_name "
                 "FROM configs cf JOIN products p ON cf.product_id = p.id "
-                "WHERE cf.is_used=1 AND cf.renewal_reminder_sent=0 "
+                "WHERE cf.is_used=1 "
                 "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
             ).fetchall()
 
-    def mark_renewal_reminder_sent(self, config_id: int):
+    def mark_renewal_reminder_sent(self, config_id: int, sent: int = 1):
         with self._get_conn() as conn:
-            conn.execute("UPDATE configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
+            conn.execute("UPDATE configs SET renewal_reminder_sent=? WHERE id=?", (int(sent), config_id))
 
     def get_custom_configs_due_for_renewal_reminder(self):
         """معادل get_configs_due_for_renewal_reminder برای کانفیگ‌هایی که مستقیم
@@ -7006,15 +7007,15 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
-                "username as product_name "
+                "renewal_reminder_sent as sent, username as product_name "
                 "FROM custom_configs "
-                "WHERE renewal_reminder_sent=0 AND status='active' AND source != 'test' "
+                "WHERE status='active' AND source != 'test' "
                 "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
             ).fetchall()
 
-    def mark_custom_config_renewal_reminder_sent(self, config_id: int):
+    def mark_custom_config_renewal_reminder_sent(self, config_id: int, sent: int = 1):
         with self._get_conn() as conn:
-            conn.execute("UPDATE custom_configs SET renewal_reminder_sent=1 WHERE id=?", (config_id,))
+            conn.execute("UPDATE custom_configs SET renewal_reminder_sent=? WHERE id=?", (int(sent), config_id))
 
     def generate_renewal_discount_code(self, user_tg_id: int) -> tuple:
         """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری تمدید سرویس کاربر می‌سازد.
@@ -7042,7 +7043,7 @@ class Database:
         }
 
     def get_configs_due_for_volume_reminder(self):
-        """کانفیگ‌های فعال و بدون یادآوری حجم را برمی‌گرداند.
+        """کانفیگ‌های فعال را همراه با پرچم sent (یادآوری حجم قبلاً ارسال شده یا نه) برمی‌گرداند.
 
         آستانه‌ی واقعی (درصد/گیگ) از روی مصرف زنده‌ی Subscription در
         renewal_reminders.py بررسی می‌شود؛ اینجا فقط کاندیدها فیلتر می‌شوند.
@@ -7053,15 +7054,16 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT cf.id as config_id, cf.link, cf.assigned_user_id, "
+                "cf.volume_reminder_sent as sent, "
                 "p.id as product_id, p.name as product_name "
                 "FROM configs cf JOIN products p ON cf.product_id = p.id "
-                "WHERE cf.is_used=1 AND cf.volume_reminder_sent=0 "
+                "WHERE cf.is_used=1 "
                 "AND cf.link IS NOT NULL AND TRIM(cf.link) != ''"
             ).fetchall()
 
-    def mark_volume_reminder_sent(self, config_id: int):
+    def mark_volume_reminder_sent(self, config_id: int, sent: int = 1):
         with self._get_conn() as conn:
-            conn.execute("UPDATE configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
+            conn.execute("UPDATE configs SET volume_reminder_sent=? WHERE id=?", (int(sent), config_id))
 
     def get_custom_configs_due_for_volume_reminder(self):
         """معادل get_configs_due_for_volume_reminder برای کانفیگ‌های ساخته‌شده
@@ -7072,15 +7074,15 @@ class Database:
         with self._get_conn() as conn:
             return conn.execute(
                 "SELECT id as config_id, subscription_url as link, user_id as assigned_user_id, "
-                "username as product_name "
+                "volume_reminder_sent as sent, username as product_name "
                 "FROM custom_configs "
-                "WHERE volume_reminder_sent=0 AND status='active' AND source != 'test' "
+                "WHERE status='active' AND source != 'test' "
                 "AND subscription_url IS NOT NULL AND TRIM(subscription_url) != ''"
             ).fetchall()
 
-    def mark_custom_config_volume_reminder_sent(self, config_id: int):
+    def mark_custom_config_volume_reminder_sent(self, config_id: int, sent: int = 1):
         with self._get_conn() as conn:
-            conn.execute("UPDATE custom_configs SET volume_reminder_sent=1 WHERE id=?", (config_id,))
+            conn.execute("UPDATE custom_configs SET volume_reminder_sent=? WHERE id=?", (int(sent), config_id))
 
     def generate_volume_discount_code(self, user_tg_id: int) -> tuple:
         """یک کد تخفیف یکبارمصرف و محدود به زمان برای یادآوری اتمام حجم کاربر می‌سازد.
@@ -8162,9 +8164,13 @@ class Database:
             else:
                 new_volume = row["volume_gb"]
             new_duration = (row["duration_days"] or 0) + add_days if add_days else row["duration_days"]
+            rearm_time = bool(add_days) or full_reset
+            rearm_volume = bool(add_volume_gb) or set_volume_gb is not None or full_reset
             conn.execute(
-                "UPDATE custom_configs SET volume_gb=?, duration_days=?, expires_at=? WHERE id=?",
-                (new_volume, new_duration, new_expires_at, custom_config_id),
+                "UPDATE custom_configs SET volume_gb=?, duration_days=?, expires_at=?, "
+                "renewal_reminder_sent=CASE WHEN ? THEN 0 ELSE renewal_reminder_sent END, "
+                "volume_reminder_sent=CASE WHEN ? THEN 0 ELSE volume_reminder_sent END WHERE id=?",
+                (new_volume, new_duration, new_expires_at, int(rearm_time), int(rearm_volume), custom_config_id),
             )
         self.add_custom_config_history(
             custom_config_id, "renewal",
@@ -8192,7 +8198,10 @@ class Database:
                 except ValueError:
                     pass
             new_expires_at = (base + timedelta(days=add_days)).isoformat()
-            conn.execute("UPDATE configs SET expires_at=? WHERE id=?", (new_expires_at, config_id))
+            conn.execute(
+                "UPDATE configs SET expires_at=?, renewal_reminder_sent=0 WHERE id=?",
+                (new_expires_at, config_id),
+            )
             return new_expires_at
 
     def is_custom_username_taken(self, username: str) -> bool:
@@ -8316,7 +8325,12 @@ class Database:
             # اگر provider تاریخ معتبر برگرداند، همان مرجع اصلی است.
             if panel_expires_at:
                 new_exp = panel_expires_at
-            conn.execute("UPDATE custom_configs SET volume_gb=?, expires_at=? WHERE id=?", (new_volume,new_exp,custom_config_id))
+            conn.execute(
+                "UPDATE custom_configs SET volume_gb=?, expires_at=?, "
+                "renewal_reminder_sent=CASE WHEN ? THEN 0 ELSE renewal_reminder_sent END, "
+                "volume_reminder_sent=CASE WHEN ? THEN 0 ELSE volume_reminder_sent END WHERE id=?",
+                (new_volume, new_exp, int(bool(add_days) or bool(panel_expires_at)), int(bool(add_volume_gb)), custom_config_id),
+            )
             conn.execute("UPDATE bulk_gift_items SET status='done',completed_at=CURRENT_TIMESTAMP WHERE id=?", (item_id,))
             conn.execute("UPDATE bulk_gift_jobs SET done=done+1 WHERE id=?", (item['job_id'],))
         self.add_custom_config_history(custom_config_id, "gift", f"هدیه گروهی: +{add_volume_gb:g} گیگ / +{add_days} روز")
@@ -8428,7 +8442,8 @@ class Database:
             if not row:
                 return False
             cur = conn.execute(
-                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? "
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=?, "
+                "renewal_reminder_sent=0, volume_reminder_sent=0 "
                 "WHERE id=? AND user_id=? AND status='active'",
                 (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
             )
@@ -8442,7 +8457,8 @@ class Database:
             if not row:
                 return False
             cur = conn.execute(
-                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? "
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=?, "
+                "renewal_reminder_sent=0, volume_reminder_sent=0 "
                 "WHERE id=? AND user_id=? AND status='active'",
                 (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
             )
@@ -8483,7 +8499,8 @@ class Database:
             if not row:
                 return False
             cur = conn.execute(
-                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=? WHERE id=? AND user_id=? AND status='active'",
+                "UPDATE custom_configs SET panel_server_id=?, username=?, subscription_url=?, volume_gb=?, expires_at=?, "
+                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=? AND user_id=? AND status='active'",
                 (row["new_panel_server_id"], new_username, subscription_url, int(new_volume_gb), new_expires_at, custom_config_id, row["user_id"]),
             )
             if cur.rowcount != 1:
