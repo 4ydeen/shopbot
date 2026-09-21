@@ -4763,6 +4763,7 @@ class PanelServerXuiConfigBody(BaseModel):
 
 
 def _panel_server_public(s, health=None) -> dict:
+    h = (health or {}).get(s["id"])
     is_sub_base_type = s["panel_type"] in SUB_BASE_URL_PANEL_TYPES
     xui_inbound_ids = parse_xui_inbound_ids(s) if s["panel_type"] in INBOUND_SELECT_PANEL_TYPES else []
     if is_sub_base_type:

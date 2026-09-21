@@ -59,8 +59,8 @@ def verify_session_token(secret_key: str, token: str):
     if not token or "." not in token:
         return None
     body, _, sig = token.partition(".")
-    expected_sig = hmac.new(secret_key.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected_sig, sig):
+    expected_sig = hmac.new(secret_key.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig.encode("utf-8"), sig.encode("utf-8")):
         return None
     try:
         payload = json.loads(_b64url_decode(body))
