@@ -34,7 +34,7 @@ def validate_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
-    if not hmac.compare_digest(computed_hash, received_hash):
+    if not hmac.compare_digest(computed_hash.encode("utf-8"), received_hash.encode("utf-8")):
         logger.warning(
             "عدم تطابق هش initData. token_used=...%s computed=%s received=%s data_check_string=%r",
             bot_token[-6:], computed_hash, received_hash, data_check_string,

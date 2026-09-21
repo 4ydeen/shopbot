@@ -866,7 +866,7 @@ async def api_custom_config_renew_full(custom_config_id: int, body: RenewFullBod
     wallet_credit = db.get_wallet_credit(tg_id)
     wallet_used = min(wallet_credit, price)
     if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
+        wallet_used = db.deduct_wallet_credit(tg_id, wallet_used)
 
     order_id = db.create_renewal_order(
         tg_id, "custom", cc["id"], "full", add_volume, add_days, price, wallet_used,
@@ -1067,7 +1067,7 @@ async def api_create_custom_config(body: CustomConfigPurchase, auth=Depends(requ
     wallet_credit = db.get_wallet_credit(tg_id) if wallet_allowed else 0
     wallet_used = min(wallet_credit, price)
     if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
+        wallet_used = db.deduct_wallet_credit(tg_id, wallet_used)
 
     order_id = db.create_custom_config_order(
         tg_id, body.volume_gb, username, server["id"], base_price=price, wallet_used=wallet_used,
@@ -1775,7 +1775,7 @@ async def api_create_order(body: OrderCreate, auth=Depends(require_joined)):
     if discount_code_id and not db.claim_discount_use(discount_code_id, tg_id):
         raise HTTPException(status_code=400, detail="این کد تخفیف دیگر برای شما قابل استفاده نیست.")
     if wallet_used > 0:
-        db.add_wallet_credit(tg_id, -wallet_used)
+        wallet_used = db.deduct_wallet_credit(tg_id, wallet_used)
 
     order_id = db.create_order(
         tg_id, body.product_id, base_price=total_price,
