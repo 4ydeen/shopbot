@@ -290,14 +290,19 @@ async def check_and_process_auto_renewals(bot, db) -> int:
         server = await _db(db.get_panel_server, row["panel_server_id"]) if row["panel_server_id"] else None
         if not server or not server["is_active"]:
             continue
+        if not await _db(db.deduct_wallet_credit, user_id, price, True):
+            continue
         try:
             provider = get_provider(server)
             await provider.update_user(row["username"], add_volume_gb=volume_gb, add_days=duration_days, reset_usage=True)
         except PanelError:
             logger.exception("تمدید خودکار روی پنل برای کانفیگ «%s» ناموفق بود.", row["username"])
+            await _db(db.add_wallet_credit, user_id, price)
             continue
+        except Exception:
+            await _db(db.add_wallet_credit, user_id, price)
+            raise
 
-        await _db(db.add_wallet_credit, user_id, -price)
         await _db(db.apply_custom_config_renewal, row["id"], add_volume_gb=0, add_days=duration_days, full_reset=True)
         await _db(
             db.add_custom_config_history,

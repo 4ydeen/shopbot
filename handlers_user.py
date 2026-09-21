@@ -1119,7 +1119,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await call.answer("این کد تخفیف دیگر برای شما قابل استفاده نیست. دوباره تلاش کنید.", show_alert=True)
                 return
         if wallet_used > 0:
-            (await asyncio.to_thread(db.add_wallet_credit, call.from_user.id, -wallet_used))
+            wallet_used = await asyncio.to_thread(db.deduct_wallet_credit, call.from_user.id, wallet_used)
 
         order_id = (await asyncio.to_thread(db.create_order, 
             call.from_user.id,
@@ -1866,7 +1866,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
 
         if wallet_used > 0:
-            (await asyncio.to_thread(db.add_wallet_credit, message.from_user.id, -wallet_used))
+            wallet_used = await asyncio.to_thread(db.deduct_wallet_credit, message.from_user.id, wallet_used)
 
         order_id = (await asyncio.to_thread(db.create_custom_config_order, 
             message.from_user.id, volume_gb, username, server["id"],
@@ -3761,7 +3761,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, user_tg_id))
         wallet_used = min(wallet_credit, price)
         if wallet_used > 0:
-            (await asyncio.to_thread(db.add_wallet_credit, user_tg_id, -wallet_used))
+            wallet_used = await asyncio.to_thread(db.deduct_wallet_credit, user_tg_id, wallet_used)
 
         order_id = (await asyncio.to_thread(
             db.create_renewal_order, user_tg_id, target_kind, target_id, mode,
@@ -6199,13 +6199,20 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             )
             return
 
-        order_id = await asyncio.to_thread(
-            db.create_order, user_id, product_id,
-            base_price=total_price, wallet_used=total_price,
-            discount_code_id=None, discount_amount=0, quantity=quantity,
-            tier_discount_amount=tier_info["amount"],
-        )
-        await asyncio.to_thread(db.add_wallet_credit, user_id, -total_price)
+        deducted = await asyncio.to_thread(db.deduct_wallet_credit, user_id, total_price, True)
+        if not deducted:
+            await message.answer("⛔️ موجودی کیف پول برای این خرید کافی نیست.")
+            return
+        try:
+            order_id = await asyncio.to_thread(
+                db.create_order, user_id, product_id,
+                base_price=total_price, wallet_used=total_price,
+                discount_code_id=None, discount_amount=0, quantity=quantity,
+                tier_discount_amount=tier_info["amount"],
+            )
+        except Exception:
+            await asyncio.to_thread(db.add_wallet_credit, user_id, total_price)
+            raise
         order = await asyncio.to_thread(db.get_order, order_id)
 
         try:

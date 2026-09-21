@@ -3571,6 +3571,7 @@ class Database:
 
     def take_unused_config(self, product_id: int, user_tg_id: int):
         with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id LIMIT 1",
                 (product_id,),
@@ -3583,17 +3584,20 @@ class Database:
             duration_days = (prod["duration_days"] if prod and prod["duration_days"] else 30)
             now = datetime.utcnow()
             expires_at = (now + timedelta(days=duration_days)).isoformat()
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
+                "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=? AND is_used=0",
                 (user_tg_id, now.isoformat(), expires_at, row["id"]),
             )
+            if cur.rowcount != 1:
+                return None
             return {"id": row["id"], "link": row["link"], "expires_at": expires_at}
 
     def take_unused_configs(self, product_id: int, user_tg_id: int, quantity: int = 1):
         """مثل take_unused_config ولی چند کانفیگ را یکجا برمی‌دارد. اگر موجودی کافی
         نباشد، هیچ کانفیگی مصرف نمی‌شود و None برمی‌گردد."""
         with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT id, link FROM configs WHERE product_id=? AND is_used=0 ORDER BY id LIMIT ?",
                 (product_id, quantity),
@@ -3608,11 +3612,14 @@ class Database:
             expires_at = (now + timedelta(days=duration_days)).isoformat()
             results = []
             for row in rows:
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE configs SET is_used=1, assigned_user_id=?, assigned_at=?, expires_at=?, "
-                    "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=?",
+                    "renewal_reminder_sent=0, volume_reminder_sent=0 WHERE id=? AND is_used=0",
                     (user_tg_id, now.isoformat(), expires_at, row["id"]),
                 )
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    return None
                 results.append({"id": row["id"], "link": row["link"], "expires_at": expires_at})
             return results
 
@@ -4811,6 +4818,7 @@ class Database:
             )
 
     def get_inline_reseller_stats(self, owner_tg_id: int) -> dict:
+        default_percent = int(self.get_setting("reseller_inline_commission_percent", "10") or 0)
         with self._get_conn() as conn:
             customers = conn.execute(
                 "SELECT COUNT(*) c FROM users WHERE owner_reseller_id=?", (owner_tg_id,)
@@ -4824,9 +4832,7 @@ class Database:
                 "SELECT inline_reseller_commission_percent FROM users WHERE telegram_id=?", (owner_tg_id,)
             ).fetchone()
             own_percent = prow["inline_reseller_commission_percent"] if prow else None
-            percent = int(own_percent) if own_percent is not None else int(
-                self.get_setting("reseller_inline_commission_percent", "10") or 0
-            )
+            percent = int(own_percent) if own_percent is not None else default_percent
             return {
                 "customers": customers, "paid_orders": row["cnt"], "total_commission": row["total"],
                 "percent": percent,
@@ -4880,6 +4886,25 @@ class Database:
                 "UPDATE users SET referral_credit = MAX(referral_credit + ?, 0) WHERE telegram_id=?",
                 (delta, user_tg_id),
             )
+
+    def deduct_wallet_credit(self, user_tg_id: int, amount: int, exact: bool = False) -> int:
+        """کسر اتمیک از کیف پول؛ مقدار واقعاً کسرشده را برمی‌گرداند (در حالت exact اگر موجودی کم باشد ۰)."""
+        amount = int(amount)
+        if amount <= 0:
+            return 0
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT COALESCE(referral_credit, 0) AS c FROM users WHERE telegram_id=?", (user_tg_id,)
+            ).fetchone()
+            balance = int(row["c"]) if row else 0
+            take = amount if balance >= amount else (0 if exact else balance)
+            if take > 0:
+                conn.execute(
+                    "UPDATE users SET referral_credit = referral_credit - ? WHERE telegram_id=?",
+                    (take, user_tg_id),
+                )
+            return take
 
     @staticmethod
     def _wallet_gift_code_hash(code: str) -> str:

@@ -27,7 +27,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
 import keyboards as kb
 from database import Database, MENU_BUTTON_META
-from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL
+from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL, BOT_TOKEN
 from config_delivery import deliver_config_to_user
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock

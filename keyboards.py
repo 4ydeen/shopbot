@@ -3322,7 +3322,6 @@ def resellers_kb(resellers) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(text="تغییر وضعیت", callback_data=f"adm_resbot_toggle:{r['id']}"),
-                InlineKeyboardButton(text="🔁 تغییر سطح", callback_data=f"adm_resbot_level:{r['id']}"),
                 InlineKeyboardButton(text="🗑حذف", callback_data=f"adm_resbot_del:{r['id']}"),
             ]
         )
