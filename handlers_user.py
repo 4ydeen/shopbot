@@ -1200,8 +1200,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
     async def _check_order_receipt_with_ai(bot: Bot, order_id: int, order: dict, file_id: str, receipt_type: str, message: Message = None):
         """رسید ارسالی برای یک سفارش را از نظر تکراری‌بودن/دستکاری با AI بررسی
-        می‌کند و نتیجه را روی خود سفارش هم ذخیره می‌کند. هرگز چیزی را رد
-        نمی‌کند - فقط note/available برمی‌گرداند تا در پیام ادمین دیده شود."""
+        می‌کند و نتیجه را روی خود سفارش هم ذخیره می‌کند. معمولاً چیزی را خودش
+        رد نمی‌کند - فقط note/available برمی‌گرداند تا در پیام ادمین دیده شود؛
+        فقط وقتی رسید بسیار مشکوک باشد (و تنظیم رد خودکار روشن باشد)
+        result["reject"]=True برمی‌گردد و caller مسئول رد کردن سفارش است."""
         try:
             card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
             card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
@@ -1214,11 +1216,30 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             )
         except Exception as exc:
             logging.getLogger("handlers_user").warning("receipt_ai_check برای سفارش #%s خطا داد: %s", order_id, exc)
-            return {"note": None, "available": False}
+            return {"note": None, "available": False, "reject": False, "reject_reason": None}
         (await asyncio.to_thread(db.set_order_receipt_ai_note, order_id, result["note"]))
         return result
 
-    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo", ai_note: str = None, ai_available: bool = True):
+    async def _reject_order_by_ai(bot: Bot, order_id: int, order: dict, file_id: str, receipt_type: str, ai_result: dict) -> bool:
+        """وقتی check_receipt یک سفارش را بسیار مشکوک تشخیص داده (ai_result["reject"]
+        روشن است)، همین‌جا خودِ سفارش را رد می‌کند، به ادمین‌ها فقط جهت اطلاع
+        (بدون دکمه‌ی تایید/رد) گزارش می‌دهد و به کاربر پیام رد رسید را می‌فرستد.
+        اگر سفارش قبلاً از حالت pending خارج شده باشد (مثلاً هم‌زمان توسط ادمین
+        بررسی شده)، کاری نمی‌کند و False برمی‌گرداند تا جریان عادی ادامه یابد."""
+        if not (await asyncio.to_thread(db.reject_order, order_id)):
+            return False
+        (await asyncio.to_thread(
+            db.log_admin_action, 0, "order_ai_auto_reject",
+            f"سفارش #{order_id} | کاربر {order['user_id']} | دلیل: {ai_result.get('reject_reason') or ''}",
+        ))
+        rejected_note = "🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n" + (ai_result.get("reject_reason") or "")
+        await _notify_admins_of_order(
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
+            ai_rejected_note=rejected_note,
+        )
+        return True
+
+    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo", ai_note: str = None, ai_available: bool = True, ai_rejected_note: str = None):
         order = (await asyncio.to_thread(db.get_order, order_id))
 
         if order["is_custom_config"]:
@@ -1240,7 +1261,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
             already_approved = order["status"] != "pending"
             reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
-            if already_approved:
+            if ai_rejected_note:
+                caption += "\n\n" + ai_rejected_note
+            elif already_approved:
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ ساخته شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
@@ -1293,7 +1316,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
             already_approved = order["status"] != "pending"
             reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
-            if already_approved:
+            if ai_rejected_note:
+                caption += "\n\n" + ai_rejected_note
+            elif already_approved:
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و سرویس تمدید شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
@@ -1344,7 +1369,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # این پیام فقط جهت اطلاع ادمین است و نیازی به دکمه تایید/رد ندارد.
         already_approved = order["status"] != "pending"
         reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
-        if already_approved:
+        if ai_rejected_note:
+            caption += "\n\n" + ai_rejected_note
+        elif already_approved:
             caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ برای کاربر ارسال شد (پرداخت کامل از کیف پول/کد تخفیف)."
 
         if not receipt_file_id and not already_approved:
@@ -2067,6 +2094,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
         ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
 
+        if ai_result.get("reject") and (await _reject_order_by_ai(bot, order_id, order, file_id, receipt_type, ai_result)):
+            await message.answer(
+                db.get_text('handlers_user.auto_receipt_ai_rejected', '❌ متاسفانه رسید ارسالی شما رد شد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.'),
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            await _send_inline_main_menu(message, message.from_user.id)
+            await state.clear()
+            return
+
         await _notify_admins_of_order(
             bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
             ai_note=ai_result["note"], ai_available=ai_result["available"],
@@ -2663,6 +2699,16 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
         ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
+
+        if ai_result.get("reject") and (await _reject_order_by_ai(bot, order_id, order, file_id, receipt_type, ai_result)):
+            await message.answer(
+                db.get_text('handlers_user.auto_receipt_ai_rejected', '❌ متاسفانه رسید ارسالی شما رد شد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.'),
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            await _send_inline_main_menu(message, message.from_user.id)
+            await state.clear()
+            return
+
         await _notify_admins_of_order(
             bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
             ai_note=ai_result["note"], ai_available=ai_result["available"],
@@ -5038,6 +5084,16 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
         ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
+
+        if ai_result.get("reject") and (await _reject_order_by_ai(bot, order_id, order, file_id, receipt_type, ai_result)):
+            await message.answer(
+                db.get_text('handlers_user.auto_receipt_ai_rejected', '❌ متاسفانه رسید ارسالی شما رد شد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.'),
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            await _send_inline_main_menu(message, message.from_user.id)
+            await state.clear()
+            return
+
         await _notify_admins_of_order(
             bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
             ai_note=ai_result["note"], ai_available=ai_result["available"],
@@ -5730,7 +5786,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             )
         except Exception as exc:
             logging.getLogger("handlers_user").warning("receipt_ai_check برای شارژ #%s خطا داد: %s", topup_id, exc)
-            ai_result = {"note": None, "available": False}
+            ai_result = {"note": None, "available": False, "reject": False, "reject_reason": None}
         (await asyncio.to_thread(db.set_topup_receipt_ai_note, topup_id, ai_result["note"]))
 
         user_row = (await asyncio.to_thread(db.get_user, message.from_user.id))
@@ -5740,6 +5796,32 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 آیدی عددی: {message.from_user.id}\n"
             f"💰 مبلغ: {amount:,} تومان"
         )
+
+        if ai_result.get("reject") and (await asyncio.to_thread(db.reject_topup, topup_id)):
+            (await asyncio.to_thread(
+                db.log_admin_action, 0, "topup_ai_auto_reject",
+                f"شارژ #{topup_id} | کاربر {message.from_user.id} | مبلغ: {amount:,} | دلیل: {ai_result.get('reject_reason') or ''}",
+            ))
+            rejected_caption = caption + (
+                "\n\n🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n"
+                + (ai_result.get("reject_reason") or "")
+            )
+            if not await _report_topup_to_group(bot, topup_id, file_id, receipt_type, rejected_caption, kb.user_quick_actions_kb(message.from_user.id)):
+                for admin_id in (await asyncio.to_thread(db.list_admins)):
+                    factory = lambda aid=admin_id: _send_receipt_to_admin(
+                        bot, aid, file_id, receipt_type, rejected_caption, kb.user_quick_actions_kb(message.from_user.id)
+                    )
+                    sent = await _send_admin_notification(bot, admin_id, factory, "شارژ کیف پول", topup_id)
+                    if sent:
+                        (await asyncio.to_thread(db.set_topup_admin_message, topup_id, admin_id, sent.message_id))
+            await message.answer(
+                db.get_text('handlers_user.auto_receipt_ai_rejected', '❌ متاسفانه رسید ارسالی شما رد شد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.'),
+                reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+            )
+            await _send_inline_main_menu(message, message.from_user.id)
+            await state.clear()
+            return
+
         # قابلیت ۸۵: شماره کارتی که هنگام واریز به کاربر نشان داده شده بود، برای
         # تطبیق مدیر با صورتحساب بانکی، به گزارش اضافه می‌شود.
         caption += "\n\n" + (await _admin_card_hint_line())

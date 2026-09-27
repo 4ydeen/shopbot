@@ -893,15 +893,27 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
     card_number = db.get_setting("card_number") or "-"
     card_holder = db.get_setting("card_holder") or "-"
     enabled = db.get_setting("card_to_card_enabled", "1") == "1"
+    ai_check_enabled = db.get_setting("receipt_ai_check_enabled", "1") == "1"
+    ai_auto_reject_enabled = db.get_setting("receipt_ai_auto_reject_enabled", "1") == "1"
     toggle_text = "🔴 غیرفعال کردن پرداخت کارت‌به‌کارت" if enabled else "🟢 فعال کردن پرداخت کارت‌به‌کارت"
+    ai_toggle_text = "🔴 خاموش کردن بررسی هوشمند رسید" if ai_check_enabled else "🟢 روشن کردن بررسی هوشمند رسید"
+    ai_reject_toggle_text = "🔴 غیرفعال کردن رد خودکار رسید بسیار مشکوک" if ai_auto_reject_enabled else "🟢 فعال کردن رد خودکار رسید بسیار مشکوک"
     rows = [
         [InlineKeyboardButton(text=tr(f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"💳 شماره کارت: {card_number}"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"👤 به نام: {card_holder}"), callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_card_toggle")],
         [InlineKeyboardButton(text=tr("✏️ تغییر شماره کارت / صاحب حساب"), callback_data="adm_set_card_edit")],
-        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")],
+        [InlineKeyboardButton(text=tr(f"🤖 بررسی هوشمند رسید (AI): {'🟢 روشن' if ai_check_enabled else '🔴 خاموش'}"), callback_data="noop")],
+        [InlineKeyboardButton(text=tr(ai_toggle_text), callback_data="adm_receipt_ai_toggle")],
     ]
+    if ai_check_enabled:
+        rows.append([InlineKeyboardButton(
+            text=tr(f"⛔️ رد خودکار رسید بسیار مشکوک: {'🟢 روشن' if ai_auto_reject_enabled else '🔴 خاموش'}"),
+            callback_data="noop",
+        )])
+        rows.append([InlineKeyboardButton(text=tr(ai_reject_toggle_text), callback_data="adm_receipt_ai_reject_toggle")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

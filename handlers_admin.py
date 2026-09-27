@@ -9285,6 +9285,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
         await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
 
+    @router.callback_query(F.data == "adm_receipt_ai_toggle")
+    async def cb_admin_receipt_ai_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "receipt_ai_check_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "receipt_ai_check_enabled", "0" if current == "1" else "1"))
+        await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
+        await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
+
+    @router.callback_query(F.data == "adm_receipt_ai_reject_toggle")
+    async def cb_admin_receipt_ai_reject_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "receipt_ai_auto_reject_enabled", "1"))
+        (await asyncio.to_thread(db.set_setting, "receipt_ai_auto_reject_enabled", "0" if current == "1" else "1"))
+        await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
+        await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
+
     @router.callback_query(F.data == "adm_set_card_edit")
     async def cb_admin_set_card_edit(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id):

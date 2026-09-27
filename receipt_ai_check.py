@@ -15,11 +15,23 @@
      چندوجهیِ پیکربندی‌شده در پروژه است. مبلغ/کارت مقصد داخل عکس با فاکتور
      تطبیق داده می‌شود و نشانه‌های دستکاری بصری بررسی می‌شوند.
 
-طبق تصمیم صریح مدیر پروژه: این ماژول هرگز خودش سفارشی را رد نمی‌کند - فقط یک
-یادداشت هشدار کوتاه فارسی برمی‌گرداند که به پیام ادمین اضافه می‌شود؛ تصمیم
-نهایی همیشه دست ادمین است. اگر سرویس AI در دسترس نبود/خطا داد (یا اصلاً کلیدی
-تنظیم نشده)، available=False برمی‌گردد تا پیام ادمین به‌جای ساکت‌ماندن، صریحاً
-بگوید بررسی AI انجام نشد - نه اینکه به‌اشتباه به‌نظر برسد رسید «تایید» شده.
+این ماژول به‌طور پیش‌فرض هرگز خودش سفارشی را رد نمی‌کند - فقط یک یادداشت
+هشدار کوتاه فارسی برمی‌گرداند که به پیام ادمین اضافه می‌شود؛ تصمیم نهایی دست
+ادمین است. اگر سرویس AI در دسترس نبود/خطا داد (یا اصلاً کلیدی تنظیم نشده)،
+available=False برمی‌گردد تا پیام ادمین به‌جای ساکت‌ماندن، صریحاً بگوید بررسی
+AI انجام نشد - نه اینکه به‌اشتباه به‌نظر برسد رسید «تایید» شده.
+
+۳) رد خودکار رسید بسیار مشکوک: اگر تنظیم "receipt_ai_auto_reject_enabled"
+   روشن باشد (پیش‌فرض روشن)، دو حالت به‌صورت خودکار سفارش/شارژ را رد می‌کنند
+   (بدون نیاز به تایید ادمین) و به کاربر پیام می‌دهند که رسیدش رد شده و با
+   پشتیبانی تماس بگیرد: یکی رسید تکراری/ری‌یوزشده (قطعیت کامل، بدون نیاز به
+   AI)، دیگری وقتی مدل تصویری رسید را "suspicious" با درجه اطمینان "high"
+   تشخیص دهد (یعنی مدل تقریباً مطمئن است رسید جعلی/دستکاری‌شده یا کاملاً با
+   فاکتور مغایر است - نه فقط یک ابهام جزئی). خروجی check_receipt در این
+   حالت‌ها reject=True و reject_reason را هم برمی‌گرداند. با خاموش‌کردن این
+   تنظیم، رفتار قبلی (فقط هشدار به ادمین، بدون رد خودکار) برقرار می‌ماند.
+   کل قابلیت بررسی AI هم با تنظیم "receipt_ai_check_enabled" کاملاً
+   قابل خاموش/روشن شدن است.
 """
 
 import asyncio
@@ -45,8 +57,20 @@ _PROMPT = """شما دستیار تشخیص تقلب در رسیدهای بان�
 - آیا تاریخ/ساعت تراکنش داخل رسید منطقی و معقول به‌نظر می‌رسد (نه خیلی قدیمی نسبت به الان)؟
 
 فقط یک JSON خام و بدون هیچ توضیح اضافه یا Markdown، دقیقاً با این فرمت برگردان:
-{{"suspicious": true/false, "reasons": ["دلیل کوتاه فارسی", ...]}}
-اگر چیز غیرعادی ندیدی: {{"suspicious": false, "reasons": []}}"""
+{{"suspicious": true/false, "confidence": "low"/"high", "reasons": ["دلیل کوتاه فارسی", ...]}}
+
+راهنمای فیلد confidence - خیلی مهم، محتاط باش:
+- "high" را فقط وقتی بگذار که تقریباً مطمئنی رسید جعلی/دستکاری‌شده است، یا
+  مبلغ/شماره کارت به‌طور کامل و آشکار با مقادیر بالا مغایرت دارد (نه صرفاً
+  چند رقم آخر ناخوانا یا کیفیت پایین عکس). وقتی suspicious=true و
+  confidence="high" باشد، این رسید به‌صورت کاملاً خودکار و بدون هیچ بررسی
+  انسانی رد خواهد شد - پس این مقدار را فقط در موارد کاملاً واضح و بدون شک
+  انتخاب کن.
+- در هر حالت نامطمئن، مبهم، یا با شواهد ضعیف (کیفیت پایین عکس، فونت کمی
+  متفاوت، عدم قطعیت در تطبیق چند رقم کارت، زاویه/نور بد) حتماً "low" بگذار -
+  این موارد فقط به‌صورت هشدار به ادمین نمایش داده می‌شود و تصمیم نهایی با
+  خود ادمین می‌ماند.
+اگر چیز غیرعادی ندیدی: {{"suspicious": false, "confidence": "low", "reasons": []}}"""
 
 
 def _hash_bytes(data: bytes) -> str:
@@ -76,12 +100,16 @@ def _parse_verdict(text: str) -> dict:
             text = text[4:]
     try:
         data = json.loads(text)
+        confidence = str(data.get("confidence") or "low").strip().lower()
+        if confidence not in ("low", "high"):
+            confidence = "low"
         return {
             "suspicious": bool(data.get("suspicious")),
+            "confidence": confidence,
             "reasons": [str(r).strip() for r in (data.get("reasons") or []) if str(r).strip()],
         }
     except Exception:
-        return {"suspicious": False, "reasons": []}
+        return {"suspicious": False, "confidence": "low", "reasons": []}
 
 
 async def _run_vision_check(db, image_bytes: bytes, mime_type: str, amount_toman, card_number, card_holder) -> dict:
@@ -134,20 +162,29 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
     ref_kind/ref_id: نوع و شناسه‌ی رکوردی که این رسید برایش ارسال شده - مثلاً
     ("order", 123) یا ("topup", 45) - برای تشخیص رسید تکراری بین انواع مختلف.
 
-    خروجی: {"note": str|None, "available": bool}
+    خروجی: {"note": str|None, "available": bool, "reject": bool, "reject_reason": str|None}
     - note: متن هشدار کوتاه فارسی برای اضافه‌شدن به پیام ادمین (None یعنی
       چیز مشکوکی پیدا نشد).
     - available: آیا بررسی AI واقعاً انجام شد یا نه. چک رسید تکراری همیشه
       مستقل از این انجام می‌شود و در صورت پیدا شدن، در note لحاظ می‌شود -
-      even اگر available=False باشد."""
+      even اگر available=False باشد.
+    - reject: آیا این رسید آنقدر مشکوک بود که باید به‌صورت خودکار (بدون
+      بررسی ادمین) رد شود. فقط وقتی True می‌شود که تنظیم
+      "receipt_ai_auto_reject_enabled" روشن باشد و یا رسید عیناً تکراری/
+      ری‌یوزشده باشد، یا مدل تصویری با اطمینان "high" مشکوک تشخیص داده باشد.
+    - reject_reason: دلیل(های) کوتاه فارسیِ همان رد خودکار (زیرمجموعه‌ای از
+      note)، برای نمایش به کاربر/ادمین."""
     reasons = []
+    reject_reasons = []
     available = True
 
     try:
         image_bytes = await _download(bot, file_id)
     except Exception as exc:
         _log.warning("receipt_ai_check: دانلود فایل رسید ناموفق بود: %s", exc)
-        return {"note": None, "available": False}
+        return {"note": None, "available": False, "reject": False, "reject_reason": None}
+
+    auto_reject_enabled = (await asyncio.to_thread(db.get_setting, "receipt_ai_auto_reject_enabled", "1")) != "0"
 
     file_hash = _hash_bytes(image_bytes)
     try:
@@ -155,7 +192,10 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
         await asyncio.to_thread(db.record_receipt_hash, file_hash, ref_kind, ref_id)
         if dup:
             other_kind = "سفارش" if dup["ref_kind"] == "order" else "شارژ کیف پول"
-            reasons.append(f"⛔️ این عکس رسید دقیقاً قبلاً هم برای {other_kind} #{dup['ref_id']} ارسال شده بود (رسید تکراری/ری‌یوز شده)")
+            dup_reason = f"⛔️ این عکس رسید دقیقاً قبلاً هم برای {other_kind} #{dup['ref_id']} ارسال شده بود (رسید تکراری/ری‌یوز شده)"
+            reasons.append(dup_reason)
+            if auto_reject_enabled:
+                reject_reasons.append(dup_reason)
     except Exception as exc:
         _log.warning("receipt_ai_check: بررسی رسید تکراری خطا داد: %s", exc)
 
@@ -167,9 +207,17 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
         try:
             verdict = await _run_vision_check(db, image_bytes, mime_type, amount_toman, card_number, card_holder)
             if verdict.get("suspicious") and verdict.get("reasons"):
-                reasons.append("🤖 هشدار هوش مصنوعی: " + "؛ ".join(verdict["reasons"]))
+                note = "🤖 هشدار هوش مصنوعی: " + "؛ ".join(verdict["reasons"])
+                reasons.append(note)
+                if auto_reject_enabled and verdict.get("confidence") == "high":
+                    reject_reasons.append(note)
         except Exception as exc:
             _log.warning("receipt_ai_check: بررسی AI ناموفق بود: %s", exc)
             available = False
 
-    return {"note": "\n".join(reasons) if reasons else None, "available": available}
+    return {
+        "note": "\n".join(reasons) if reasons else None,
+        "available": available,
+        "reject": bool(reject_reasons),
+        "reject_reason": "\n".join(reject_reasons) if reject_reasons else None,
+    }
