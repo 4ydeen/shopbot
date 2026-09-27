@@ -2783,17 +2783,28 @@ def api_user_detail(tg_id: int, admin=Depends(get_current_admin)):
     }
 
 
+async def _notify_block_change_from_web(tg_id: int, blocked: bool, actor_label: str) -> None:
+    try:
+        user_row = await asyncio.to_thread(db.get_user, tg_id)
+        text = report_router.build_block_toggle_text(user_row, tg_id, blocked, actor_label)
+        await report_router.send_raw_to_group(_bot_token(), db, "security", text)
+    except Exception:
+        logger.warning("ارسال کارت بلاک/آنبلاک (پنل وب) به گروه گزارش ناموفق بود.", exc_info=True)
+
+
 @app.post("/api/users/{tg_id}/block")
-def api_block_user(tg_id: int, admin=Depends(require_permission("users"))):
+async def api_block_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, True)
     db.log_admin_action(admin["id"], "user_block", f"کاربر {tg_id} مسدود شد (پنل وب - {admin['username']})", "user", tg_id)
+    await _notify_block_change_from_web(tg_id, True, f"{admin['username']} (پنل وب)")
     return {"ok": True}
 
 
 @app.post("/api/users/{tg_id}/unblock")
-def api_unblock_user(tg_id: int, admin=Depends(require_permission("users"))):
+async def api_unblock_user(tg_id: int, admin=Depends(require_permission("users"))):
     db.set_user_blocked(tg_id, False)
     db.log_admin_action(admin["id"], "user_unblock", f"کاربر {tg_id} رفع مسدودیت شد (پنل وب - {admin['username']})", "user", tg_id)
+    await _notify_block_change_from_web(tg_id, False, f"{admin['username']} (پنل وب)")
     return {"ok": True}
 
 
