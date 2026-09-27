@@ -473,6 +473,14 @@ class DatabaseBase:
                     PRIMARY KEY (chat_id, topic_key)
                 );
 
+                CREATE TABLE IF NOT EXISTS report_topic_labels (
+                    chat_id INTEGER NOT NULL,
+                    topic_key TEXT NOT NULL,
+                    custom_name TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (chat_id, topic_key)
+                );
+
                 CREATE TABLE IF NOT EXISTS wallet_topups (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,

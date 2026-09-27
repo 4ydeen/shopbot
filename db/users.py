@@ -160,6 +160,30 @@ class UsersMixin:
             return "expired" if has_any else "none"
 
 
+    def get_user_purchase_summary(self, tg_id: int) -> dict:
+        """قابلیت گسترش گروه گزارش (فاز ۳): برای نمایش سابقه‌ی خرید کاربر روی
+        کارت سفارش در گروه - تعداد و جمع مبلغ سفارش‌های تاییدشده‌ی قبلی و
+        تعداد سرویس فعال فعلی (هم از بانک کانفیگ محصولات، هم کانفیگ شخصی)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) c, COALESCE(SUM(final_price),0) s FROM orders "
+                "WHERE user_id=? AND status='approved'",
+                (tg_id,),
+            ).fetchone()
+            active_services = conn.execute(
+                "SELECT ("
+                "(SELECT COUNT(*) FROM configs WHERE assigned_user_id=? AND is_disabled=0) + "
+                "(SELECT COUNT(*) FROM custom_configs WHERE user_id=? AND status='active')"
+                ") c",
+                (tg_id, tg_id),
+            ).fetchone()["c"]
+            return {
+                "total_orders": row["c"],
+                "total_spent": row["s"],
+                "active_services": active_services,
+            }
+
+
     def get_user_full_history(self, tg_id: int):
         """تاریخچه‌ی کامل یک کاربر: سفارش‌ها (با نام محصول و لینک کانفیگ) + شارژهای کیف‌پول."""
         with self._get_conn() as conn:

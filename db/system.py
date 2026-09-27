@@ -852,12 +852,81 @@ class SystemMixin:
                 "COUNT(*) c FROM orders o WHERE o.status='approved' AND date(o.created_at)=? "
                 "GROUP BY hour ORDER BY c DESC LIMIT 1", (day,),
             ).fetchone()
+
+            # قابلیت فاز ۵: تعداد رفرال جدید امروز (کاربرانی که امروز از طریق
+            # یک معرف عضو شده‌اند - نه لزوماً کسانی که امروز خرید کرده‌اند).
+            referral_new_count = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE date(joined_at)=? AND referred_by IS NOT NULL", (day,),
+            ).fetchone()["c"]
+
+            # قابلیت فاز ۵: نرخ تبدیل ثبت‌نام→خرید همان روز - از کاربرانی که
+            # امروز عضو شده‌اند، چند درصد همان روز حداقل یک خرید تاییدشده داشته‌اند.
+            signup_today = conn.execute(
+                "SELECT COUNT(*) c FROM users WHERE date(joined_at)=?", (day,),
+            ).fetchone()["c"]
+            signup_today_purchased = conn.execute(
+                "SELECT COUNT(DISTINCT o.user_id) c FROM orders o JOIN users u ON u.telegram_id=o.user_id "
+                "WHERE o.status='approved' AND date(u.joined_at)=? AND date(o.created_at)=?", (day, day),
+            ).fetchone()["c"]
+            signup_purchase_conversion_pct = (
+                round(signup_today_purchased / signup_today * 100, 1) if signup_today else None
+            )
+
+            # قابلیت فاز ۵: تفکیک فروش تاییدشده‌ی امروز بر اساس روش پرداخت - با
+            # بررسی وجود سفارش در جدول فاکتور هر درگاه (kind='order').
+            # اگر سفارشی رسید کارت‌به‌کارت داشته ولی در جدول تطبیق خودکار
+            # card_to_card_invoices نباشد، یعنی از مسیر قدیمی/دستی (عکس رسید
+            # تایید شده توسط ادمین) پرداخت شده - جدا از تطبیق خودکار پیامکی شمرده می‌شود.
+            payment_rows = conn.execute(
+                "SELECT o.id oid, o.receipt_file_id has_receipt, "
+                "(SELECT 1 FROM card_to_card_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) c2c_auto, "
+                "(SELECT 1 FROM abangateway_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) aban, "
+                "(SELECT 1 FROM blupal_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) blupal, "
+                "(SELECT 1 FROM noapay_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) noapay, "
+                "(SELECT 1 FROM crypto_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) crypto, "
+                "(SELECT 1 FROM custom_gateway_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) custom_gw, "
+                "(SELECT 1 FROM extra_gateway_invoices i WHERE i.kind='order' AND i.ref_id=o.id LIMIT 1) extra_gw, "
+                "COALESCE(o.final_price, p.price) revenue "
+                "FROM orders o JOIN products p ON o.product_id=p.id "
+                "WHERE o.status='approved' AND date(o.created_at)=?", (day,),
+            ).fetchall()
+            payment_breakdown = {}
+
+            def _bump(label, revenue):
+                entry = payment_breakdown.setdefault(label, {"count": 0, "revenue": 0})
+                entry["count"] += 1
+                entry["revenue"] += revenue or 0
+
+            for r in payment_rows:
+                revenue = r["revenue"] or 0
+                if r["c2c_auto"]:
+                    _bump("💳 کارت‌به‌کارت (خودکار)", revenue)
+                elif r["aban"]:
+                    _bump("🏦 آبان‌گیت‌وی", revenue)
+                elif r["blupal"]:
+                    _bump("🏦 بلوپال", revenue)
+                elif r["noapay"]:
+                    _bump("⭐️ نوآپی (استارز)", revenue)
+                elif r["crypto"]:
+                    _bump("₿ کریپتو (پلیسیو)", revenue)
+                elif r["custom_gw"]:
+                    _bump("🔗 درگاه سفارشی", revenue)
+                elif r["extra_gw"]:
+                    _bump("🔗 درگاه جانبی", revenue)
+                elif r["has_receipt"]:
+                    _bump("🧾 کارت‌به‌کارت (دستی)", revenue)
+                else:
+                    _bump("👛 کیف‌پول/تخفیف", revenue)
         return {
             "topup_count": topup["c"], "topup_amount": topup["s"], "test_count": tests["c"],
             "first_purchase_count": first_purchase["c"],
             "active_users_count": active_users, "inactive_users_count": total_users - active_users,
             "best_hour": best_hour_row["hour"] if best_hour_row else None,
             "best_hour_orders": best_hour_row["c"] if best_hour_row else 0,
+            "referral_new_count": referral_new_count,
+            "signup_purchase_conversion_pct": signup_purchase_conversion_pct,
+            "signup_today_count": signup_today,
+            "payment_breakdown": payment_breakdown,
         }
 
 

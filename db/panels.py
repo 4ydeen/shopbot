@@ -275,6 +275,33 @@ class PanelsMixin:
             conn.execute("DELETE FROM report_topics")
 
 
+    def get_report_topic_labels(self, chat_id: int) -> dict:
+        """نام‌های سفارشی تاپیک‌ها (فاز ۱ گسترش گروه گزارش) که مدیر روی نام
+        پیش‌فرض هر تاپیک override کرده - جدا از thread_id واقعی تلگرام تا حتی
+        قبل از ساخته‌شدن خودِ تاپیک هم قابل تنظیم باشد."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT topic_key, custom_name FROM report_topic_labels WHERE chat_id=?", (chat_id,),
+            ).fetchall()
+        return {r["topic_key"]: r["custom_name"] for r in rows}
+
+
+    def set_report_topic_label(self, chat_id: int, topic_key: str, custom_name: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO report_topic_labels (chat_id, topic_key, custom_name, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(chat_id, topic_key) DO UPDATE SET custom_name=excluded.custom_name, updated_at=excluded.updated_at",
+                (chat_id, topic_key, custom_name, datetime.utcnow().isoformat()),
+            )
+
+
+    def clear_report_topic_label(self, chat_id: int, topic_key: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM report_topic_labels WHERE chat_id=? AND topic_key=?", (chat_id, topic_key),
+            )
+
+
     def get_latest_panel_health_event_id(self) -> int:
         with self._get_conn() as conn:
             row = conn.execute("SELECT MAX(id) m FROM panel_health_events").fetchone()
