@@ -28,6 +28,7 @@ from md_utils import escape_md, escape_html
 import keyboards as kb
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, RenewalDiscountEntry, WalletTopup, WalletGiftCode, WalletTransfer, CoinConvert, CustomConfigFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
 import ai_support
+import receipt_ai_check
 from service_refund import (
     quote_service_refund, refund_quote_text, wallet_refund_amount, grant_service_refund_credit, refund_result_text,
 )
@@ -1187,7 +1188,37 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         holder_line = f"👤 به نام: {escape_html(card_holder)}\n" if card_holder else ""
         return f"💳 شماره کارت واریزی: `{card_number}`\n{holder_line}"
 
-    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo"):
+    def _ai_note_line(ai_note: str = None, ai_available: bool = True) -> str:
+        """قابلیت تشخیص رسید جعلی: خط هشدار AI (یا اعلام عدم انجام بررسی) که
+        به کپشن پیام ادمین اضافه می‌شود. تصمیم نهایی همیشه دست ادمین است -
+        این ماژول هرگز سفارشی را خودش رد نمی‌کند، فقط پرچم می‌گذارد."""
+        if ai_note:
+            return "\n\n" + ai_note
+        if not ai_available:
+            return "\n\n⚠️ بررسی خودکار هوش مصنوعی روی این رسید انجام نشد (سرویس در دسترس نبود)."
+        return ""
+
+    async def _check_order_receipt_with_ai(bot: Bot, order_id: int, order: dict, file_id: str, receipt_type: str, message: Message = None):
+        """رسید ارسالی برای یک سفارش را از نظر تکراری‌بودن/دستکاری با AI بررسی
+        می‌کند و نتیجه را روی خود سفارش هم ذخیره می‌کند. هرگز چیزی را رد
+        نمی‌کند - فقط note/available برمی‌گرداند تا در پیام ادمین دیده شود."""
+        try:
+            card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
+            card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
+            result = await receipt_ai_check.check_receipt(
+                bot, db,
+                file_id=file_id, receipt_type=receipt_type,
+                ref_kind="order", ref_id=order_id,
+                amount_toman=order["final_price"], card_number=card_number, card_holder=card_holder,
+                message=message,
+            )
+        except Exception as exc:
+            logging.getLogger("handlers_user").warning("receipt_ai_check برای سفارش #%s خطا داد: %s", order_id, exc)
+            return {"note": None, "available": False}
+        (await asyncio.to_thread(db.set_order_receipt_ai_note, order_id, result["note"]))
+        return result
+
+    async def _notify_admins_of_order(bot: Bot, order_id: int, receipt_file_id: str = None, receipt_type: str = "photo", ai_note: str = None, ai_available: bool = True):
         order = (await asyncio.to_thread(db.get_order, order_id))
 
         if order["is_custom_config"]:
@@ -1215,6 +1246,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
             elif receipt_file_id and not already_approved:
                 caption += "\n\n" + (await _admin_card_hint_line())
+                caption += _ai_note_line(ai_note, ai_available)
             if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
                 return
             for admin_id in (await asyncio.to_thread(db.list_admins)):
@@ -1267,6 +1299,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
             elif receipt_file_id and not already_approved:
                 caption += "\n\n" + (await _admin_card_hint_line())
+                caption += _ai_note_line(ai_note, ai_available)
             if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
                 return
             for admin_id in (await asyncio.to_thread(db.list_admins)):
@@ -1318,6 +1351,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول/تخفیف پوشش داده شده)"
         elif receipt_file_id and not already_approved:
             caption += "\n\n" + (await _admin_card_hint_line())
+            caption += _ai_note_line(ai_note, ai_available)
 
         if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
             return
@@ -2031,9 +2065,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(db.get_text('handlers_user.auto_deee023d', 'لطفاً عکس یا فایل رسید پرداخت را ارسال کنید.'))
             return
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
+        ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
 
         await _notify_admins_of_order(
-            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
+            ai_note=ai_result["note"], ai_available=ai_result["available"],
         )
 
         await message.answer(
@@ -2626,8 +2662,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(db.get_text('handlers_user.auto_deee023d', 'لطفاً عکس یا فایل رسید پرداخت را ارسال کنید.'))
             return
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
+        ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
         await _notify_admins_of_order(
-            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
+            ai_note=ai_result["note"], ai_available=ai_result["available"],
         )
         await message.answer(
             db.get_text('handlers_user.auto_3c5b40fb', '✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، کانفیگ شخصی شما ساخته و ارسال خواهد شد.'),
@@ -4999,7 +5037,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(db.get_text('handlers_user.auto_deee023d', 'لطفاً عکس یا فایل رسید پرداخت را ارسال کنید.'))
             return
         (await asyncio.to_thread(db.set_order_receipt, order_id, file_id, receipt_type))
-        await _notify_admins_of_order(bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type)
+        ai_result = await _check_order_receipt_with_ai(bot, order_id, order, file_id, receipt_type, message)
+        await _notify_admins_of_order(
+            bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
+            ai_note=ai_result["note"], ai_available=ai_result["available"],
+        )
         await message.answer(
             db.get_text('handlers_user.auto_925daaf0', '✅ رسید شما برای بررسی ارسال شد. پس از تایید ادمین، سرویس شما تمدید خواهد شد.'),
             reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
@@ -5676,6 +5718,21 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         topup_id = (await asyncio.to_thread(db.create_topup, message.from_user.id, amount))
         (await asyncio.to_thread(db.set_topup_receipt, topup_id, file_id, receipt_type))
 
+        card_number = (await asyncio.to_thread(db.get_setting, "card_number"))
+        card_holder = (await asyncio.to_thread(db.get_setting, "card_holder"))
+        try:
+            ai_result = await receipt_ai_check.check_receipt(
+                bot, db,
+                file_id=file_id, receipt_type=receipt_type,
+                ref_kind="topup", ref_id=topup_id,
+                amount_toman=amount, card_number=card_number, card_holder=card_holder,
+                message=message,
+            )
+        except Exception as exc:
+            logging.getLogger("handlers_user").warning("receipt_ai_check برای شارژ #%s خطا داد: %s", topup_id, exc)
+            ai_result = {"note": None, "available": False}
+        (await asyncio.to_thread(db.set_topup_receipt_ai_note, topup_id, ai_result["note"]))
+
         user_row = (await asyncio.to_thread(db.get_user, message.from_user.id))
         caption = (
             f"👛 درخواست شارژ کیف پول #{topup_id}\n"
@@ -5686,6 +5743,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # قابلیت ۸۵: شماره کارتی که هنگام واریز به کاربر نشان داده شده بود، برای
         # تطبیق مدیر با صورتحساب بانکی، به گزارش اضافه می‌شود.
         caption += "\n\n" + (await _admin_card_hint_line())
+        caption += _ai_note_line(ai_result["note"], ai_result["available"])
         if not await _report_topup_to_group(bot, topup_id, file_id, receipt_type, caption, kb.topup_review_kb(topup_id)):
             for admin_id in (await asyncio.to_thread(db.list_admins)):
                 factory = lambda aid=admin_id: _send_receipt_to_admin(
