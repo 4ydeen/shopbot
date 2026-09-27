@@ -6,7 +6,7 @@
 معیارهای دعوت انبوه و نرخ بی‌خریدی زیرمجموعه‌ها را برای همان دعوت‌کننده بررسی
 می‌کند. اگر تازه مشکوک تشخیص داده شود (یعنی هنوز فلگ بازی برایش نبوده)، این
 ماژول متن هشدار را می‌سازد و مثل stock_alerts آن را - اگر گروه گزارش تنظیم شده
-باشد در تاپیک «سایر»، وگرنه با پیام خصوصی - به همه‌ی ادمین‌ها ارسال می‌کند.
+باشد در تاپیک «امنیت»، وگرنه با پیام خصوصی - به همه‌ی ادمین‌ها ارسال می‌کند.
 
 send_fn مثل stock_alerts یک تابع async است که (admin_telegram_id, text) می‌گیرد؛
 همین امضا اجازه می‌دهد این ماژول هم در بات (aiogram) و هم در Mini App/پنل ادمین
@@ -19,7 +19,7 @@ import report_router
 
 logger = logging.getLogger(__name__)
 
-TOPIC_KEY = "other"
+TOPIC_KEY = "security"
 
 
 async def check_and_notify_referral_fraud(send_fn, db, referrer_id: int, bot_token: str = None) -> None:

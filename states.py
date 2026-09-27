@@ -435,6 +435,11 @@ class AdminBackupSecondaryChat(StatesGroup):
 
 class AdminReportGroup(StatesGroup):
     waiting_chat_id = State()
+    waiting_topic_name = State()
+
+
+class AdminQuickAction(StatesGroup):
+    waiting_message_text = State()
 
 
 class AdminBackupSftp(StatesGroup):

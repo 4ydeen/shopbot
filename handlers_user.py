@@ -525,6 +525,60 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # -----------------------------------------------------------------------
 
     @router.message(CommandStart())
+    async def _notify_new_signup(message: Message, bot: Bot):
+        """قابلیت گسترش گروه گزارش: کارت ثبت‌نام کاربر تازه به تاپیک «ثبت‌نام»."""
+        row = await asyncio.to_thread(db.get_user, message.from_user.id)
+        name = escape_html(message.from_user.first_name or "")
+        username = message.from_user.username or ""
+        handle = f" (@{escape_html(username)})" if username else ""
+        text = (
+            "🆕 کاربر جدید ثبت‌نام کرد\n\n"
+            f"👤 {name}{handle}\n"
+            f"🆔 <code>{message.from_user.id}</code>\n"
+            f"🌐 زبان تلگرام: {escape_html(message.from_user.language_code or '-')}"
+        )
+        source = row["acquisition_source"] if row and row["acquisition_source"] else ""
+        if source:
+            text += f"\n📥 منبع ورود: {escape_html(source)}"
+        referred_by = row["referred_by"] if row and row["referred_by"] else None
+        if referred_by:
+            referrer_row = await asyncio.to_thread(db.get_user, referred_by)
+            ref_name = escape_html((referrer_row["first_name"] if referrer_row else "") or "")
+            ref_username = (referrer_row["username"] if referrer_row else "") or ""
+            ref_handle = f" (@{escape_html(ref_username)})" if ref_username else ""
+            text += f"\n🤝 معرف: {ref_name}{ref_handle} — <code>{referred_by}</code>"
+        try:
+            await report_router.send_text(bot, db, "signup", text, kb.user_quick_actions_kb(message.from_user.id))
+        except Exception:
+            logging.getLogger("handlers_user").warning("ارسال کارت ثبت‌نام به گروه گزارش ناموفق بود.", exc_info=True)
+
+    async def _notify_new_referral(bot: Bot, referred_user_id: int, referrer_id: int, reward_info: dict):
+        """قابلیت گسترش گروه گزارش: کارت رفرال جدید به تاپیک «رفرال»."""
+        referred_row = await asyncio.to_thread(db.get_user, referred_user_id)
+        referrer_row = await asyncio.to_thread(db.get_user, referrer_id)
+
+        def _label(row, tg_id):
+            name = escape_html((row["first_name"] if row else "") or "")
+            username = (row["username"] if row else "") or ""
+            handle = f" (@{escape_html(username)})" if username else ""
+            return f"{name}{handle} — <code>{tg_id}</code>"
+
+        text = (
+            "🤝 رفرال جدید ثبت شد\n\n"
+            f"👤 دعوت‌شده: {_label(referred_row, referred_user_id)}\n"
+            f"🎯 معرف: {_label(referrer_row, referrer_id)}"
+        )
+        if reward_info:
+            invite_bonus = reward_info.get("invite_bonus")
+            if invite_bonus:
+                text += f"\n💰 پاداش دعوت‌کننده: {invite_bonus:,} تومان"
+            if reward_info.get("free_config_product_id"):
+                text += "\n🎁 دعوت‌کننده یک کانفیگ رایگان جایزه گرفت"
+        try:
+            await report_router.send_text(bot, db, "referral", text, kb.user_quick_actions_kb(referred_user_id))
+        except Exception:
+            logging.getLogger("handlers_user").warning("ارسال کارت رفرال به گروه گزارش ناموفق بود.", exc_info=True)
+
     async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         existing_user = await asyncio.to_thread(db.get_user, message.from_user.id)
@@ -571,6 +625,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                             db.apply_referral_invite_rewards, message.from_user.id, referrer_id
                         ))
                         await _handle_referral_invite_rewards(bot, referrer_id, reward_info)
+                        await _notify_new_referral(bot, message.from_user.id, referrer_id, reward_info)
                         await check_and_notify_referral_fraud(bot.send_message, db, referrer_id, bot_token=bot.token)
             elif token.startswith("disc_"):
                 code = token[len("disc_"):]
@@ -604,6 +659,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
         if not existing_user:
+            await _notify_new_signup(message, bot)
             # کاربر تازه: به‌جای تنظیم خودکار زبان بر اساس لوکیل تلگرام، از او سوال می‌شود.
             # پیام خوش‌آمد/منو بلافاصله بعد از انتخاب زبان (در cb_language) فرستاده می‌شود.
             await state.update_data(pending_welcome=True)
@@ -1089,13 +1145,35 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await asyncio.to_thread(db.set_topup_admin_message, topup_id, sent.chat.id, sent.message_id)
         return True
 
-    def _user_purchase_info_line(user_row) -> str:
-        """خط شماره تلفن و موجودی کیف پول کاربر، برای نمایش به مدیر هنگام سفارش."""
+    async def _user_purchase_info_line(user_row) -> str:
+        """اطلاعات کاربر برای نمایش به مدیر هنگام سفارش: شماره تلفن، کیف پول،
+        تاریخ عضویت، سابقه خرید (LTV)، تعداد سرویس فعال فعلی و معرف - قابلیت
+        گسترش گروه گزارش (فاز ۳)."""
         if not user_row:
             return ""
         phone = user_row["phone_number"] or "ثبت نشده"
         balance = int(user_row["referral_credit"] or 0)
-        return f"📱 شماره: {phone}\n👛 موجودی کیف پول: {balance:,} تومان\n"
+        line = f"📱 شماره: {phone}\n👛 موجودی کیف پول: {balance:,} تومان\n"
+        joined_at = user_row["joined_at"] if "joined_at" in user_row.keys() else None
+        if joined_at:
+            try:
+                line += f"📅 عضویت: {to_jalali_str(joined_at)}\n"
+            except Exception:
+                pass
+        summary = await asyncio.to_thread(db.get_user_purchase_summary, user_row["telegram_id"])
+        if summary["total_orders"] > 0:
+            line += f"🧾 سابقه خرید: {summary['total_orders']:,} سفارش به ارزش {summary['total_spent']:,} تومان\n"
+        else:
+            line += "🧾 سابقه خرید: اولین خرید\n"
+        line += f"📦 سرویس فعال فعلی: {summary['active_services']:,}\n"
+        referred_by = user_row["referred_by"] if "referred_by" in user_row.keys() else None
+        if referred_by:
+            referrer_row = await asyncio.to_thread(db.get_user, referred_by)
+            ref_name = escape_html((referrer_row["first_name"] if referrer_row else "") or "")
+            ref_username = (referrer_row["username"] if referrer_row else "") or ""
+            ref_handle = f" (@{escape_html(ref_username)})" if ref_username else ""
+            line += f"🤝 معرف: {ref_name}{ref_handle} — <code>{referred_by}</code>\n"
+        return line
 
     async def _admin_card_hint_line() -> str:
         """قابلیت ۸۵: وقتی سفارش با رسید کارت‌به‌کارت به مدیر گزارش می‌شود، شماره
@@ -1116,11 +1194,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             user_row = (await asyncio.to_thread(db.get_user, order["user_id"]))
             username = user_row["username"] if user_row else ""
             first_name = user_row["first_name"] if user_row else ""
+            purchase_info_line = await _user_purchase_info_line(user_row)
             caption = (
                 f"🧾 سفارش کانفیگ شخصی #{order_id}\n"
                 f"👤 کاربر: {escape_html(first_name)} (@{escape_html(username) or '---'})\n"
                 f"🆔 آیدی عددی: {order['user_id']}\n"
-                f"{_user_purchase_info_line(user_row)}"
+                f"{purchase_info_line}"
                 f"🛠 نام کاربری: {order['custom_username']}\n"
                 f"📶 حجم: {order['custom_volume_gb']} گیگابایت\n"
                 f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
@@ -1129,7 +1208,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
             caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
             already_approved = order["status"] != "pending"
-            reply_markup = None if already_approved else kb.order_review_kb(order_id)
+            reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
             if already_approved:
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ ساخته شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
@@ -1161,11 +1240,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             first_name = user_row["first_name"] if user_row else ""
             mode_label = _RENEW_MODE_LABEL.get(order["renewal_mode"], order["renewal_mode"] or "")
             target_label = "کانفیگ شخصی" if order["renewal_target_kind"] == "custom" else "کانفیگ بانک (استخر)"
+            purchase_info_line = await _user_purchase_info_line(user_row)
             caption = (
                 f"🧾 سفارش تمدید سرویس #{order_id}\n"
                 f"👤 کاربر: {escape_html(first_name)} (@{escape_html(username) or '---'})\n"
                 f"🆔 آیدی عددی: {order['user_id']}\n"
-                f"{_user_purchase_info_line(user_row)}"
+                f"{purchase_info_line}"
                 f"🔄 نوع: {mode_label}\n"
                 f"🎯 هدف: {target_label} #{order['renewal_target_id']}\n"
             )
@@ -1180,7 +1260,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
             caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
             already_approved = order["status"] != "pending"
-            reply_markup = None if already_approved else kb.order_review_kb(order_id)
+            reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
             if already_approved:
                 caption += "\n\n✅ این سفارش به‌طور خودکار تایید و سرویس تمدید شد (پرداخت کامل از کیف پول)."
             if not receipt_file_id and not already_approved:
@@ -1209,11 +1289,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         first_name = user_row["first_name"] if user_row else ""
 
         quantity = order["quantity"] or 1
+        purchase_info_line = await _user_purchase_info_line(user_row)
         caption = (
             f"🧾 سفارش #{order_id}\n"
             f"👤 کاربر: {escape_html(first_name)} (@{escape_html(username) or '---'})\n"
             f"🆔 آیدی عددی: {order['user_id']}\n"
-            f"{_user_purchase_info_line(user_row)}"
+            f"{purchase_info_line}"
             f"📦 محصول: {product['name']}"
             + (f" × {quantity}\n" if quantity > 1 else "\n")
             + f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
@@ -1229,7 +1310,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # اگر سفارش از قبل به‌صورت خودکار تایید شده (کاملاً از کیف پول/کد تخفیف پوشش داده شده بود)،
         # این پیام فقط جهت اطلاع ادمین است و نیازی به دکمه تایید/رد ندارد.
         already_approved = order["status"] != "pending"
-        reply_markup = None if already_approved else kb.order_review_kb(order_id)
+        reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
         if already_approved:
             caption += "\n\n✅ این سفارش به‌طور خودکار تایید و کانفیگ برای کاربر ارسال شد (پرداخت کامل از کیف پول/کد تخفیف)."
 

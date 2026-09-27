@@ -24,6 +24,9 @@ TOPICS = {
     "error": "🚨 خطا",
     "backup": "🗄 بکاپ",
     "nightly": "📊 گزارش شبانه",
+    "signup": "🆕 ثبت‌نام",
+    "referral": "🤝 رفرال",
+    "security": "🛡 امنیت",
     "other": "📌 سایر",
 }
 MISSING_THREAD_MARKERS = ("thread not found", "topic_id_invalid", "topic_deleted")
@@ -48,10 +51,33 @@ def get_chat_id(db):
         return None
 
 
+def topic_display_name(db, chat_id: int, topic_key: str) -> str:
+    """نام قابل‌نمایش تاپیک: نام سفارشی که مدیر تنظیم کرده (فاز ۱)، وگرنه
+    نام پیش‌فرض ثابت پروژه."""
+    labels = db.get_report_topic_labels(chat_id)
+    return labels.get(topic_key) or TOPICS.get(topic_key, topic_key)
+
+
 async def _create_topic(bot, db, chat_id: int, topic_key: str) -> int:
-    created = await bot.create_forum_topic(chat_id, TOPICS[topic_key])
+    name = await _db(topic_display_name, db, chat_id, topic_key)
+    created = await bot.create_forum_topic(chat_id, name)
     await _db(db.set_report_topic, chat_id, topic_key, created.message_thread_id)
     return created.message_thread_id
+
+
+async def rename_topic(bot, db, chat_id: int, topic_key: str, new_name: str) -> None:
+    """نام تاپیک را هم در دیتابیس (برای ساخت‌های بعدی) و هم - در صورت وجود -
+    روی خودِ تاپیک واقعی تلگرام (با edit_forum_topic) تغییر می‌دهد."""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise SetupError("نام تاپیک نمی‌تواند خالی باشد.")
+    await _db(db.set_report_topic_label, chat_id, topic_key, new_name)
+    thread_id = (await _db(db.get_report_topics, chat_id)).get(topic_key)
+    if thread_id:
+        try:
+            await bot.edit_forum_topic(chat_id, thread_id, name=new_name)
+        except TelegramAPIError as e:
+            raise SetupError(f"نام در دیتابیس ذخیره شد ولی تغییر نام خودِ تاپیک در تلگرام ناموفق بود: {e}")
 
 
 async def _thread_for(bot, db, chat_id: int, topic_key: str, refresh: bool = False) -> int:
@@ -133,6 +159,22 @@ async def report(bot, db, topic_key: str, text: str, reply_markup=None, senior_o
         except Exception:
             logger.warning("ارسال گزارش به ادمین %s ناموفق بود.", admin_id)
     return delivered
+
+
+def build_block_toggle_text(user_row, tg_id: int, blocked: bool, actor_label: str) -> str:
+    """متن کارت تاپیک «امنیت» برای بلاک/آنبلاک کاربر - مشترک بین بات، پنل وب
+    و مینی‌اپ (سه مسیر مستقل تغییر وضعیت بلاک)."""
+    name = html.escape((user_row["first_name"] if user_row else "") or "")
+    username = (user_row["username"] if user_row else "") or ""
+    handle = f" (@{html.escape(username)})" if username else ""
+    icon = "🚫" if blocked else "✅"
+    action = "بلاک شد" if blocked else "آنبلاک شد"
+    return (
+        f"{icon} کاربر {action}\n\n"
+        f"👤 {name}{handle}\n"
+        f"🆔 <code>{tg_id}</code>\n"
+        f"👮 توسط: {html.escape(actor_label)}"
+    )
 
 
 async def notify_test_config(bot, db, user_id: int, name: str, username, detail_html: str) -> None:

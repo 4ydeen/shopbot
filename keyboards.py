@@ -960,7 +960,7 @@ def card_auto_card_detail_kb(card) -> InlineKeyboardMarkup:
 # سفارش برای ادمین (تایید/رد)
 # ---------------------------------------------------------------------------
 
-def order_review_kb(order_id) -> InlineKeyboardMarkup:
+def order_review_kb(order_id, user_id=None) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(text=tr("✅ تایید و ارسال کانفیگ"), callback_data=f"order_approve:{order_id}"),
@@ -970,7 +970,34 @@ def order_review_kb(order_id) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=tr("🚫 فیش فیک + بلاک کاربر"), callback_data=f"order_fake_receipt:{order_id}"),
         ],
     ]
+    if user_id is not None:
+        rows.append(_quick_action_row(user_id))
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# اکشن سریع روی کارت‌های تاپیک‌دار گروه گزارش (فاز ۴): پروفایل کامل، بلاک سریع
+# با تاییدیه، پیام مستقیم به کاربر - مشترک بین کارت سفارش/ثبت‌نام/رفرال.
+# ---------------------------------------------------------------------------
+
+def _quick_action_row(user_id: int) -> list:
+    return [
+        InlineKeyboardButton(text=tr("👤 پروفایل"), callback_data=f"qa_profile:{user_id}"),
+        InlineKeyboardButton(text=tr("🚫 بلاک"), callback_data=f"qa_block:{user_id}"),
+        InlineKeyboardButton(text=tr("✉️ پیام"), callback_data=f"qa_msg:{user_id}"),
+    ]
+
+
+def user_quick_actions_kb(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[_quick_action_row(user_id)])
+
+
+def quick_block_confirm_kb(user_id: int, new_blocked: bool) -> InlineKeyboardMarkup:
+    label = "🚫 بله، بلاک کن" if new_blocked else "✅ بله، آنبلاک کن"
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=tr(label), callback_data=f"qa_block_go:{user_id}:{1 if new_blocked else 0}"),
+        InlineKeyboardButton(text=tr("انصراف"), callback_data="qa_cancel"),
+    ]])
 
 
 def contact_reply_kb(user_tg_id) -> InlineKeyboardMarkup:
@@ -1650,10 +1677,21 @@ def admin_backup_sync_menu_kb(db) -> InlineKeyboardMarkup:
 
 def admin_report_group_kb(configured: bool) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text=tr("✏️ تنظیم یا تغییر گروه"), callback_data="adm_report_set")]]
+    rows.append([InlineKeyboardButton(text=tr("🏷 نام‌گذاری تاپیک‌ها"), callback_data="adm_report_topics")])
     if configured:
         rows.append([InlineKeyboardButton(text=tr("🔁 بررسی و ساخت تاپیک‌های ناموجود"), callback_data="adm_report_recheck")])
         rows.append([InlineKeyboardButton(text=tr("🚫 حذف گروه گزارش"), callback_data="adm_report_clear")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:management")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_report_topics_list_kb(topic_labels: dict) -> InlineKeyboardMarkup:
+    """topic_labels: دیکشنری topic_key -> نام فعلی (سفارشی یا پیش‌فرض) برای نمایش."""
+    rows = [
+        [InlineKeyboardButton(text=name, callback_data=f"adm_report_topic_ren:{key}")]
+        for key, name in topic_labels.items()
+    ]
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_report_group")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

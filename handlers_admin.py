@@ -21,7 +21,7 @@ import zipfile
 from aiogram import Router, F, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Message, CallbackQuery, FSInputFile, BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, FSInputFile, BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.filters import Command, StateFilter
@@ -141,6 +141,7 @@ from states import (
     AdminBackupInterval,
     AdminBackupSecondaryChat,
     AdminReportGroup,
+    AdminQuickAction,
     AdminBackupSftp,
     AdminFactoryReset,
     AdminAddPanelServer,
@@ -2565,10 +2566,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if order["receipt_file_id"]:
             await _send_receipt(
                 bot, call.from_user.id, order["receipt_file_id"], (order["receipt_type"] if "receipt_type" in order.keys() else "photo"),
-                caption, kb.order_review_kb(order_id)
+                caption, kb.order_review_kb(order_id, order["user_id"])
             )
         else:
-            await call.message.answer(caption, reply_markup=kb.order_review_kb(order_id))
+            await call.message.answer(caption, reply_markup=kb.order_review_kb(order_id, order["user_id"]))
         await call.answer()
 
     @router.callback_query(F.data.startswith("order_approve:"))
@@ -11824,7 +11825,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # ---- بلاک/آنبلاک کاربر ----
 
     @router.callback_query(F.data.startswith("adm_user_toggleblock:"))
-    async def cb_admin_user_toggleblock(call: CallbackQuery):
+    async def cb_admin_user_toggleblock(call: CallbackQuery, bot: Bot):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         tg_id = callback_id(call.data, "adm_user_toggleblock")
@@ -11844,6 +11845,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         note = "🚫 کاربر بلاک شد." if new_blocked else "✅ کاربر آنبلاک شد."
         await call.answer(tr(note))
         await _show_user_menu(call.message, tg_id, note)
+        actor_label = call.from_user.first_name or (f"@{call.from_user.username}" if call.from_user.username else str(call.from_user.id))
+        text = report_router.build_block_toggle_text(user, tg_id, new_blocked, actor_label)
+        try:
+            await report_router.report(bot, db, "security", text, senior_only=True)
+        except Exception:
+            logging.getLogger("handlers_admin").warning("ارسال کارت بلاک/آنبلاک به گروه گزارش ناموفق بود.", exc_info=True)
 
     # ---- ویرایش موجودی کیف‌پول ----
 
@@ -12355,6 +12362,211 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             reply_markup=kb.admin_report_group_kb(False),
         )
         await call.answer()
+
+    # -------------------------------------------------------------------
+    # نام‌گذاری تاپیک‌ها توسط مدیر (فاز ۱ - زیرساخت بقیه فازها)
+    # -------------------------------------------------------------------
+
+    def _report_topics_display(chat_id: int) -> dict:
+        labels = db.get_report_topic_labels(chat_id)
+        return {
+            key: (labels.get(key) or default_name)
+            for key, default_name in report_router.TOPICS.items()
+        }
+
+    @router.callback_query(F.data == "adm_report_topics")
+    async def cb_report_topics_menu(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is None:
+            await call.answer(tr("اول باید گروه گزارش را تنظیم کنی."), show_alert=True)
+            return
+        display = await asyncio.to_thread(_report_topics_display, chat_id)
+        await replace_admin_view(
+            call,
+            tr(
+                "🏷 نام‌گذاری تاپیک‌ها\n\n"
+                "روی هر تاپیک بزن تا نام/ایموجی‌اش را عوض کنی. با تغییر، هم دیتابیس "
+                "آپدیت می‌شود هم نام واقعی تاپیک در تلگرام (در صورت وجود)."
+            ),
+            reply_markup=kb.admin_report_topics_list_kb(display),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_report_topic_ren:"))
+    async def cb_report_topic_rename_ask(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        topic_key = call.data.split(":", 1)[1]
+        if topic_key not in report_router.TOPICS:
+            await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
+            return
+        await state.set_state(AdminReportGroup.waiting_topic_name)
+        await state.update_data(rename_topic_key=topic_key)
+        current = report_router.TOPICS[topic_key]
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is not None:
+            labels = await asyncio.to_thread(db.get_report_topic_labels, chat_id)
+            current = labels.get(topic_key) or current
+        await safe_edit(
+            call,
+            tr(f"نام/ایموجی جدید برای تاپیک «{current}» را بفرست:"),
+            reply_markup=kb.admin_back_kb("adm_report_topics"),
+        )
+        await call.answer()
+
+    @router.message(AdminReportGroup.waiting_topic_name)
+    async def process_report_topic_rename(message: Message, state: FSMContext, bot: Bot):
+        if not owner_only(message.from_user.id):
+            return
+        data = await state.get_data()
+        topic_key = data.get("rename_topic_key")
+        await state.clear()
+        if not topic_key or topic_key not in report_router.TOPICS:
+            return
+        new_name = (message.text or "").strip()
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is None:
+            await message.answer(tr("گروه گزارش تنظیم نشده است."))
+            return
+        if not new_name:
+            await message.answer(tr("❌ نام نمی‌تواند خالی باشد."))
+            return
+        try:
+            await report_router.rename_topic(bot, db, chat_id, topic_key, new_name)
+            (await asyncio.to_thread(
+                db.log_admin_action, message.from_user.id, "report_topic_rename",
+                f"تاپیک {topic_key} → {new_name}",
+            ))
+            result = f"✅ نام تاپیک به «{new_name}» تغییر کرد."
+        except report_router.SetupError as e:
+            result = f"⚠️ {e}"
+        display = await asyncio.to_thread(_report_topics_display, chat_id)
+        await message.answer(result, reply_markup=kb.admin_report_topics_list_kb(display))
+
+    # -------------------------------------------------------------------
+    # اکشن سریع روی کارت‌های گروه گزارش (فاز ۴): پروفایل کامل، بلاک سریع با
+    # تاییدیه، پیام مستقیم به کاربر با force-reply - مشترک بین کارت
+    # سفارش/ثبت‌نام/رفرال.
+    # -------------------------------------------------------------------
+
+    @router.callback_query(F.data.startswith("qa_profile:"))
+    async def cb_quick_action_profile(call: CallbackQuery):
+        if not db.is_admin(call.from_user.id):
+            return await deny_support(call)
+        tg_id = callback_id(call.data, "qa_profile")
+        if tg_id is None:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        user = await asyncio.to_thread(db.get_user, tg_id)
+        if not user:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        stats = await asyncio.to_thread(db.get_user_full_stats, tg_id)
+        is_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
+        text = _fmt_user_full_stats_report(stats)
+        markup = kb.user_full_stats_kb(tg_id, is_blocked)
+        try:
+            await call.message.reply(text, reply_markup=markup)
+        except TelegramBadRequest:
+            await call.message.answer(text, reply_markup=markup)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("qa_block:"))
+    async def cb_quick_action_block_confirm(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        tg_id = callback_id(call.data, "qa_block")
+        if tg_id is None:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        user = await asyncio.to_thread(db.get_user, tg_id)
+        if not user:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        already_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
+        verb = "آنبلاک" if already_blocked else "بلاک"
+        prompt = tr(f"⚠️ کاربر {tg_id} {verb} شود؟")
+        markup = kb.quick_block_confirm_kb(tg_id, not already_blocked)
+        try:
+            await call.message.reply(prompt, reply_markup=markup)
+        except TelegramBadRequest:
+            await call.message.answer(prompt, reply_markup=markup)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("qa_block_go:"))
+    async def cb_quick_action_block_go(call: CallbackQuery, bot: Bot):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            _, tg_id_s, flag_s = call.data.split(":", 2)
+            tg_id = int(tg_id_s)
+            new_blocked = flag_s == "1"
+        except (ValueError, IndexError):
+            await call.answer(tr("درخواست نامعتبر است."), show_alert=True)
+            return
+        user = await asyncio.to_thread(db.get_user, tg_id)
+        if not user:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        await asyncio.to_thread(db.set_user_blocked, tg_id, new_blocked)
+        (await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "user_block_toggle",
+            f"کاربر {tg_id} ← {'بلاک' if new_blocked else 'آنبلاک'} (اکشن سریع از کارت)",
+        ))
+        note = "🚫 کاربر بلاک شد." if new_blocked else "✅ کاربر آنبلاک شد."
+        await safe_edit(call, tr(note))
+        await call.answer(tr(note))
+        actor_label = call.from_user.first_name or (f"@{call.from_user.username}" if call.from_user.username else str(call.from_user.id))
+        text = report_router.build_block_toggle_text(user, tg_id, new_blocked, actor_label)
+        try:
+            await report_router.report(bot, db, "security", text, senior_only=True)
+        except Exception:
+            logging.getLogger("handlers_admin").warning("ارسال کارت بلاک/آنبلاک به گروه گزارش ناموفق بود.", exc_info=True)
+
+    @router.callback_query(F.data == "qa_cancel")
+    async def cb_quick_action_cancel(call: CallbackQuery):
+        await safe_edit(call, tr("لغو شد."))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("qa_msg:"))
+    async def cb_quick_action_msg_ask(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        tg_id = callback_id(call.data, "qa_msg")
+        if tg_id is None:
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        await state.set_state(AdminQuickAction.waiting_message_text)
+        await state.update_data(qa_target_user=tg_id)
+        prompt = tr(f"✉️ متن پیام برای کاربر {tg_id} را بفرست:")
+        markup = ForceReply(input_field_placeholder="متن پیام...", selective=True)
+        try:
+            await call.message.reply(prompt, reply_markup=markup)
+        except TelegramBadRequest:
+            await call.message.answer(prompt, reply_markup=markup)
+        await call.answer()
+
+    @router.message(AdminQuickAction.waiting_message_text)
+    async def process_quick_action_msg(message: Message, state: FSMContext, bot: Bot):
+        data = await state.get_data()
+        tg_id = data.get("qa_target_user")
+        await state.clear()
+        if not tg_id:
+            return
+        html_text = message.html_text if message.text else ""
+        try:
+            await bot.send_message(tg_id, tr(f"📩 پیام از پشتیبانی:\n\n{html_text}"))
+            await _notify_user_inline_menu(bot, tg_id)
+            (await asyncio.to_thread(
+                db.log_admin_action, message.from_user.id, "user_direct_message",
+                f"کاربر {tg_id} (اکشن سریع از کارت)",
+            ))
+            await message.reply(tr("✅ پیام ارسال شد."))
+        except Exception:
+            await message.reply(tr("⛔️ ارسال پیام به کاربر ناموفق بود."))
 
     # -------------------------------------------------------------------
     # بکاپ و بازیابی
