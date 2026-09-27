@@ -1589,6 +1589,29 @@ def _ordered_admin_categories(db):
     return [by_key[k] for k in order if k in by_key]
 
 
+def _is_wide_label(label: str) -> bool:
+    """برچسب‌های طولانی وقتی توی چیدمان دو ستونه قرار بگیرن، توی بعضی
+    کلاینت‌های تلگرام (مثل Telegraph) نصفه/پنهان نمایش داده می‌شن؛ این تابع
+    تشخیص می‌ده که یک برچسب باید تک‌ستونه (تمام عرض) باشه یا نه."""
+    return len(label) > 26
+
+
+def _pack_admin_buttons(rows: list, current_row: list, label: str, button: InlineKeyboardButton) -> list:
+    """دکمه رو به چیدمان اضافه می‌کنه: برچسب‌های طولانی تک‌ستونه (تمام عرض)
+    می‌شن تا بریده/پنهان نشن؛ بقیه مثل قبل دوتا-دوتا در یک ردیف قرار می‌گیرن."""
+    if _is_wide_label(label):
+        if current_row:
+            rows.append(current_row)
+            current_row = []
+        rows.append([button])
+    else:
+        current_row.append(button)
+        if len(current_row) == 2:
+            rows.append(current_row)
+            current_row = []
+    return current_row
+
+
 def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
     """کیبورد سطح اول پنل مدیریت: فقط دسته‌ها نمایش داده می‌شوند، نه هر ۲۶ آیتم."""
     rows = []
@@ -1599,10 +1622,8 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
             continue
         custom_label = db.get_setting(f"catlbl_{cat_key}", "")
         label = custom_label if custom_label else tr(cat_label)
-        current_row.append(_styled_inline(db, label, f"adm_cat:{cat_key}", f"catlbl_{cat_key}_style"))
-        if len(current_row) == 2:
-            rows.append(current_row)
-            current_row = []
+        button = _styled_inline(db, label, f"adm_cat:{cat_key}", f"catlbl_{cat_key}_style")
+        current_row = _pack_admin_buttons(rows, current_row, label, button)
     if current_row:
         rows.append(current_row)
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_exit_panel")])
@@ -1610,8 +1631,9 @@ def admin_panel_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
 
 
 def admin_category_kb(db, is_main_bot: bool, cat_key: str) -> InlineKeyboardMarkup:
-    """زیرمنوی یک دسته: آیتم‌های همان دسته با چیدمان دو ستونه + بازگشت.
-    ترتیب آیتم‌ها و متن هرکدام از تب «دکمه‌ها»ی پنل وب قابل کاستوم‌سازی است."""
+    """زیرمنوی یک دسته: آیتم‌های همان دسته با چیدمان دو ستونه (برچسب‌های
+    طولانی تک‌ستونه می‌شن) + بازگشت. ترتیب آیتم‌ها و متن هرکدام از تب
+    «دکمه‌ها»ی پنل وب قابل کاستوم‌سازی است."""
     default_item_keys = next((items for key, _, items in ADMIN_PANEL_CATEGORIES if key == cat_key), [])
     item_keys = db.get_custom_order(f"admin_items__{cat_key}", default_item_keys)
     rows = []
@@ -1621,14 +1643,13 @@ def admin_category_kb(db, is_main_bot: bool, cat_key: str) -> InlineKeyboardMark
             continue
         label, callback_data = _admin_item_label_and_cb(key)
         if key in _EXTRA_PANEL_ITEM_LABELS:
-            current_row.append(InlineKeyboardButton(text=tr(label), callback_data=callback_data))
+            label = tr(label)
+            button = InlineKeyboardButton(text=label, callback_data=callback_data)
         else:
             custom_label = db.get_setting(f"{key}_label", "")
             label = custom_label if custom_label else tr(label)
-            current_row.append(_styled_inline(db, label, callback_data, f"{key}_style"))
-        if len(current_row) == 2:
-            rows.append(current_row)
-            current_row = []
+            button = _styled_inline(db, label, callback_data, f"{key}_style")
+        current_row = _pack_admin_buttons(rows, current_row, label, button)
     if current_row:
         rows.append(current_row)
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت به پنل مدیریت"), callback_data="adm_back_panel")])
