@@ -59,8 +59,9 @@
    برگردد.
 
 ۵) چک‌های ریاضی قطعی (بدون نیاز به قضاوت AI): همزمان با تحلیل تصویری، مدل
-   شماره کارت/شبای مقصد و شماره پیگیری/مرجع را عیناً از متن رسید OCR
-   می‌کند. روی این دو مقدار خام، دو چک کاملاً مستقل از AI انجام می‌شود:
+   شماره کارت/شبای مقصد، شماره پیگیری/مرجع، و مبلغ تراکنش را عیناً از متن
+   رسید OCR می‌کند. روی این مقادیر خام، چک‌های کاملاً مستقل از قضاوت AI
+   انجام می‌شود:
      - شماره کارت باید الگوریتم Luhn را رد کند و پیش‌شماره‌اش (۶ رقم اول)
        باید متعلق به یک بانک واقعی ایرانی باشد؛ شبا هم باید چک‌سام
        استاندارد IBAN (ISO 7064) را پاس کند. این‌ها استانداردهای واقعی
@@ -69,11 +70,23 @@
        رسید تکراری چک می‌شود - مستقل از هش فایل، پس حتی اگر کاربر عکس را
        کمی ویرایش/فشرده کرده باشد (که هش فایل را عوض می‌کند) باز هم رسید
        ری‌یوزشده لو می‌رود.
+     - مبلغ خام OCR شده با مبلغ مورد انتظار فاکتور به‌صورت عددی (نه با
+       قضاوت مدل) مقایسه می‌شود - چون بعضی اپ‌های بانکی مبلغ را به ریال
+       نشان می‌دهند، هم تومان و هم ریال (ده برابر) به‌عنوان تطابق معتبر
+       پذیرفته می‌شود، با کمی تلورانس برای گرد شدن. این چک، جدا از این‌که
+       خودِ مدل تصویری هم مبلغ را «قضاوت» می‌کند، یک لایه‌ی مستقل و
+       دترمینیستیک اضافه می‌کند - رایج‌ترین شکل جعل (دستکاری فقط عدد مبلغ
+       در یک رسید واقعی) را حتی اگر مدل تصویری اشتباه کند هم می‌گیرد.
    نکته‌ی مهم: این چک‌ها فقط زمانی اجرا می‌شوند که مقدار کاملاً خوانا و
-   بدون ستاره باشد (شماره‌های ماسک‌شده اصلاً بررسی نمی‌شوند) و شکست‌شان
-   هرگز به‌تنهایی reject خودکار ایجاد نمی‌کند (فقط note برای ادمین) - چون
-   امکان اشتباه OCR روی یک رقم وجود دارد؛ فقط تکراربودن شماره مرجع مثل
-   تکراربودن هش، به شرط روشن‌بودن auto-reject، خودکار رد می‌شود.
+   بدون ستاره باشد (شماره‌های ماسک‌شده اصلاً بررسی نمی‌شوند) و به‌تنهایی
+   reject خودکار ایجاد نمی‌کنند (فقط note برای ادمین) - چون امکان اشتباه
+   OCR روی یک رقم وجود دارد؛ فقط تکراربودن شماره مرجع/هش، به شرط
+   روشن‌بودن auto-reject، خودکار رد می‌شود. استثنا: اگر مبلغ OCR شده به‌طور
+   قطعی مغایرت داشته باشد و *همزمان* حداقل یک مدل تصویری هم آن رسید را با
+   اطمینان «high» مشکوک تشخیص داده باشد (حتی وقتی فقط همان یک مدل موجود
+   بوده)، این دو منبع مستقل (OCR عددی + قضاوت مدل) هم‌رای در نظر گرفته
+   می‌شوند و طبق همان قاعده‌ی «حداقل دو منبع مستقل» در بخش (۴) رد خودکار
+   انجام می‌شود.
 
 ۶) تحلیل فرنزیک تصویر (ELA - Error Level Analysis): فقط برای فایل‌های
    JPEG، تصویر با کیفیت ثابت (۹۰) دوباره فشرده و با نسخه‌ی اصلی مقایسه
@@ -83,6 +96,36 @@
    دترمینیستیک است، ولی چون ممکن است هشدار اشتباه هم بدهد (فشرده‌سازی
    چندباره‌ی خودِ تلگرام)، همیشه فقط «note» است، هرگز باعث رد خودکار
    نمی‌شود.
+
+۷) سه چک اضافی برای رسیدهایی که مبلغ/شماره کارتشان کاملاً درست است ولی از
+   یک منبع دیگر لو می‌روند (رایج در جعل «حرفه‌ای‌تر» - مثلاً رسید واقعیِ
+   قدیمیِ خودِ کاربر که دوباره برای این خرید فرستاده شده، بدون دستکاری
+   هیچ رقمی):
+     - ساعت نوار وضعیت گوشی در اسکرین‌شات (status_bar_time، اگر خوانا
+       باشد) با ساعت واقعی ارسال پیام به ربات (به وقت تهران) مقایسه
+       می‌شود. اگر فاصله‌ی این دو زیاد باشد (مثلاً چند ساعت)، یعنی
+       اسکرین‌شات مدتی قبل از ارسال گرفته شده - می‌تواند یک رسید قدیمی
+       (واقعی یا حتی برای تراکنش دیگری) باشد که همین حالا دوباره فرستاده
+       شده. چون تاخیر طبیعی بین گرفتن اسکرین‌شات و ارسالش هم وجود دارد
+       (بازکردن گالری، تردید کاربر و...)، تلورانس این چک نسبتاً بزرگ در
+       نظر گرفته شده - فقط note، هرگز reject خودکار.
+     - پیش‌شماره‌ی (۶ رقم اول) کارت مبدأ/پرداخت‌کننده که داخل متن رسید
+       چاپ شده، با نامِ بانک/برندی که مدل از روی ظاهر تصویر (لوگو، رنگ،
+       اسم اپ در بالای صفحه) تشخیص می‌دهد مقایسه می‌شود - این دو باید به
+       یک بانک اشاره کنند. اگر رسید واقعاً مال یک اپ بانکی خاص باشد ولی
+       شماره کارت مبدأ داخل متن به بانک دیگری تعلق داشته باشد (مثلاً
+       عکس/قالب یک اپ با شماره کارت جعلی/دستکاری‌شده ترکیب شده)، ناسازگاری
+       آشکار می‌شود. چون تشخیص بصری برند اپ توسط مدل خودش هم می‌تواند
+       گاهی اشتباه باشد، این هم فقط note است.
+     - نام فایل رسید ارسالی (فقط وقتی به‌صورت «فایل/سند» تلگرام - نه
+       عکس فشرده‌ی معمولی - فرستاده شده باشد، چون تلگرام نام فایل اصلی
+       عکس‌های معمولی را حذف می‌کند): اگر با الگوی استاندارد اسکرین‌شات
+       اندروید/فوروارد واتس‌اپ (که خودش تاریخ/ساعت گرفتن عکس را در نام
+       فایل دارد) مطابقت داشته باشد ولی آن تاریخ با زمان واقعی ارسال به
+       ربات خیلی فاصله داشته باشد (رسید/اسکرین‌شات قدیمی)، یا اگر نام
+       فایل حاوی نام ابزارهای ویرایش عکس شناخته‌شده باشد، به‌عنوان یک
+       نشانه‌ی ضعیف گزارش می‌شود - فقط note، چون کاربر می‌تواند عمداً یا
+       سهواً نام فایل را عوض کرده باشد.
 """
 
 import asyncio
@@ -91,6 +134,14 @@ import hashlib
 import io
 import json
 import logging
+import re
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+    _TEHRAN_TZ = ZoneInfo("Asia/Tehran")
+except Exception:
+    _TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
 import aiohttp
 
@@ -121,17 +172,37 @@ _PROMPT = """شما دستیار تشخیص تقلب در رسیدهای بان�
 - آیا نشانه‌ی دستکاری دیجیتال دیده می‌شود (فونت/رنگ/فاصله‌گذاری نامنظم در عدد مبلغ، پیکسل‌خوردگی موضعی دور یک عدد، چیدمانی که با اپ‌های بانکی واقعی ایران همخوانی ندارد، عکس از عکسِ یک اسکرین‌شات)؟
 - آیا تاریخ/ساعت تراکنش داخل رسید منطقی و معقول به‌نظر می‌رسد (نه خیلی قدیمی نسبت به الان)؟
 
-علاوه بر این دو مقدار خام را هم دقیقاً همان‌طور که در عکس نوشته شده (بدون
-فاصله، بدون خط‌تیره، فقط رقم/حروف انگلیسی) استخراج کن - این دو فیلد صرفاً
-OCR هستند، قضاوتی درباره‌شان نکن:
+علاوه بر این چند مقدار خام را هم دقیقاً همان‌طور که در عکس نوشته شده (بدون
+فاصله، بدون خط‌تیره، بدون کلمه‌ی «ریال»/«تومان»، فقط رقم/حروف انگلیسی)
+استخراج کن - این فیلدها صرفاً OCR/مشاهده‌ی خام هستند، قضاوتی درباره‌شان نکن:
 - شماره کارت یا شبای مقصد که داخل خودِ متن رسید چاپ شده (همانی که رسید ادعا
   می‌کند پول به آن واریز شده)، اگر بخشی از آن با ستاره پوشانده شده رقم‌های
   ستاره‌دار را هم به همان شکل با کاراکتر * بگذار.
+- شماره کارت مبدأ/پرداخت‌کننده (کارتی که پول از آن کم شده)، به همان شکل
+  که در متن رسید چاپ شده، رقم‌های ستاره‌دار را هم با * نگه دار.
 - شماره پیگیری/مرجع/سند تراکنش (هرکدام که در رسید هست).
+- مبلغ تراکنش، فقط رقم خام (مثلاً برای «۱۵۰,۰۰۰ تومان» بنویس 150000)، دقیقاً
+  همان عددی که در رسید چاپ شده - توجه کن اپ‌های بانکی ایرانی گاهی مبلغ را به
+  ریال نشان می‌دهند (ده برابر تومان)، فقط همان رقم خام را بدون تبدیل واحد
+  بنویس.
+- اگر رسید اسکرین‌شات یک گوشی موبایل است و نوار وضعیت (status bar) بالای
+  صفحه ساعت گوشی را نشان می‌دهد، همان ساعت را با فرمت ۲۴ ساعته HH:MM
+  بنویس (مثلاً 14:32). اگر رسید اسکرین‌شات موبایل نیست یا نوار وضعیت
+  ساعت ندارد/ناخوانا است، رشته خالی بگذار.
+- صرفاً بر اساس ۶ رقم اول شماره کارت مبدأ که در بالا نوشتی (نه ظاهر
+  تصویر)، با دانش عمومی خودت از پیش‌شماره‌های بانک‌های ایرانی حدس بزن این
+  کارت متعلق به کدام بانک است؛ فقط اسم بانک را به فارسی بنویس (مثلاً
+  «بانک ملت»). اگر شماره کارت مبدأ ناخوانا/ستاره‌دار بود یا مطمئن نیستی،
+  رشته خالی بگذار.
+- کاملاً مستقل از فیلد قبلی و صرفاً بر اساس ظاهر تصویر (لوگو، رنگ اپ،
+  اسم برند نوشته‌شده در بالای صفحه یا هدر رسید)، حدس بزن این اسکرین‌شات/
+  رسید مربوط به اپلیکیشن یا فیش کدام بانک ایرانی است؛ فقط اسم بانک را به
+  فارسی بنویس. اگر برندینگ اپ در تصویر مشخص نیست (مثلاً رسید کاغذی خام
+  بدون لوگو)، رشته خالی بگذار.
 اگر هرکدام خوانده نشد یا وجود نداشت، رشته خالی "" بگذار.
 
 فقط یک JSON خام و بدون هیچ توضیح اضافه یا Markdown، دقیقاً با این فرمت برگردان:
-{{"suspicious": true/false, "confidence": "low"/"high", "reasons": ["دلیل کوتاه فارسی", ...], "card_number_digits": "...", "reference_number": "..."}}
+{{"suspicious": true/false, "confidence": "low"/"high", "reasons": ["دلیل کوتاه فارسی", ...], "card_number_digits": "...", "source_card_digits": "...", "reference_number": "...", "amount_digits": "...", "status_bar_time": "...", "bin_bank_name": "...", "app_bank_name": "..."}}
 
 راهنمای فیلد confidence - خیلی مهم، محتاط باش:
 - "high" را فقط وقتی بگذار که تقریباً مطمئنی رسید جعلی/دستکاری‌شده است، یا
@@ -144,7 +215,7 @@ OCR هستند، قضاوتی درباره‌شان نکن:
   متفاوت، عدم قطعیت در تطبیق چند رقم کارت، زاویه/نور بد) حتماً "low" بگذار -
   این موارد فقط به‌صورت هشدار به ادمین نمایش داده می‌شود و تصمیم نهایی با
   خود ادمین می‌ماند.
-اگر چیز غیرعادی ندیدی: {{"suspicious": false, "confidence": "low", "reasons": [], "card_number_digits": "...", "reference_number": "..."}}"""
+اگر چیز غیرعادی ندیدی: {{"suspicious": false, "confidence": "low", "reasons": [], "card_number_digits": "...", "source_card_digits": "...", "reference_number": "...", "amount_digits": "...", "status_bar_time": "...", "bin_bank_name": "...", "app_bank_name": "..."}}"""
 
 
 # پیش‌شماره‌های (BIN) ۶ رقمی کارت‌های بانکی ایران که واقعاً توسط بانک/موسسه‌ی
@@ -213,6 +284,172 @@ def _check_extracted_number(raw: str) -> str | None:
         if not _luhn_valid(digits):
             return "⚠️ شماره کارت داخل متن رسید الگوریتم استاندارد کارت‌های بانکی (Luhn) را رد می‌کند - عدد واقعی نیست"
         return None
+    return None
+
+
+_AMOUNT_TOLERANCE_RATIO = 0.02  # ۲٪ - برای گرد شدن‌های جزئی نمایش بعضی اپ‌های بانکی
+_AMOUNT_TOLERANCE_MIN = 500  # حداقل تلورانس مطلق (تومان) برای مبالغ خیلی کوچک
+
+
+def _check_amount_mismatch(amount_digits: str, expected_amount_toman) -> "str | None":
+    """مبلغ خامی که مدل تصویری از متن رسید OCR کرده را با مبلغ مورد انتظار
+    فاکتور به‌صورت قطعی (نه با قضاوت AI) مقایسه می‌کند. چون اپ‌های بانکی
+    ایرانی گاهی مبلغ را به ریال نشان می‌دهند (ده برابر تومان)، هر دو حالت
+    ریال/تومان به‌عنوان تطبیق معتبر پذیرفته می‌شود. این چک فقط زمانی اجرا
+    می‌شود که رقم کاملاً خوانا باشد؛ مثل بقیه‌ی چک‌های قطعی این ماژول، شکستش
+    هرگز به‌تنهایی باعث رد خودکار نمی‌شود - فقط یک نشانه‌ی قوی برای ادمین/رد
+    خودکار در کنار حداقل یک تشخیص مستقل دیگر است."""
+    if not amount_digits or not amount_digits.isdigit() or not expected_amount_toman:
+        return None
+    try:
+        seen = int(amount_digits)
+        expected = int(expected_amount_toman)
+    except (ValueError, TypeError):
+        return None
+    if seen <= 0 or expected <= 0:
+        return None
+    for candidate in (expected, expected * 10):
+        tolerance = max(candidate * _AMOUNT_TOLERANCE_RATIO, _AMOUNT_TOLERANCE_MIN)
+        if abs(seen - candidate) <= tolerance:
+            return None
+    return (
+        f"⚠️ مبلغی که از متن رسید خوانده شد ({seen:,}) با مبلغ مورد انتظار فاکتور "
+        f"({expected:,} تومان) مطابقت ندارد (نه به‌صورت تومان، نه ریال) - این یک "
+        "چک عددی مستقل از قضاوت هوش مصنوعی است."
+    )
+
+
+_STATUS_BAR_TOLERANCE_MINUTES = 90  # تلورانس بزرگ عمدی - فقط note است، هدف گرفتن فاصله‌ی چند ساعته/چندروزه است
+
+
+def _check_status_bar_time(status_bar_time: str, message) -> "str | None":
+    """ساعت نوار وضعیت گوشی در اسکرین‌شات را با ساعت واقعی ارسال پیام به ربات
+    (به وقت تهران) مقایسه می‌کند. اگر فاصله زیاد باشد یعنی این اسکرین‌شات
+    مدتی قبل از ارسال گرفته شده - نشانه‌ی احتمالی رسید قدیمی که دوباره
+    فرستاده شده، حتی اگر خودِ عکس با هیچ رسید قبلی در دیتابیس یکی/شبیه
+    نباشد (مثلاً یک رسید واقعی و متفاوت که کاربر مدت‌ها نگه داشته بود)."""
+    if not status_bar_time or not re.fullmatch(r"\d{1,2}:\d{2}", status_bar_time):
+        return None
+    send_dt = getattr(message, "date", None) if message is not None else None
+    if send_dt is None:
+        return None
+    try:
+        if send_dt.tzinfo is None:
+            send_dt = send_dt.replace(tzinfo=timezone.utc)
+        send_local = send_dt.astimezone(_TEHRAN_TZ)
+        hh, mm = status_bar_time.split(":")
+        hh, mm = int(hh), int(mm)
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            return None
+        shot_minutes = hh * 60 + mm
+        send_minutes = send_local.hour * 60 + send_local.minute
+        diff = abs(shot_minutes - send_minutes)
+        diff = min(diff, 1440 - diff)  # دور زدن نیمه‌شب
+        if diff > _STATUS_BAR_TOLERANCE_MINUTES:
+            return (
+                f"⏰ ساعت نوار وضعیت گوشی در اسکرین‌شات ({status_bar_time}) با ساعت واقعی ارسال "
+                f"همین رسید به ربات ({send_local.strftime('%H:%M')} به وقت تهران) حدود {diff} دقیقه "
+                "فاصله دارد - ممکن است این اسکرین‌شات مدتی قبل گرفته شده و رسید قدیمی/بازارسالی باشد."
+            )
+    except Exception as exc:
+        _log.warning("receipt_ai_check: مقایسه‌ی ساعت نوار وضعیت خطا داد: %s", exc)
+    return None
+
+
+def _normalize_bank_name(name: str) -> str:
+    name = (name or "").strip().lower()
+    for junk in ("بانک", "bank", "‌", " ", "-", "_"):
+        name = name.replace(junk, "")
+    return name
+
+
+def _check_bank_name_mismatch(bin_bank_name: str, app_bank_name: str) -> "str | None":
+    """نام بانکی که مدل صرفاً از روی ۶ رقم اول کارت مبدأ حدس زده را با نام
+    بانکی که مدل مستقلاً از روی ظاهر/برندینگ تصویر تشخیص داده مقایسه
+    می‌کند. این دو باید یک بانک را نشان بدهند؛ اگر آشکارا متفاوت باشند
+    (نه فقط اختلاف املایی جزئی)، یعنی یا شماره کارت مبدأ با قالب/برند
+    واقعی رسید همخوانی ندارد (نشانه‌ی ترکیب قالب یک اپ با شماره کارت
+    دستکاری‌شده) یا خودِ مدل در یکی از دو حدس اشتباه کرده - در هر دو حالت
+    فقط یک note برای بررسی بیشتر ادمین است، نه رد خودکار."""
+    a, b = _normalize_bank_name(bin_bank_name), _normalize_bank_name(app_bank_name)
+    if not a or not b:
+        return None
+    if a in b or b in a:
+        return None
+    return (
+        f"⚠️ بر اساس پیش‌شماره‌ی کارت مبدأ، بانک صادرکننده باید «{bin_bank_name}» باشد، ولی ظاهر/برندینگ "
+        f"اپلیکیشن در تصویر رسید به «{app_bank_name}» شبیه‌تر است - این دو باید یکی باشند."
+    )
+
+
+_SCREENSHOT_FILENAME_PATTERNS = (
+    # اسکرین‌شات اندروید: Screenshot_20260315-143207.jpg یا Screenshot_2026-03-15-14-32-07.png
+    re.compile(r"Screenshot_(\d{4})-?(\d{2})-?(\d{2})[-_](\d{2})-?(\d{2})-?(\d{2})", re.IGNORECASE),
+    # فوروارد واتس‌اپ: IMG-20260315-WA0001.jpg (ساعت ندارد، فقط تاریخ)
+    re.compile(r"IMG-(\d{4})(\d{2})(\d{2})-WA\d+", re.IGNORECASE),
+)
+
+_SUSPICIOUS_FILENAME_KEYWORDS = (
+    "photoshop", "ps_edit", "picsart", "snapseed", "lightroom", "remini",
+    "editor", "edited", "fake", "canva", "photopea", "inpaint", "retouch",
+)
+
+_FILENAME_DATE_TOLERANCE = timedelta(days=2)
+
+
+def _check_receipt_filename(receipt_type: str, message) -> "str | None":
+    """نام فایل رسید ارسالی را بررسی می‌کند - فقط وقتی به‌صورت «فایل/سند»
+    تلگرام (نه عکس فشرده‌ی معمولی) فرستاده شده باشد، چون تلگرام نام فایل
+    اصلی عکس‌های معمولی را حذف می‌کند و آن‌ها را با نامی تصادفی جایگزین
+    می‌کند. دو چیز را چک می‌کند: تاریخ/ساعت جاسازشده در نام‌های استاندارد
+    اسکرین‌شات اندروید/فوروارد واتس‌اپ (اگر با زمان واقعی ارسال خیلی
+    فاصله داشته باشد یعنی اسکرین‌شات قدیمی است) و کلیدواژه‌ی ابزارهای
+    ویرایش عکس در نام فایل. هر دو فقط note هستند - کاربر می‌تواند نام فایل
+    را عمداً یا سهواً عوض کرده باشد، پس قطعیت این چک از هش/OCR کمتر است."""
+    if receipt_type != "document" or message is None:
+        return None
+    doc = getattr(message, "document", None)
+    file_name = getattr(doc, "file_name", None) if doc else None
+    if not file_name:
+        return None
+
+    lowered = file_name.lower()
+    for kw in _SUSPICIOUS_FILENAME_KEYWORDS:
+        if kw in lowered:
+            return (
+                f"🗂 نام فایل رسید ارسالی («{file_name}») حاوی نام یک ابزار/اپ ویرایش عکس شناخته‌شده "
+                "است - ممکن است تصویر پیش از ارسال ویرایش شده باشد."
+            )
+
+    send_dt = getattr(message, "date", None)
+    if send_dt is None:
+        return None
+    if send_dt.tzinfo is None:
+        send_dt = send_dt.replace(tzinfo=timezone.utc)
+
+    for pattern in _SCREENSHOT_FILENAME_PATTERNS:
+        m = pattern.search(file_name)
+        if not m:
+            continue
+        groups = m.groups()
+        try:
+            if len(groups) == 6:
+                y, mo, d, hh, mi, ss = (int(g) for g in groups)
+                shot_dt = datetime(y, mo, d, hh, mi, ss, tzinfo=_TEHRAN_TZ)
+            else:
+                y, mo, d = (int(g) for g in groups)
+                shot_dt = datetime(y, mo, d, tzinfo=_TEHRAN_TZ)
+        except ValueError:
+            continue
+        send_local = send_dt.astimezone(_TEHRAN_TZ)
+        if abs((send_local - shot_dt)) > _FILENAME_DATE_TOLERANCE:
+            return (
+                f"🗂 بر اساس نام فایل ارسالی («{file_name}»)، این اسکرین‌شات در تاریخ "
+                f"{shot_dt.strftime('%Y-%m-%d %H:%M')} گرفته شده - در حالی که همین حالا "
+                f"({send_local.strftime('%Y-%m-%d %H:%M')}) ارسال شده؛ ممکن است اسکرین‌شات/رسید "
+                "قدیمی دوباره فرستاده شده باشد."
+            )
+        break
     return None
 
 
@@ -340,10 +577,19 @@ def _parse_verdict(text: str) -> dict:
             "confidence": confidence,
             "reasons": [str(r).strip() for r in (data.get("reasons") or []) if str(r).strip()],
             "card_number_digits": str(data.get("card_number_digits") or "").strip(),
+            "source_card_digits": str(data.get("source_card_digits") or "").strip(),
             "reference_number": str(data.get("reference_number") or "").strip(),
+            "amount_digits": str(data.get("amount_digits") or "").strip(),
+            "status_bar_time": str(data.get("status_bar_time") or "").strip(),
+            "bin_bank_name": str(data.get("bin_bank_name") or "").strip(),
+            "app_bank_name": str(data.get("app_bank_name") or "").strip(),
         }
     except Exception:
-        return {"suspicious": False, "confidence": "low", "reasons": [], "card_number_digits": "", "reference_number": ""}
+        return {
+            "suspicious": False, "confidence": "low", "reasons": [],
+            "card_number_digits": "", "source_card_digits": "", "reference_number": "",
+            "amount_digits": "", "status_bar_time": "", "bin_bank_name": "", "app_bank_name": "",
+        }
 
 
 async def _run_gemini_vision(db, image_bytes: bytes, mime_type: str, amount_toman, card_number, card_holder) -> dict:
@@ -532,6 +778,10 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
     if ela_note:
         reasons.append(ela_note)
 
+    filename_note = _check_receipt_filename(receipt_type, message)
+    if filename_note:
+        reasons.append(filename_note)
+
     ai_enabled = (await asyncio.to_thread(db.get_setting, "receipt_ai_check_enabled", "1")) != "0"
     can_analyze = mime_type.startswith("image/") or mime_type == "application/pdf"
 
@@ -550,13 +800,32 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
             for label, v in flagged:
                 reasons.append(f"🤖 هشدار {label}: " + "؛ ".join(v["reasons"]))
 
+            chosen = next((v for label, v in successes if label == "Gemini"), successes[0][1])
+            amount_digits = chosen.get("amount_digits") or ""
+            amount_note = _check_amount_mismatch(amount_digits, amount_toman)
+            amount_mismatch = amount_note is not None
+
+            status_bar_note = _check_status_bar_time(chosen.get("status_bar_time") or "", message)
+            if status_bar_note:
+                reasons.append(status_bar_note)
+
+            bank_mismatch_note = _check_bank_name_mismatch(
+                chosen.get("bin_bank_name") or "", chosen.get("app_bank_name") or "",
+            )
+            if bank_mismatch_note:
+                reasons.append(bank_mismatch_note)
+
             high_flagged = [(label, v) for label, v in flagged if v.get("confidence") == "high"]
             if high_flagged and auto_reject_enabled:
-                if len(successes) == 1 or len(flagged) >= 2:
+                if len(successes) == 1 or len(flagged) >= 2 or amount_mismatch:
                     # فقط یک مدل کلاً در دسترس بود (رفتار قبلی)، یا حداقل دو مدل
-                    # مستقل هر دو مشکوک تشخیص دادند (هم‌رایی) - رد خودکار مجاز است.
+                    # مستقل هر دو مشکوک تشخیص دادند (هم‌رایی)، یا چک عددی قطعی
+                    # مبلغ (مستقل از AI) هم مغایرت را تایید کرد - در هر سه حالت
+                    # حداقل دو منبع مستقل هم‌رای‌اند، پس رد خودکار مجاز است.
                     for label, v in high_flagged:
                         reject_reasons.append(f"🤖 هشدار {label}: " + "؛ ".join(v["reasons"]))
+                    if amount_mismatch and amount_note not in reject_reasons:
+                        reject_reasons.append(amount_note)
                 else:
                     reasons.append(
                         "ℹ️ فقط یک مدل هوش مصنوعی این رسید را با اطمینان بالا مشکوک تشخیص داد ولی بقیه‌ی "
@@ -569,14 +838,19 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
             ref_values = {v["reference_number"] for _, v in successes if v.get("reference_number")}
             if len(ref_values) > 1:
                 reasons.append("⚠️ مدل‌های مختلف هوش مصنوعی شماره پیگیری/مرجع متفاوتی از متن رسید خواندند - یکی از آن‌ها ممکن است اشتباه OCR کرده باشد.")
+            amount_values = {v["amount_digits"] for _, v in successes if v.get("amount_digits")}
+            if len(amount_values) > 1:
+                reasons.append("⚠️ مدل‌های مختلف هوش مصنوعی مبلغ متفاوتی از متن رسید خواندند - یکی از آن‌ها ممکن است اشتباه OCR کرده باشد.")
 
-            chosen = next((v for label, v in successes if label == "Gemini"), successes[0][1])
             reference_number = chosen.get("reference_number") or ""
             card_number_digits = chosen.get("card_number_digits") or ""
 
             structural_note = _check_extracted_number(card_number_digits)
             if structural_note:
                 reasons.append(structural_note)
+
+            if amount_note and amount_note not in reasons:
+                reasons.append(amount_note)
 
             try:
                 ref_dup = await asyncio.to_thread(db.find_receipt_ref_reuse, reference_number, ref_kind, ref_id)
