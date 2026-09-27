@@ -1721,11 +1721,29 @@ class OrdersMixin:
             ).fetchone()
 
 
-    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int):
+    def find_receipt_ref_reuse(self, ref_number: str, ref_kind: str, ref_id: int):
+        """مشابه find_receipt_hash_reuse ولی بر اساس شماره پیگیری/مرجع/سندی
+        که مدل تصویری از داخل متن رسید خوانده - نه هش فایل. این کمک می‌کند
+        رسید تکراری‌ای که کاربر با فشرده‌سازی/برش/تغییر جزئی عکس (که هش را
+        عوض می‌کند) دوباره ارسال کرده هم شناسایی شود، چون شماره مرجع بانکی
+        داخل متن تغییر نمی‌کند. ref_number خالی هرگز جست‌وجو نمی‌شود چون
+        خیلی از رسیدها ممکن است این فیلد در آن‌ها خوانده نشده باشد و یک
+        مقدار خالی مشترک نباید به اشتباه «تکراری» تشخیص داده شود."""
+        if not ref_number:
+            return None
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM receipt_hashes WHERE ref_number=? AND ref_number<>'' "
+                "AND NOT (ref_kind=? AND ref_id=?) ORDER BY id LIMIT 1",
+                (ref_number, ref_kind, ref_id),
+            ).fetchone()
+
+
+    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int, ref_number: str = None):
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id) VALUES (?, ?, ?)",
-                (file_hash, ref_kind, ref_id),
+                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id, ref_number) VALUES (?, ?, ?, ?)",
+                (file_hash, ref_kind, ref_id, ref_number or None),
             )
 
 

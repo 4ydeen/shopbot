@@ -1430,6 +1430,7 @@ class DatabaseBase:
                 conn.execute(f"ALTER TABLE languages ADD COLUMN {_col} {_typ}")
 
         migrations = [
+            ("receipt_hashes", "ref_number", "TEXT"),
             ("users", "referred_by", "INTEGER"),
             ("users", "owner_reseller_id", "INTEGER"),
             ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
@@ -1673,6 +1674,10 @@ class DatabaseBase:
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+
+        # ایندکس ستون ref_number باید بعد از migrations بالا اضافه شود چون
+        # روی نصب‌های قدیمی این ستون همین بالا با ALTER TABLE اضافه می‌شود.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_ref ON receipt_hashes(ref_number)")
 
         # مهاجرت نقش‌های ثابت قدیمی (owner/admin/mid/support) به مجموعه
         # مجوزهای granular. فقط رکوردهایی که هنوز permissions ندارند پر می‌شوند
