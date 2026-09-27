@@ -1739,11 +1739,22 @@ class OrdersMixin:
             ).fetchone()
 
 
-    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int, ref_number: str = None):
+    def find_receipt_phash_candidates(self, ref_kind: str, ref_id: int):
+        """همه‌ی رسیدهای قبلی که phash دارند (برای مقایسه‌ی فاصله‌ی همینگ در
+        پایتون - چون فاصله‌ی همینگ را نمی‌شود مستقیم توی SQL محاسبه کرد).
+        ردیف‌های خودِ همین ref_kind/ref_id حذف شده‌اند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM receipt_hashes WHERE phash IS NOT NULL AND phash<>'' "
+                "AND NOT (ref_kind=? AND ref_id=?) ORDER BY id DESC LIMIT 500",
+                (ref_kind, ref_id),
+            ).fetchall()
+
+    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int, ref_number: str = None, phash: str = None):
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id, ref_number) VALUES (?, ?, ?, ?)",
-                (file_hash, ref_kind, ref_id, ref_number or None),
+                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id, ref_number, phash) VALUES (?, ?, ?, ?, ?)",
+                (file_hash, ref_kind, ref_id, ref_number or None, phash or None),
             )
 
 

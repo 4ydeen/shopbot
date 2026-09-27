@@ -1431,6 +1431,7 @@ class DatabaseBase:
 
         migrations = [
             ("receipt_hashes", "ref_number", "TEXT"),
+            ("receipt_hashes", "phash", "TEXT"),
             ("users", "referred_by", "INTEGER"),
             ("users", "owner_reseller_id", "INTEGER"),
             ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
@@ -1678,6 +1679,10 @@ class DatabaseBase:
         # ایندکس ستون ref_number باید بعد از migrations بالا اضافه شود چون
         # روی نصب‌های قدیمی این ستون همین بالا با ALTER TABLE اضافه می‌شود.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_ref ON receipt_hashes(ref_number)")
+        # phash: هش ادراکی (perceptual hash) رسید - برخلاف file_hash که با کوچک‌ترین
+        # فشرده‌سازی/کراپ مجدد کاملاً عوض می‌شود، این هش تصویر را از نظر بصری مقایسه
+        # می‌کند تا رسید تکراری‌ای که کمی ویرایش/فشرده/برش خورده هم لو برود.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_phash ON receipt_hashes(phash)")
 
         # مهاجرت نقش‌های ثابت قدیمی (owner/admin/mid/support) به مجموعه
         # مجوزهای granular. فقط رکوردهایی که هنوز permissions ندارند پر می‌شوند
