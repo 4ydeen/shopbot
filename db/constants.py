@@ -262,7 +262,7 @@ DEFAULT_SETTINGS = {
     "groq_api_key": "",
     "openrouter_api_key": "",
     "ai_provider": "auto",
-    "gemini_model": "gemini-2.5-flash-lite",
+    "gemini_model": "gemini-3.5-flash-lite",
     "groq_model": "openai/gpt-oss-20b",
     "openrouter_model": "openrouter/free",
     "usd_to_toman_rate": "0",  # نرخ تبدیل هر ۱ دلار به تومان؛ توسط ادمین دستی تنظیم می‌شود
