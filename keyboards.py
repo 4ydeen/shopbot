@@ -895,9 +895,13 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
     enabled = db.get_setting("card_to_card_enabled", "1") == "1"
     ai_check_enabled = db.get_setting("receipt_ai_check_enabled", "1") == "1"
     ai_auto_reject_enabled = db.get_setting("receipt_ai_auto_reject_enabled", "1") == "1"
+    ai_multi_model_enabled = db.get_setting("receipt_ai_multi_model_enabled", "1") == "1"
     toggle_text = "🔴 غیرفعال کردن پرداخت کارت‌به‌کارت" if enabled else "🟢 فعال کردن پرداخت کارت‌به‌کارت"
     ai_toggle_text = "🔴 خاموش کردن بررسی هوشمند رسید" if ai_check_enabled else "🟢 روشن کردن بررسی هوشمند رسید"
     ai_reject_toggle_text = "🔴 غیرفعال کردن رد خودکار رسید بسیار مشکوک" if ai_auto_reject_enabled else "🟢 فعال کردن رد خودکار رسید بسیار مشکوک"
+    ai_multi_toggle_text = "🔴 خاموش کردن بررسی چندمدلی (Groq/OpenRouter)" if ai_multi_model_enabled else "🟢 روشن کردن بررسی چندمدلی (Groq/OpenRouter)"
+    import ai_support
+    extra_providers_configured = bool(ai_support.resolve_groq_keys(db) or ai_support.resolve_openrouter_keys(db))
     rows = [
         [InlineKeyboardButton(text=tr(f"وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"💳 شماره کارت: {card_number}"), callback_data="noop")],
@@ -913,6 +917,17 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
             callback_data="noop",
         )])
         rows.append([InlineKeyboardButton(text=tr(ai_reject_toggle_text), callback_data="adm_receipt_ai_reject_toggle")])
+        if extra_providers_configured:
+            rows.append([InlineKeyboardButton(
+                text=tr(f"🧠 بررسی چندمدلی (Gemini+Groq+OpenRouter): {'🟢 روشن' if ai_multi_model_enabled else '🔴 خاموش'}"),
+                callback_data="noop",
+            )])
+            rows.append([InlineKeyboardButton(text=tr(ai_multi_toggle_text), callback_data="adm_receipt_ai_multi_toggle")])
+        else:
+            rows.append([InlineKeyboardButton(
+                text=tr("ℹ️ برای بررسی چندمدلی، کلید Groq یا OpenRouter را هم در «دستیار هوشمند» تنظیم کنید"),
+                callback_data="noop",
+            )])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
