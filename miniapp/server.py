@@ -6377,13 +6377,29 @@ class UserBlockUpdate(BaseModel):
     blocked: bool
 
 
+async def _notify_block_change_from_miniapp(tenant, db, telegram_id: int, blocked: bool, actor_id: int) -> None:
+    try:
+        user_row = db.get_user(telegram_id)
+        actor_row = db.get_user(actor_id)
+        actor_label = (f"@{actor_row['username']}" if actor_row and actor_row["username"] else str(actor_id)) + " (مینی‌اپ)"
+        text = report_router.build_block_toggle_text(user_row, telegram_id, blocked, actor_label)
+        await report_router.send_raw_to_group(tenant.bot_token, db, "security", text)
+    except Exception:
+        logging.getLogger("miniapp").warning("ارسال کارت بلاک/آنبلاک (مینی‌اپ) به گروه گزارش ناموفق بود.", exc_info=True)
+
+
 @app.post("/api/admin/users/{telegram_id}/block")
-def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_full_admin)):
-    _, db, _ = auth
+async def api_admin_set_user_blocked(telegram_id: int, body: UserBlockUpdate, auth=Depends(require_full_admin)):
+    admin_tg_id, db, tenant = auth
     user = db.get_user(telegram_id)
     if not user:
         raise HTTPException(status_code=404, detail=tr("کاربری با این آیدی عددی پیدا نشد."))
     db.set_user_blocked(telegram_id, body.blocked)
+    (await asyncio.to_thread(
+        db.log_admin_action, admin_tg_id, "user_block_toggle",
+        f"کاربر {telegram_id} ← {'بلاک' if body.blocked else 'آنبلاک'} (مینی‌اپ)",
+    ))
+    await _notify_block_change_from_miniapp(tenant, db, telegram_id, body.blocked, admin_tg_id)
     return {"status": "ok", "is_blocked": body.blocked}
 
 
