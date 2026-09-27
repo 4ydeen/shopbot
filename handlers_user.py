@@ -525,7 +525,6 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # شروع
     # -----------------------------------------------------------------------
 
-    @router.message(CommandStart())
     async def _notify_new_signup(message: Message, bot: Bot):
         """قابلیت گسترش گروه گزارش: کارت ثبت‌نام کاربر تازه به تاپیک «ثبت‌نام»."""
         row = await asyncio.to_thread(db.get_user, message.from_user.id)
@@ -580,6 +579,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         except Exception:
             logging.getLogger("handlers_user").warning("ارسال کارت رفرال به گروه گزارش ناموفق بود.", exc_info=True)
 
+    @router.message(CommandStart())
     async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         existing_user = await asyncio.to_thread(db.get_user, message.from_user.id)
