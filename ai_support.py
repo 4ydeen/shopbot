@@ -53,8 +53,8 @@ _MAX_TOOL_ROUNDS = 3
 # فقط جهت مقایسه‌ی نسبی مدل‌ها هستند - برای عدد دقیق و زنده به aistudio.google.com
 # بخش Usage نگاه کن). ترتیب: از سریع‌ترین/بیشترین سهمیه‌ی رایگان تا باکیفیت‌ترین.
 MODEL_CHOICES = [
-    ("gemini", "gemini-2.5-flash-lite", "⚡ Gemini Flash-Lite — سریع و اقتصادی برای حجم بالا"),
-    ("gemini", "gemini-2.5-flash", "🔷 Gemini Flash — تعادل کیفیت و سرعت"),
+    ("gemini", "gemini-3.5-flash-lite", "⚡ Gemini Flash-Lite — سریع و اقتصادی برای حجم بالا"),
+    ("gemini", "gemini-3.5-flash", "🔷 Gemini Flash — تعادل کیفیت و سرعت"),
     ("gemini", "gemini-2.5-pro", "🎯 Gemini Pro — استدلال قوی‌تر؛ سهمیه/هزینه بیشتر"),
     ("groq", "openai/gpt-oss-20b", "🚀 Groq GPT-OSS 20B — بسیار سریع، مناسب چت روزمره"),
     ("groq", "openai/gpt-oss-120b", "🧠 Groq GPT-OSS 120B — کیفیت بالاتر برای Agent"),
@@ -79,8 +79,18 @@ def resolve_provider_mode(db) -> str:
     return mode if mode in PROVIDER_LABELS else "auto"
 
 
+# مدل‌هایی که گوگل بازنشسته/حذف کرده - حتی اگر توی دیتابیس یا .env هنوز
+# مقدار قدیمی ذخیره شده باشد (مثلاً از قبل توسط ادمین انتخاب شده)، این نگاشت
+# بدون نیاز به دست‌کاری دستی تنظیمات، به‌صورت شفاف جایگزین معتبر را برمی‌گرداند.
+# اگر گوگل مدل دیگری را هم بازنشسته کرد، فقط کافیست یک خط اینجا اضافه شود.
+_DEPRECATED_GEMINI_MODELS = {
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+}
+
+
 def resolve_gemini_model(db) -> str:
-    return _setting(db, "gemini_model", "gemini-2.5-flash-lite") or getattr(config, "AI_SUPPORT_MODEL", "gemini-2.5-flash-lite")
+    model = _setting(db, "gemini_model", "gemini-3.5-flash-lite") or getattr(config, "AI_SUPPORT_MODEL", "gemini-3.5-flash-lite")
+    return _DEPRECATED_GEMINI_MODELS.get(model, model)
 
 
 def resolve_groq_model(db) -> str:

@@ -10962,7 +10962,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         try:
             gemini_model = ai_support.resolve_gemini_model(db)
         except Exception:
-            gemini_model = "gemini-2.5-flash-lite"
+            gemini_model = "gemini-3.5-flash-lite"
         try:
             groq_model = ai_support.resolve_groq_model(db)
         except Exception:

@@ -124,7 +124,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 # (فعلاً یعنی Gemini 3.6/3.7/3.8 Flash، بسته به این‌که گوگل چه‌موقع سوییچ کند).
 # اگر می‌خواهی نسخه‌ی مشخصی پین شود (برای پایداری رفتار مدل)، این مقدار را در
 # .env با AI_SUPPORT_MODEL=gemini-3.6-flash (یا نسخه‌ی دلخواه) override کن.
-AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-2.5-flash-lite")
+AI_SUPPORT_MODEL = os.getenv("AI_SUPPORT_MODEL", "gemini-3.5-flash-lite")
 
 # کلید امضای نشست (session) پنل مدیریت وب مستقل - فقط توسط admin_panel/server.py
 # استفاده می‌شود. اگر ست نشود، هر ری‌استارت پروسه همه‌ی نشست‌های وب‌ادمین‌ها را
