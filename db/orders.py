@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from typing import Optional
 from .constants import *  # noqa: F403
 from .constants import _wallet_tag
 
@@ -254,6 +255,17 @@ class OrdersMixin:
             conn.execute(
                 "UPDATE orders SET receipt_file_id=?, receipt_type=? WHERE id=?",
                 (file_id, receipt_type, order_id),
+            )
+
+
+    def set_order_receipt_ai_note(self, order_id: int, note: Optional[str]):
+        """قابلیت تشخیص رسید جعلی: نتیجه‌ی بررسی هوش مصنوعی (یا دلیل عدم بررسی)
+        روی سفارش ذخیره می‌شود تا هم در پیام ادمین دیده شود و هم برای رسیدگی
+        بعدی در دیتابیس بماند. note=None یعنی چیزی مشکوک/غیرعادی نبوده."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET receipt_ai_note=? WHERE id=?",
+                (note, order_id),
             )
 
 
@@ -1680,6 +1692,40 @@ class OrdersMixin:
             conn.execute(
                 "UPDATE wallet_topups SET receipt_file_id=?, receipt_type=? WHERE id=?",
                 (file_id, receipt_type, topup_id),
+            )
+
+
+    def set_topup_receipt_ai_note(self, topup_id: int, note: Optional[str]):
+        """معادل set_order_receipt_ai_note برای درخواست‌های شارژ کیف پول."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE wallet_topups SET receipt_ai_note=? WHERE id=?",
+                (note, topup_id),
+            )
+
+
+    # -----------------------------------------------------------------------
+    # تشخیص رسید جعلی/تکراری با هوش مصنوعی (receipt_ai_check.py)
+    # -----------------------------------------------------------------------
+
+    def find_receipt_hash_reuse(self, file_hash: str, ref_kind: str, ref_id: int):
+        """اگر همین عکس رسید (بر اساس هش فایل) قبلاً برای سفارش/شارژ دیگری
+        ثبت شده باشد، آن ردیف را برمی‌گرداند (رایج‌ترین الگوی تقلب: ری‌یوز یه
+        رسید تاییدشده‌ی قدیمی برای خرید جدید). ردیف‌های مربوط به همین
+        ref_kind/ref_id نادیده گرفته می‌شوند."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT * FROM receipt_hashes WHERE file_hash=? "
+                "AND NOT (ref_kind=? AND ref_id=?) ORDER BY id LIMIT 1",
+                (file_hash, ref_kind, ref_id),
+            ).fetchone()
+
+
+    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id) VALUES (?, ?, ?)",
+                (file_hash, ref_kind, ref_id),
             )
 
 

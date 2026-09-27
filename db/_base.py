@@ -1406,6 +1406,19 @@ class DatabaseBase:
             FOREIGN KEY(language_code) REFERENCES languages(code) ON DELETE CASCADE
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_translation_history_lang ON translation_history(language_code, id)")
+
+        # تشخیص رسید جعلی/تکراری با هوش مصنوعی (receipt_ai_check.py): هش هر
+        # رسید ارسالی (order یا topup) ذخیره می‌شود تا اگر همان عکس دوباره
+        # برای سفارش دیگری ارسال شد - بدون نیاز به هیچ فراخوانی AI - فوراً
+        # به‌عنوان رسید تکراری پرچم بخورد.
+        conn.execute("""CREATE TABLE IF NOT EXISTS receipt_hashes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_hash TEXT NOT NULL,
+            ref_kind TEXT NOT NULL,
+            ref_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_hash ON receipt_hashes(file_hash)")
         # Translation health/recovery state. These columns are additive so
         # existing installations keep their language data untouched.
         for _col, _typ in [
@@ -1652,6 +1665,10 @@ class DatabaseBase:
             # قابلیت #253: ترتیب نمایش محصولات داخل هر دسته (پیش از این فقط بر
             # اساس id/ترتیب ساخت مرتب می‌شدند).
             ("products", "sort_order", "INTEGER DEFAULT 0"),
+            # تشخیص رسید جعلی با هوش مصنوعی: نتیجه‌ی بررسی (یا دلیل عدم بررسی،
+            # مثلاً کلید API تنظیم نشده/خطای سرویس) روی خود سفارش/شارژ می‌ماند.
+            ("orders", "receipt_ai_note", "TEXT"),
+            ("wallet_topups", "receipt_ai_note", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
