@@ -218,6 +218,35 @@ _PROMPT = """شما دستیار تشخیص تقلب در رسیدهای بان�
 اگر چیز غیرعادی ندیدی: {{"suspicious": false, "confidence": "low", "reasons": [], "card_number_digits": "...", "source_card_digits": "...", "reference_number": "...", "amount_digits": "...", "status_bar_time": "...", "bin_bank_name": "...", "app_bank_name": "..."}}"""
 
 
+_FORENSIC_PROMPT = """این یک بررسی تخصصی فورنزیک برای تشخیص رسید بانکی جعلی است.
+فرض نکن که عبارت «عملیات موفق» یا ظاهر کلی تصویر به معنی واقعی بودن تراکنش است.
+تو فقط اصالت بصری/دیجیتال خودِ تصویر را ارزیابی می‌کنی؛ قرار نیست وجود واقعی تراکنش بانکی را تأیید کنی.
+
+تصویر را با دقت پیکسل‌به‌پیکسل و از چند زاویه بررسی کن:
+1) آیا تصویر بیشتر شبیه یک اسکرین‌شات طبیعی از یک اپ واقعی است یا یک تصویر بازسازی‌شده/ساخته‌شده؟
+2) هم‌ترازی متن‌ها، فاصله خطوط، baseline فونت، ضخامت حروف، anti-aliasing، رنگ، سایه، لبه‌ها و اندازه‌ی عناصر را بررسی کن.
+3) نواحی عددی حساس مثل مبلغ، شماره کارت، تاریخ، ساعت و شماره پیگیری را با بقیه‌ی UI مقایسه کن؛ دنبال فونت/رزولوشن/فشرده‌سازی متفاوت، halo، برش، paste، blur موضعی یا تغییر کیفیت باش.
+4) ساختار کلی UI، هدر، لوگو، دکمه‌ها، نوار وضعیت و نسبت‌های فضایی را بررسی کن. اگر چیزی با یک اسکرین‌شات طبیعی از همان نوع اپ ناسازگار است، مشخص کن.
+5) تناقض‌های داخلی تصویر را پیدا کن؛ مثلاً متن یا بانک اعلام‌شده با کارت/برندینگ/ساختار رسید همخوان نباشد.
+6) نشانه‌های تولید مصنوعی، بازسازی با ویرایشگر، compositing، screenshot-of-screenshot یا تغییر موضعی را بررسی کن.
+7) اگر شواهد کافی نداری، امتیاز بالا نده و چیزی را حدس نزن. کیفیت پایین یا فشرده‌سازی معمولی به‌تنهایی جعل نیست.
+
+این بخش را به خروجی JSON اصلی بررسی رسید اضافه کن و یک JSON واحد برگردان؛
+فیلدهای فورنزیک عبارت‌اند از:
+"forensic_score": 0, "forensic_confidence": "low", "synthetic": false,
+"tamper": false, "indicators": ["..."], "strong_indicators": ["..."]
+
+مقیاس forensic_score:
+0-19 = تقریباً بدون نشانه
+20-44 = ضعیف/مبهم
+45-69 = مشکوک
+70-84 = بسیار مشکوک
+85-100 = شواهد بصری قوی برای جعل/بازسازی
+
+forensic_confidence فقط low/medium/high باشد. فقط وقتی high بگذار که حداقل دو نشانه‌ی مستقل و مشخص در خود تصویر دیده شود.
+"""
+
+
 # پیش‌شماره‌های (BIN) ۶ رقمی کارت‌های بانکی ایران که واقعاً توسط بانک/موسسه‌ی
 # مالی صادر شده‌اند. منبع: فهرست عمومی و شناخته‌شده‌ی پیش‌شماره‌های شاپرک
 # (همانی که در کتابخانه‌های متن‌باز validation کارت ایرانی هم استفاده می‌شود).
@@ -546,6 +575,90 @@ def _ela_note(image_bytes: bytes, mime_type: str) -> "str | None":
         return None
 
 
+# وزن‌های محلی فورنزیک: این امتیاز «احتمال دستکاری» است، نه اثبات جعل.
+# هدف این است که ELA ضعیف قبلی به یک مجموعه چک مستقل تبدیل شود.
+def _local_forensic_scan(image_bytes: bytes, mime_type: str) -> dict:
+    result = {"score": 0, "indicators": [], "strong": []}
+    if not mime_type.startswith("image/"):
+        return result
+    try:
+        from PIL import Image, ImageChops, ImageStat, ImageFilter
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        w, h = img.size
+        if w < 300 or h < 500:
+            return result
+
+        # 1) چند سطح ELA: جعل موضعی معمولاً در یک کیفیت بازفشرده‌سازی، فقط یک ناحیه را جدا می‌کند.
+        if mime_type == "image/jpeg":
+            gray = img.convert("L")
+            local_scores = []
+            for quality in (75, 85, 92):
+                buf = io.BytesIO()
+                img.save(buf, "JPEG", quality=quality, optimize=False)
+                buf.seek(0)
+                resaved = Image.open(buf).convert("RGB")
+                diff = ImageChops.difference(img, resaved)
+                stat = ImageStat.Stat(diff)
+                overall = sum(stat.mean) / 3.0
+                if overall <= 0.05:
+                    continue
+                grid = 12
+                bw, bh = max(w // grid, 1), max(h // grid, 1)
+                vals = []
+                for gy in range(grid):
+                    for gx in range(grid):
+                        box = (gx*bw, gy*bh, min((gx+1)*bw,w), min((gy+1)*bh,h))
+                        if box[2] <= box[0] or box[3] <= box[1]:
+                            continue
+                        vals.append(sum(ImageStat.Stat(diff.crop(box)).mean)/3.0)
+                if vals:
+                    vals_sorted = sorted(vals)
+                    median = vals_sorted[len(vals_sorted)//2]
+                    p90 = vals_sorted[max(0, int(len(vals_sorted)*0.90)-1)]
+                    mx = max(vals)
+                    if median > 0 and mx > median * 6 and p90 > median * 2.5:
+                        local_scores.append(1)
+            if local_scores:
+                result["score"] += min(25, 10 * len(local_scores))
+                result["indicators"].append("ناهمگونی موضعی فشرده‌سازی در چند سطح ELA دیده شد")
+                if len(local_scores) >= 2:
+                    result["strong"].append("ناهمگونی موضعی در چند سطح بازفشرده‌سازی تکرار شد")
+
+        # 2) نواحی متن/عدد: اختلاف شدید شارپنس موضعی می‌تواند نشانه paste/retouch باشد.
+        # این چک فقط وقتی تفاوت از چند ناحیه عبور کند امتیاز می‌دهد تا خطوط طبیعی UI کافی نباشند.
+        small = img.resize((max(64, w//8), max(64, h//8)), Image.LANCZOS)
+        edges = small.convert("L").filter(ImageFilter.FIND_EDGES)
+        est = ImageStat.Stat(edges)
+        mean_edge = sum(est.mean) / len(est.mean)
+        if mean_edge > 18:
+            # high-frequency map on a coarse grid
+            pix = edges.load(); sw, sh = small.size
+            vals=[]
+            for gy in range(8):
+                for gx in range(8):
+                    x0,x1=int(gx*sw/8),int((gx+1)*sw/8)
+                    y0,y1=int(gy*sh/8),int((gy+1)*sh/8)
+                    crop=edges.crop((x0,y0,x1,y1))
+                    vals.append(sum(ImageStat.Stat(crop).mean)/3.0)
+            vals.sort()
+            med=vals[len(vals)//2]
+            hi=sum(1 for v in vals if med>0 and v>med*2.2)
+            if hi >= 3:
+                result["score"] += 8
+                result["indicators"].append("چند ناحیه از تصویر شارپنس/ریزجزئیات متفاوتی با بدنه اصلی دارند")
+
+        # 3) نسبت تصویر رایج برای اسکرین‌شات عمودی: به‌تنهایی نشانه جعل نیست، فقط context است.
+        ratio = w / float(h)
+        if 0.43 <= ratio <= 0.55 and h >= 1200:
+            result["indicators"].append("تصویر از نظر ابعاد با اسکرین‌شات عمودی موبایل سازگار است")
+
+        result["score"] = min(40, result["score"])
+        return result
+    except Exception as exc:
+        _log.warning("receipt_ai_check: local forensic scan failed: %s", exc)
+        return result
+
+
 async def _download(bot, file_id: str) -> bytes:
     tg_file = await bot.get_file(file_id)
     buf = await bot.download_file(tg_file.file_path)
@@ -572,6 +685,13 @@ def _parse_verdict(text: str) -> dict:
         confidence = str(data.get("confidence") or "low").strip().lower()
         if confidence not in ("low", "high"):
             confidence = "low"
+        forensic_confidence = str(data.get("forensic_confidence") or "low").strip().lower()
+        if forensic_confidence not in ("low", "medium", "high"):
+            forensic_confidence = "low"
+        try:
+            forensic_score = max(0, min(100, int(float(data.get("forensic_score") or 0))))
+        except (TypeError, ValueError):
+            forensic_score = 0
         return {
             "suspicious": bool(data.get("suspicious")),
             "confidence": confidence,
@@ -583,16 +703,24 @@ def _parse_verdict(text: str) -> dict:
             "status_bar_time": str(data.get("status_bar_time") or "").strip(),
             "bin_bank_name": str(data.get("bin_bank_name") or "").strip(),
             "app_bank_name": str(data.get("app_bank_name") or "").strip(),
+            "forensic_score": forensic_score,
+            "forensic_confidence": forensic_confidence,
+            "synthetic": bool(data.get("synthetic")),
+            "tamper": bool(data.get("tamper")),
+            "indicators": [str(r).strip() for r in (data.get("indicators") or []) if str(r).strip()],
+            "strong_indicators": [str(r).strip() for r in (data.get("strong_indicators") or []) if str(r).strip()],
         }
     except Exception:
         return {
             "suspicious": False, "confidence": "low", "reasons": [],
             "card_number_digits": "", "source_card_digits": "", "reference_number": "",
             "amount_digits": "", "status_bar_time": "", "bin_bank_name": "", "app_bank_name": "",
+            "forensic_score": 0, "forensic_confidence": "low", "synthetic": False, "tamper": False,
+            "indicators": [], "strong_indicators": [],
         }
 
 
-async def _run_gemini_vision(db, image_bytes: bytes, mime_type: str, amount_toman, card_number, card_holder) -> dict:
+async def _run_gemini_vision(db, image_bytes: bytes, mime_type: str, amount_toman, card_number, card_holder, prompt_override: str | None = None) -> dict:
     """تحلیل تصویری با Gemini - کلیدها/rotate دقیقاً همان چیزی است که
     ai_support._run_gemini استفاده می‌کند تا تنظیمات پنل ادمین یکسان برای
     هر دو کاربرد به‌کار برود."""
@@ -603,7 +731,7 @@ async def _run_gemini_vision(db, image_bytes: bytes, mime_type: str, amount_toma
         raise RuntimeError("gemini_api_key تنظیم نشده")
 
     model_name = ai_support.resolve_gemini_model(db)
-    prompt = _PROMPT.format(
+    prompt = prompt_override or _PROMPT.format(
         amount=f"{amount_toman:,}" if amount_toman else "نامشخص",
         card_number=card_number or "نامشخص",
         card_holder=card_holder or "نامشخص",
@@ -697,9 +825,9 @@ async def _run_vision_ensemble(db, image_bytes: bytes, mime_type: str, amount_to
         amount=f"{amount_toman:,}" if amount_toman else "نامشخص",
         card_number=card_number or "نامشخص",
         card_holder=card_holder or "نامشخص",
-    )
+    ) + "\n\n" + _FORENSIC_PROMPT + "\n\nمهم: فقط یک JSON نهایی برگردان و همه فیلدهای استخراجی قبلی + فیلدهای فورنزیک را در همان JSON قرار بده."
 
-    tasks = [_run_labeled("Gemini", _run_gemini_vision(db, image_bytes, mime_type, amount_toman, card_number, card_holder))]
+    tasks = [_run_labeled("Gemini", _run_gemini_vision(db, image_bytes, mime_type, amount_toman, card_number, card_holder, prompt_override=prompt))]
 
     multi_model_enabled = (await asyncio.to_thread(db.get_setting, "receipt_ai_multi_model_enabled", "1")) != "0"
     # مدل‌های بینایی Groq/OpenRouter فعلاً فقط عکس را پشتیبانی می‌کنند، نه PDF.
@@ -778,6 +906,11 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
     if ela_note:
         reasons.append(ela_note)
 
+    local_forensics = await asyncio.to_thread(_local_forensic_scan, image_bytes, mime_type)
+    local_forensic_score = int(local_forensics.get("score") or 0)
+    for ind in local_forensics.get("indicators") or []:
+        reasons.append("🔬 فورنزیک محلی: " + ind)
+
     filename_note = _check_receipt_filename(receipt_type, message)
     if filename_note:
         reasons.append(filename_note)
@@ -800,6 +933,25 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
             for label, v in flagged:
                 reasons.append(f"🤖 هشدار {label}: " + "؛ ".join(v["reasons"]))
 
+            # امتیاز فورنزیک از همه‌ی مدل‌ها؛ این با suspicious فرق دارد و مدل را مجبور می‌کند
+            # به‌جای یک «بله/خیر» مبهم، شواهد تصویری را وزن‌دهی کند.
+            forensic_models = [(label, v) for label, v in successes if int(v.get("forensic_score") or 0) > 0]
+            if forensic_models:
+                best_forensic = max(int(v.get("forensic_score") or 0) for _, v in forensic_models)
+                high_forensic_votes = [
+                    (label, v) for label, v in forensic_models
+                    if int(v.get("forensic_score") or 0) >= 80 and v.get("forensic_confidence") == "high"
+                ]
+                if best_forensic >= 45:
+                    labels = "، ".join(f"{label}: {int(v.get('forensic_score') or 0)}/100" for label, v in forensic_models)
+                    reasons.append(f"🧠 امتیاز فورنزیک تصویری: {labels}")
+                for label, v in forensic_models:
+                    for ind in v.get("indicators") or []:
+                        reasons.append(f"🔎 فورنزیک {label}: {ind}")
+            else:
+                best_forensic = 0
+                high_forensic_votes = []
+
             chosen = next((v for label, v in successes if label == "Gemini"), successes[0][1])
             amount_digits = chosen.get("amount_digits") or ""
             amount_note = _check_amount_mismatch(amount_digits, amount_toman)
@@ -816,20 +968,30 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
                 reasons.append(bank_mismatch_note)
 
             high_flagged = [(label, v) for label, v in flagged if v.get("confidence") == "high"]
-            if high_flagged and auto_reject_enabled:
-                if len(successes) == 1 or len(flagged) >= 2 or amount_mismatch:
-                    # فقط یک مدل کلاً در دسترس بود (رفتار قبلی)، یا حداقل دو مدل
-                    # مستقل هر دو مشکوک تشخیص دادند (هم‌رایی)، یا چک عددی قطعی
-                    # مبلغ (مستقل از AI) هم مغایرت را تایید کرد - در هر سه حالت
-                    # حداقل دو منبع مستقل هم‌رای‌اند، پس رد خودکار مجاز است.
+            # رد خودکار فقط وقتی فعال است که یک سیگنال قوی، حداقل یک شاهد مستقل دیگر داشته باشد.
+            # برای جعل تصویری حرفه‌ای، فورنزیک AI می‌تواند شاهد دوم باشد؛ اما صرف score متوسط هرگز کافی نیست.
+            if auto_reject_enabled:
+                independent_visual = (
+                    len(high_flagged) >= 2
+                    or len(high_forensic_votes) >= 2
+                    or (high_flagged and local_forensic_score >= 18)
+                    or (high_forensic_votes and local_forensic_score >= 12)
+                )
+                independent_numeric = amount_mismatch and bool(high_flagged or high_forensic_votes)
+                if independent_visual or independent_numeric:
                     for label, v in high_flagged:
-                        reject_reasons.append(f"🤖 هشدار {label}: " + "؛ ".join(v["reasons"]))
-                    if amount_mismatch and amount_note not in reject_reasons:
+                        reject_reasons.append(f"🤖 هشدار {label}: " + "؛ ".join(v.get("reasons") or ["نشانه‌ی قوی جعل تصویری"]))
+                    for label, v in high_forensic_votes:
+                        strong = v.get("strong_indicators") or v.get("indicators") or ["نشانه‌های فورنزیک قوی"]
+                        reject_reasons.append(f"🧠 فورنزیک {label} ({int(v.get('forensic_score') or 0)}/100): " + "؛ ".join(strong))
+                    if local_forensic_score >= 18:
+                        reject_reasons.append("🔬 فورنزیک محلی نیز نشانه‌ی مستقل دستکاری/بازسازی تصویر پیدا کرد")
+                    if amount_mismatch and amount_note:
                         reject_reasons.append(amount_note)
-                else:
+                elif high_flagged or high_forensic_votes:
                     reasons.append(
-                        "ℹ️ فقط یک مدل هوش مصنوعی این رسید را با اطمینان بالا مشکوک تشخیص داد ولی بقیه‌ی "
-                        "مدل‌های در دسترس موردی پیدا نکردند؛ برای احتیاط رد خودکار انجام نشد و تصمیم با ادمین است."
+                        "ℹ️ رسید نشانه‌ی قوی از یک منبع هوش مصنوعی دارد، اما برای جلوگیری از رد اشتباه، "
+                        "شاهد مستقل کافی برای رد خودکار وجود نداشت؛ بررسی انسانی توصیه می‌شود."
                     )
 
             card_values = {v["card_number_digits"] for _, v in successes if v.get("card_number_digits")}
@@ -848,6 +1010,10 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
             structural_note = _check_extracted_number(card_number_digits)
             if structural_note:
                 reasons.append(structural_note)
+            source_card_digits = chosen.get("source_card_digits") or ""
+            source_structural_note = _check_extracted_number(source_card_digits)
+            if source_structural_note:
+                reasons.append("⚠️ کارت مبدأ: " + source_structural_note.replace("⚠️ ", ""))
 
             if amount_note and amount_note not in reasons:
                 reasons.append(amount_note)
