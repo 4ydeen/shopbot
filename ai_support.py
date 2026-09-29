@@ -129,6 +129,43 @@ def resolve_openrouter_keys(db) -> list:
     return keys or _split_keys(getattr(config, "OPENROUTER_API_KEY", ""))
 
 
+def resolve_github_keys(db) -> list:
+    keys = _split_keys(_setting(db, "github_models_api_key"))
+    return keys or _split_keys(getattr(config, "GITHUB_MODELS_API_KEY", ""))
+
+
+def resolve_mistral_keys(db) -> list:
+    keys = _split_keys(_setting(db, "mistral_api_key"))
+    return keys or _split_keys(getattr(config, "MISTRAL_API_KEY", ""))
+
+
+def resolve_cohere_keys(db) -> list:
+    keys = _split_keys(_setting(db, "cohere_api_key"))
+    return keys or _split_keys(getattr(config, "COHERE_API_KEY", ""))
+
+
+def resolve_cloudflare_keys(db) -> list:
+    keys = _split_keys(_setting(db, "cloudflare_api_token"))
+    return keys or _split_keys(getattr(config, "CLOUDFLARE_API_TOKEN", ""))
+
+
+def resolve_cloudflare_account_id(db) -> str:
+    return _setting(db, "cloudflare_account_id") or getattr(config, "CLOUDFLARE_ACCOUNT_ID", "").strip()
+
+
+RECEIPT_AGENT_FIELDS = (
+    ("gh", "GitHub Models", "github_models_api_key", "GITHUB_MODELS_API_KEY", "https://github.com/settings/personal-access-tokens", True),
+    ("mi", "Mistral", "mistral_api_key", "MISTRAL_API_KEY", "https://console.mistral.ai/api-keys", True),
+    ("co", "Cohere", "cohere_api_key", "COHERE_API_KEY", "https://dashboard.cohere.com/api-keys", True),
+    ("cft", "Cloudflare Workers AI - توکن", "cloudflare_api_token", "CLOUDFLARE_API_TOKEN", "https://dash.cloudflare.com/profile/api-tokens", True),
+    ("cfa", "Cloudflare Workers AI - Account ID", "cloudflare_account_id", "CLOUDFLARE_ACCOUNT_ID", "https://dash.cloudflare.com/", False),
+)
+
+
+def receipt_agent_configured(db, setting_key: str, env_name: str) -> bool:
+    return bool(_setting(db, setting_key) or getattr(config, env_name, ""))
+
+
 def resolve_gemini_key(db) -> str:
     keys = resolve_gemini_keys(db)
     return keys[0] if keys else ""

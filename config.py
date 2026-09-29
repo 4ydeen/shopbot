@@ -112,6 +112,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+GITHUB_MODELS_API_KEY = os.getenv("GITHUB_MODELS_API_KEY", "")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
+COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
 
 
 # نام مدل Gemini مورد استفاده برای دستیار پشتیبانی. اگر بعداً مدل جدیدتری آمد یا

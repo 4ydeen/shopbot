@@ -94,6 +94,10 @@ class AdminSetOpenRouterKey(StatesGroup):
     waiting_key = State()
 
 
+class AdminSetReceiptAgentKey(StatesGroup):
+    waiting_key = State()
+
+
 class AdminSetTranslationGeminiKey(StatesGroup):
     waiting_key = State()
 

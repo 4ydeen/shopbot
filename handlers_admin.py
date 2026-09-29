@@ -112,6 +112,7 @@ from states import (
     AdminSetGeminiKey,
     AdminSetGroqKey,
     AdminSetOpenRouterKey,
+    AdminSetReceiptAgentKey,
     AdminSetTranslationGeminiKey,
     AdminSetTranslationOpenRouterKey,
     AdminReferralPercent,
@@ -2856,7 +2857,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(db.get_text('handlers_admin.auto_30ff7b82', 'این سفارش قبلاً بررسی شده است.'), show_alert=True)
             return
 
-        if not (await asyncio.to_thread(db.reject_order, order_id)):
+        if not (await asyncio.to_thread(db.reject_order, order_id, "admin")):
             await call.answer(db.get_text('handlers_admin.auto_30ff7b82', 'این سفارش قبلاً بررسی شده است.'), show_alert=True)
             return
         (await asyncio.to_thread(db.log_admin_action, 
@@ -3987,7 +3988,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(db.get_text('handlers_admin.auto_eef1da1e', 'این درخواست قبلاً بررسی شده است.'), show_alert=True)
             return
 
-        if not (await asyncio.to_thread(db.reject_topup, topup_id)):
+        if not (await asyncio.to_thread(db.reject_topup, topup_id, "admin")):
             await call.answer(db.get_text('handlers_admin.auto_eef1da1e', 'این درخواست قبلاً بررسی شده است.'), show_alert=True)
             return
         (await asyncio.to_thread(db.log_admin_action, 
@@ -9303,6 +9304,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
         await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
 
+    @router.callback_query(F.data == "adm_receipt_ai_strict_toggle")
+    async def cb_admin_receipt_ai_strict_toggle(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = (await asyncio.to_thread(db.get_setting, "receipt_ai_strict_mode", "1"))
+        (await asyncio.to_thread(db.set_setting, "receipt_ai_strict_mode", "0" if current == "1" else "1"))
+        await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
+        await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
+
     @router.callback_query(F.data == "adm_receipt_ai_multi_toggle")
     async def cb_admin_receipt_ai_multi_toggle(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
@@ -9311,6 +9321,75 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "receipt_ai_multi_model_enabled", "0" if current == "1" else "1"))
         await safe_edit(call, db.get_text('handlers_admin.auto_1141f075', '💳 تنظیمات پرداخت کارت\u200cبه\u200cکارت:'), reply_markup=kb.card_settings_kb(db))
         await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
+
+    @router.callback_query(F.data == "adm_receipt_ai_stats")
+    async def cb_admin_receipt_ai_stats(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        import receipt_ai_check
+        report = await asyncio.to_thread(receipt_ai_check.build_learning_report, db)
+        await safe_edit(call, report, reply_markup=kb.admin_back_kb("adm_set_card"))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_receipt_agents")
+    async def cb_admin_receipt_agents(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        await safe_edit(
+            call,
+            tr("🧾 ایجنت‌های اضافی تشخیص رسید\n\nهر ایجنتی که کلیدش تنظیم شده باشد، روی هر رسید به‌صورت موازی و مستقل اجرا می‌شود."),
+            reply_markup=kb.receipt_agents_kb(db),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rcpt_agent:"))
+    async def cb_admin_receipt_agent_set(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        agent_id = call.data.split(":", 1)[1]
+        field = next((f for f in ai_support.RECEIPT_AGENT_FIELDS if f[0] == agent_id), None)
+        if not field:
+            return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
+        _, title, setting_key, env_name, link, secret = field
+        current = ai_support._split_keys(db.get_setting(setting_key, ""))
+        if not current:
+            masked = "❌ تنظیم نشده"
+        elif secret:
+            masked = "\n".join(f"  {i+1}. ...{k[-4:]}" for i, k in enumerate(current))
+        else:
+            masked = "  " + current[0]
+        await state.set_state(AdminSetReceiptAgentKey.waiting_key)
+        await state.update_data(receipt_agent_id=agent_id)
+        await replace_admin_view(
+            call,
+            tr(f"🔑 {title}\n\nمقدار را بفرست؛ برای چند کلید هر کلید در یک خط."
+               f"\n🔗 راهنما/ثبت‌نام: {link}\n\nمقدار فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {env_name}"),
+            reply_markup=kb.admin_back_kb("adm_receipt_agents"),
+        )
+        await call.answer()
+
+    @router.message(AdminSetReceiptAgentKey.waiting_key)
+    async def process_set_receipt_agent_key(message: Message, state: FSMContext):
+        data = await state.get_data()
+        field = next((f for f in ai_support.RECEIPT_AGENT_FIELDS if f[0] == data.get("receipt_agent_id")), None)
+        text = (message.text or "").strip()
+        await state.clear()
+        if not field:
+            return
+        _, title, setting_key, _env, _link, secret = field
+        if text in ("حذف", "/حذف", "-"):
+            value = ""
+        else:
+            keys = ai_support._split_keys(text)
+            value = "\n".join(keys if secret else keys[:1])
+        await asyncio.to_thread(db.set_setting, setting_key, value)
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "receipt_agent_key_change", f"{title}: {'حذف شد' if not value else 'ذخیره شد'}")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(tr(f"✅ {title} {'حذف شد.' if not value else 'ذخیره شد.'}"), reply_markup=kb.receipt_agents_kb(db))
 
     @router.callback_query(F.data == "adm_set_card_edit")
     async def cb_admin_set_card_edit(call: CallbackQuery, state: FSMContext):

@@ -1226,7 +1226,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (بدون دکمه‌ی تایید/رد) گزارش می‌دهد و به کاربر پیام رد رسید را می‌فرستد.
         اگر سفارش قبلاً از حالت pending خارج شده باشد (مثلاً هم‌زمان توسط ادمین
         بررسی شده)، کاری نمی‌کند و False برمی‌گرداند تا جریان عادی ادامه یابد."""
-        if not (await asyncio.to_thread(db.reject_order, order_id)):
+        if not (await asyncio.to_thread(db.reject_order, order_id, "ai_auto")):
             return False
         (await asyncio.to_thread(
             db.log_admin_action, 0, "order_ai_auto_reject",
@@ -1875,7 +1875,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if order_id:
             order = (await asyncio.to_thread(db.get_order, order_id))
             if order and order["status"] == "pending":
-                (await asyncio.to_thread(db.reject_order, order_id))
+                (await asyncio.to_thread(db.reject_order, order_id, "user_cancel"))
         await state.clear()
         await _safe_edit(call.message, db.get_text('handlers_user.auto_570dedda', 'عملیات لغو شد.'))
         await call.answer()
@@ -5797,7 +5797,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"💰 مبلغ: {amount:,} تومان"
         )
 
-        if ai_result.get("reject") and (await asyncio.to_thread(db.reject_topup, topup_id)):
+        if ai_result.get("reject") and (await asyncio.to_thread(db.reject_topup, topup_id, "ai_auto")):
             (await asyncio.to_thread(
                 db.log_admin_action, 0, "topup_ai_auto_reject",
                 f"شارژ #{topup_id} | کاربر {message.from_user.id} | مبلغ: {amount:,} | دلیل: {ai_result.get('reject_reason') or ''}",
