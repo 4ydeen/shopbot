@@ -373,6 +373,17 @@ class AdminWheelSettings(StatesGroup):
     waiting_cooldown = State()
 
 
+class AdminWheelPrize(StatesGroup):
+    waiting_discount_percent = State()
+    waiting_title = State()
+    waiting_prefix = State()
+    waiting_panel = State()
+    waiting_volume_mb = State()
+    waiting_duration_hours = State()
+    waiting_chance = State()
+    waiting_edit_chance = State()
+
+
 class AdminRenewalSettings(StatesGroup):
     waiting_days_before = State()
     waiting_percent = State()

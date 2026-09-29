@@ -4,6 +4,7 @@ import asyncio
 import html
 import logging
 
+import report_router
 from i18n import tr
 from datetime import datetime, timedelta
 
@@ -39,9 +40,9 @@ async def _report_result(bot, db, result):
             targets = []
     if not targets:
         try:
-            targets = await asyncio.to_thread(db.list_admins)
-        except Exception:
-            targets = []
+            await report_router.report(bot, db, "prize", text)
+        except Exception as exc:
+            logger.info("F18: ارسال گزارش قرعه‌کشی به تاپیک جوایز ناموفق بود: %s", exc)
     for target in targets:
         try:
             await bot.send_message(target, text, parse_mode="HTML")

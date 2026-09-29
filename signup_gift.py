@@ -12,6 +12,8 @@ Database.grant_pending_signup_gifts) و پیام اطلاع‌رسانی برا�
 import asyncio
 import logging
 
+import report_router
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,10 +27,28 @@ async def _notify(bot, db, user_id: int, amount: int):
         logger.info("ارسال پیام هدیه‌ی عضویت به کاربر %s ناموفق بود: %s", user_id, exc)
 
 
+async def _report_granted(bot, db, granted: list) -> None:
+    """خلاصه‌ی هدیه‌های عضویتِ این دور را به تاپیک «جوایز» می‌فرستد (فقط گروه، بدون پیام خصوصی)."""
+    lines = ["🎁 هدیه‌ی عضویت اعطا شد", ""]
+    for item in granted[:30]:
+        uid = item["user_id"]
+        lines.append(f'👤 <a href="tg://user?id={uid}">{uid}</a> - {item["amount"]:,} تومان')
+    if len(granted) > 30:
+        lines.append(f"... و {len(granted) - 30} کاربر دیگر")
+    lines.append("")
+    lines.append(f"جمع: {sum(int(i['amount']) for i in granted):,} تومان برای {len(granted)} کاربر")
+    try:
+        await report_router.send_text(bot, db, "prize", "\n".join(lines))
+    except Exception as exc:
+        logger.info("ارسال گزارش هدیه‌ی عضویت به تاپیک جوایز ناموفق بود: %s", exc)
+
+
 async def signup_gift_once(bot, db) -> list:
     granted = await asyncio.to_thread(db.grant_pending_signup_gifts)
     for item in granted:
         await _notify(bot, db, item["user_id"], item["amount"])
+    if granted:
+        await _report_granted(bot, db, granted)
     return granted
 
 

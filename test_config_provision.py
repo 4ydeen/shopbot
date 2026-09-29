@@ -23,7 +23,8 @@ def _random_username(prefix: str) -> str:
     return f"{prefix}{suffix}"
 
 
-async def provision_test_plan(db, plan, user_id: int, override_server=None) -> dict:
+async def provision_test_plan(db, plan, user_id: int, override_server=None,
+                              source: str = "test", track_product: bool = True) -> dict:
     """پلن را روی پنل خودش (یا override_server، برای نماینده سطح ۲ که همیشه از
     پنل اعتباری خودش استفاده می‌کند، نه پنل ثبت‌شده روی پلن) می‌سازد و در
     custom_configs با source='test' و product_id=plan['id'] ثبت می‌کند.
@@ -56,7 +57,8 @@ async def provision_test_plan(db, plan, user_id: int, override_server=None) -> d
     try:
         db.add_custom_config(
             user_id, server["id"], username, volume_gb, duration_days,
-            result.subscription_url, source="test", product_id=plan["id"],
+            result.subscription_url, source=source,
+            product_id=plan["id"] if track_product else None,
         )
     except Exception:
         pass

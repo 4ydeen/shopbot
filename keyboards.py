@@ -3388,21 +3388,57 @@ def signup_gift_settings_kb(db) -> InlineKeyboardMarkup:
 # گردونه شانس
 # ---------------------------------------------------------------------------
 
+def _fmt_chance(value) -> str:
+    text = f"{float(value):.2f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def wheel_prize_label(prize) -> str:
+    """عنوان کوتاه جایزه‌ی گردونه برای دکمه‌ها و متن‌ها."""
+    if prize["kind"] == "config":
+        base = f"🛰 {prize['title']}"
+    else:
+        base = f"🎟 کد تخفیف {prize['discount_percent']}٪"
+    return f"{base} - شانس {_fmt_chance(prize['chance'])}٪"
+
+
 def wheel_settings_kb(db) -> InlineKeyboardMarkup:
     s = db.get_wheel_settings()
     toggle_text = "🔴 غیرفعال کردن گردونه" if s["enabled"] else "🟢 فعال کردن گردونه"
-    prizes_txt = "، ".join(f"{p}%" for p in s["prizes"]) or "---"
+    prizes = db.list_wheel_prizes()
     rows = [
-        [InlineKeyboardButton(text=tr(f"احتمال برد: {s['win_percent']}%"), callback_data="noop")],
-        [InlineKeyboardButton(text=tr(f"جوایز ممکن: {prizes_txt}"), callback_data="noop")],
+        [InlineKeyboardButton(text=tr(f"شانس کل برد: {s['win_percent']}%"), callback_data="noop")],
+        [InlineKeyboardButton(text=tr(f"🎁 مدیریت جوایز ({len(prizes)})"), callback_data="adm_wheel_prizes")],
         [InlineKeyboardButton(text=tr(f"اعتبار کد جایزه: {s['expiry_hours']} ساعت"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"فاصله بین دو چرخش: {s['cooldown_hours']} ساعت"), callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_wheel_toggle")],
-        [InlineKeyboardButton(text=tr("✏️ تغییر درصد برد"), callback_data="adm_wheel_edit_percent")],
-        [InlineKeyboardButton(text=tr("✏️ تغییر لیست جوایز"), callback_data="adm_wheel_edit_prizes")],
         [InlineKeyboardButton(text=tr("✏️ تغییر اعتبار کد"), callback_data="adm_wheel_edit_expiry")],
         [InlineKeyboardButton(text=tr("✏️ تغییر فاصله چرخش"), callback_data="adm_wheel_edit_cooldown")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def wheel_prizes_kb(db) -> InlineKeyboardMarkup:
+    rows = []
+    for prize in db.list_wheel_prizes():
+        mark = "✅" if prize["is_active"] else "⛔️"
+        rows.append([InlineKeyboardButton(
+            text=f"{mark} {wheel_prize_label(prize)}", callback_data=f"adm_wp_view:{prize['id']}",
+        )])
+    rows.append([InlineKeyboardButton(text=tr("➕ جایزه تخفیف"), callback_data="adm_wp_add:discount")])
+    rows.append([InlineKeyboardButton(text=tr("➕ جایزه کانفیگ"), callback_data="adm_wp_add:config")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_wheel_settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def wheel_prize_view_kb(prize) -> InlineKeyboardMarkup:
+    toggle = "⛔️ غیرفعال کردن" if prize["is_active"] else "✅ فعال کردن"
+    rows = [
+        [InlineKeyboardButton(text=tr(toggle), callback_data=f"adm_wp_toggle:{prize['id']}")],
+        [InlineKeyboardButton(text=tr("✏️ تغییر درصد شانس"), callback_data=f"adm_wp_chance:{prize['id']}")],
+        [InlineKeyboardButton(text=tr("🗑 حذف جایزه"), callback_data=f"adm_wp_del:{prize['id']}")],
+        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_wheel_prizes")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

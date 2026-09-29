@@ -50,6 +50,7 @@ import ai_support
 import admin_tools
 import bulk_gifts
 import report_router
+from test_config_provision import format_plan_amount
 import tutorial_hub
 from service_alerts import normalize_channel
 from notification_i18n import send_telegram
@@ -131,6 +132,7 @@ from states import (
     AdminSetPanelDomain,
     AdminResellerCredit,
     AdminWheelSettings,
+    AdminWheelPrize,
     AdminRenewalSettings,
     AdminVolumeReminderSettings,
     AdminConnectAlertSettings,
@@ -5094,6 +5096,227 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "wheel_cooldown_hours", text))
         await state.clear()
         await message.answer(tr(f"✅ فاصله بین دو چرخش روی {text} ساعت تنظیم شد."), reply_markup=kb.wheel_settings_kb(db))
+
+    # -------------------------------------------------------------------
+    # جوایز گردونه شانس (هر جایزه درصد شانس مستقل دارد)
+    # -------------------------------------------------------------------
+
+    _FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫٬", "01234567890123456789..")
+
+    def _parse_wp_chance(text: str, exclude_id: int = None):
+        """درصد شانس را می‌خواند؛ (مقدار, None) یا (None, پیام خطا) برمی‌گرداند."""
+        raw = (text or "").strip().translate(_FA_DIGITS).replace(",", ".").replace("%", "")
+        try:
+            value = round(float(raw), 2)
+        except ValueError:
+            return None, tr("لطفاً یک عدد ارسال کنید (مثلاً 5 یا 2.5).")
+        if value <= 0 or value > 100:
+            return None, tr("درصد شانس باید بیشتر از 0 و حداکثر 100 باشد.")
+        used = db.wheel_chance_total(exclude_id)
+        if used + value > 100.0001:
+            free = max(0.0, 100.0 - used)
+            return None, tr(f"مجموع شانس جوایز فعال نمی‌تواند از 100٪ بیشتر شود. حداکثر شانس آزاد: {kb._fmt_chance(free)}٪")
+        return value, None
+
+    def _wp_view_text(prize) -> str:
+        lines = [tr("🎁 جایزه‌ی گردونه:"), "", kb.wheel_prize_label(prize)]
+        if prize["kind"] == "config":
+            plan = {"volume_mb": prize["volume_mb"], "duration_hours": prize["duration_hours"]}
+            server = db.get_panel_server(prize["panel_server_id"]) if prize["panel_server_id"] else None
+            lines.append(tr(f"📦 حجم/مدت: {format_plan_amount(plan)}"))
+            lines.append(tr(f"🖥 پنل: {server['name'] if server else '---'}"))
+            lines.append(tr(f"🔑 پیشوند نام کاربری: {prize['name_prefix']}"))
+        lines.append(tr("وضعیت: فعال") if prize["is_active"] else tr("وضعیت: غیرفعال"))
+        lines.append(tr(f"مجموع شانس جوایز فعال: {kb._fmt_chance(db.wheel_chance_total())}٪ (باقی‌مانده = باخت)"))
+        return "\n".join(lines)
+
+    async def _wp_show_list(target, prefix: str = ""):
+        text = (prefix + "\n\n" if prefix else "") + tr(
+            f"🎁 جوایز گردونه (مجموع شانس فعال: {kb._fmt_chance(db.wheel_chance_total())}٪؛ باقی‌مانده = باخت):"
+        )
+        markup = kb.wheel_prizes_kb(db)
+        if isinstance(target, CallbackQuery):
+            await safe_edit(target, text, reply_markup=markup)
+        else:
+            await target.answer(text, reply_markup=markup)
+
+    @router.callback_query(F.data == "adm_wheel_prizes")
+    async def cb_wp_list(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        await _wp_show_list(call)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_wp_view:"))
+    async def cb_wp_view(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        prize = await asyncio.to_thread(db.get_wheel_prize, callback_id(call.data, "adm_wp_view") or 0)
+        if not prize:
+            await call.answer(tr("این جایزه پیدا نشد."), show_alert=True)
+            return
+        await safe_edit(call, _wp_view_text(prize), reply_markup=kb.wheel_prize_view_kb(prize))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_wp_toggle:"))
+    async def cb_wp_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        prize = await asyncio.to_thread(db.get_wheel_prize, callback_id(call.data, "adm_wp_toggle") or 0)
+        if not prize:
+            await call.answer(tr("این جایزه پیدا نشد."), show_alert=True)
+            return
+        if not prize["is_active"]:
+            used = await asyncio.to_thread(db.wheel_chance_total, prize["id"])
+            if used + float(prize["chance"]) > 100.0001:
+                await call.answer(tr("با فعال شدن این جایزه مجموع شانس‌ها از 100٪ بیشتر می‌شود؛ اول شانس جوایز دیگر را کم کنید."), show_alert=True)
+                return
+        await asyncio.to_thread(db.update_wheel_prize, prize["id"], is_active=0 if prize["is_active"] else 1)
+        prize = await asyncio.to_thread(db.get_wheel_prize, prize["id"])
+        await safe_edit(call, _wp_view_text(prize), reply_markup=kb.wheel_prize_view_kb(prize))
+        await call.answer(tr("وضعیت تغییر کرد."))
+
+    @router.callback_query(F.data.startswith("adm_wp_del:"))
+    async def cb_wp_delete(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await asyncio.to_thread(db.delete_wheel_prize, callback_id(call.data, "adm_wp_del") or 0)
+        await _wp_show_list(call, tr("🗑 جایزه حذف شد."))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_wp_chance:"))
+    async def cb_wp_edit_chance(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        prize_id = callback_id(call.data, "adm_wp_chance") or 0
+        await state.clear()
+        await state.update_data(wp_edit_id=prize_id)
+        await state.set_state(AdminWheelPrize.waiting_edit_chance)
+        await safe_edit(call, tr("درصد شانس جدید این جایزه را وارد کنید (مثلاً 5 یا 2.5):"),
+                        reply_markup=kb.admin_back_kb(f"adm_wp_view:{prize_id}"))
+        await call.answer()
+
+    @router.message(AdminWheelPrize.waiting_edit_chance)
+    async def process_wp_edit_chance(message: Message, state: FSMContext):
+        data = await state.get_data()
+        prize_id = data.get("wp_edit_id")
+        value, error = await asyncio.to_thread(_parse_wp_chance, message.text, prize_id)
+        if error:
+            await message.answer(error)
+            return
+        await asyncio.to_thread(db.update_wheel_prize, prize_id, chance=value)
+        await state.clear()
+        await _wp_show_list(message, tr(f"✅ شانس جایزه روی {kb._fmt_chance(value)}٪ تنظیم شد."))
+
+    @router.callback_query(F.data.startswith("adm_wp_add:"))
+    async def cb_wp_add(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        kind = (call.data or "").split(":", 1)[1]
+        await state.clear()
+        if kind == "discount":
+            await state.set_state(AdminWheelPrize.waiting_discount_percent)
+            await safe_edit(call, tr("درصد تخفیف این جایزه را وارد کنید (عدد صحیح بین 1 تا 100، مثلاً 30):"),
+                            reply_markup=kb.admin_back_kb("adm_wheel_prizes"))
+        elif kind == "config":
+            if not (await asyncio.to_thread(db.get_panel_servers, True)):
+                await call.answer(tr("⛔️ اول باید حداقل یک سرور پنل فعال ثبت کنی."), show_alert=True)
+                return
+            await state.set_state(AdminWheelPrize.waiting_title)
+            await safe_edit(call, tr("نام این جایزه‌ی کانفیگ چیست؟ (مثلاً «کانفیگ ۵ گیگ هدیه»):"),
+                            reply_markup=kb.admin_back_kb("adm_wheel_prizes"))
+        await call.answer()
+
+    @router.message(AdminWheelPrize.waiting_discount_percent)
+    async def process_wp_discount_percent(message: Message, state: FSMContext):
+        text = (message.text or "").strip().translate(_FA_DIGITS)
+        if not text.isdigit() or not (1 <= int(text) <= 100):
+            await message.answer(tr("لطفاً یک عدد صحیح بین 1 تا 100 ارسال کنید."))
+            return
+        await state.update_data(wp_kind="discount", wp_discount=int(text))
+        await state.set_state(AdminWheelPrize.waiting_chance)
+        await message.answer(tr("درصد شانس بردن این جایزه در هر چرخش چقدر باشد؟ (مثلاً 5 یا 2.5):"))
+
+    @router.message(AdminWheelPrize.waiting_title)
+    async def process_wp_title(message: Message, state: FSMContext):
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer(tr("لطفاً یک نام معتبر ارسال کنید."))
+            return
+        await state.update_data(wp_kind="config", wp_title=title)
+        await state.set_state(AdminWheelPrize.waiting_prefix)
+        await message.answer(tr("پیشوند نام کاربری کانفیگ‌های این جایزه چه باشد؟ (مثلاً «gift»؛ فقط حروف/عدد انگلیسی):"))
+
+    @router.message(AdminWheelPrize.waiting_prefix)
+    async def process_wp_prefix(message: Message, state: FSMContext):
+        prefix = (message.text or "").strip()
+        if not prefix or not prefix.isascii() or not prefix.replace("_", "").isalnum():
+            await message.answer(tr("پیشوند باید فقط شامل حروف/عدد انگلیسی باشد. دوباره ارسال کنید:"))
+            return
+        await state.update_data(wp_prefix=prefix)
+        servers = await asyncio.to_thread(db.get_panel_servers, True)
+        rows = [
+            [InlineKeyboardButton(
+                text=f"{s['name']} ({kb.PANEL_TYPE_LABELS.get(s['panel_type'], s['panel_type'])})",
+                callback_data=f"adm_wp_new_panel:{s['id']}",
+            )]
+            for s in servers
+        ]
+        rows.append([InlineKeyboardButton(text=tr("❌ انصراف"), callback_data="adm_wheel_prizes")])
+        await state.set_state(AdminWheelPrize.waiting_panel)
+        await message.answer(tr("این جایزه روی کدام سرور پنل ساخته شود؟"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+    @router.callback_query(F.data.startswith("adm_wp_new_panel:"), AdminWheelPrize.waiting_panel)
+    async def cb_wp_panel_pick(call: CallbackQuery, state: FSMContext):
+        server_id = callback_id(call.data, "adm_wp_new_panel")
+        if not server_id:
+            await call.answer()
+            return
+        await state.update_data(wp_panel=server_id)
+        await state.set_state(AdminWheelPrize.waiting_volume_mb)
+        await safe_edit(call, tr("حجم این جایزه چند مگابایت باشد؟ فقط عدد صحیح (مثال: 100 برای ۱۰۰ مگ، یا 1024 برای ۱ گیگ):"),
+                        reply_markup=kb.admin_back_kb("adm_wheel_prizes"))
+        await call.answer()
+
+    @router.message(AdminWheelPrize.waiting_volume_mb)
+    async def process_wp_volume(message: Message, state: FSMContext):
+        text = (message.text or "").strip().translate(_FA_DIGITS)
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer(tr("لطفاً یک عدد صحیح مثبت (به مگابایت) ارسال کنید."))
+            return
+        await state.update_data(wp_volume=int(text))
+        await state.set_state(AdminWheelPrize.waiting_duration_hours)
+        await message.answer(tr("مدت اعتبار این جایزه چند ساعت باشد؟ فقط عدد صحیح (مثال: 24 برای ۱ روز، یا 720 برای ۳۰ روز):"))
+
+    @router.message(AdminWheelPrize.waiting_duration_hours)
+    async def process_wp_duration(message: Message, state: FSMContext):
+        text = (message.text or "").strip().translate(_FA_DIGITS)
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer(tr("لطفاً یک عدد صحیح مثبت (به ساعت) ارسال کنید."))
+            return
+        await state.update_data(wp_hours=int(text))
+        await state.set_state(AdminWheelPrize.waiting_chance)
+        await message.answer(tr("درصد شانس بردن این جایزه در هر چرخش چقدر باشد؟ (مثلاً 5 یا 2.5):"))
+
+    @router.message(AdminWheelPrize.waiting_chance)
+    async def process_wp_chance(message: Message, state: FSMContext):
+        value, error = await asyncio.to_thread(_parse_wp_chance, message.text)
+        if error:
+            await message.answer(error)
+            return
+        data = await state.get_data()
+        if data.get("wp_kind") == "config":
+            await asyncio.to_thread(
+                db.create_wheel_prize, "config", data["wp_title"], value, None,
+                data["wp_prefix"], data["wp_panel"], data["wp_volume"], data["wp_hours"],
+            )
+        else:
+            percent = data["wp_discount"]
+            await asyncio.to_thread(db.create_wheel_prize, "discount", f"کد تخفیف {percent}٪", value, percent)
+        await state.clear()
+        await _wp_show_list(message, tr("✅ جایزه ساخته شد."))
 
     # -------------------------------------------------------------------
     # یادآوری اتمام سرویس + کد تخفیف تشویقی تمدید

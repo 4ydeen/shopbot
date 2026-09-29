@@ -5476,17 +5476,46 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (await asyncio.to_thread(db.record_wheel_spin, message.from_user.id))
 
         settings = (await asyncio.to_thread(db.get_wheel_settings))
-        won = random.randint(1, 100) <= settings["win_percent"]
+        prize = (await asyncio.to_thread(db.pick_wheel_prize, full_access_bot))
+        user = message.from_user
 
-        if won and settings["prizes"]:
-            percent = random.choice(settings["prizes"])
-            code, expires_at = (await asyncio.to_thread(db.generate_wheel_prize_code, message.from_user.id, percent))
+        if prize is not None and prize["kind"] == "config":
+            plan = {
+                "id": prize["id"], "name": prize["title"], "name_prefix": prize["name_prefix"] or "gift",
+                "panel_server_id": prize["panel_server_id"], "volume_mb": prize["volume_mb"],
+                "duration_hours": prize["duration_hours"],
+            }
+            try:
+                result = await provision_test_plan(db, plan, user_id=user.id, source="wheel", track_product=False)
+            except TestPlanProvisionError as e:
+                (await asyncio.to_thread(db.release_wheel_spin, user.id))
+                await message.answer(tr("⚠️ ساخت جایزه‌ی کانفیگ با مشکل روبه‌رو شد. چرخش شما حساب نشد؛ کمی بعد دوباره امتحان کنید."))
+                await report_router.report(
+                    bot, db, "error",
+                    f"🚨 ساخت جایزه‌ی کانفیگ گردونه برای کاربر {user.id} ناموفق بود ({escape_html(str(e))}).",
+                )
+                return
+            amount = format_plan_amount(plan)
+            await message.answer(tr(f"🎉 تبریک! برنده شدی!\n\n🎁 جایزه‌ی شما: {prize['title']} ({amount})"))
+            await _send_test_config_link(message, result["subscription_url"], tr("🎁 کانفیگ جایزه‌ی شما:"))
+            await report_router.notify_prize(
+                bot, db, "برنده‌ی گردونه شانس (کانفیگ)", user.id, user.full_name, user.username,
+                f"📦 {escape_html(prize['title'])} - {escape_html(amount)}\n"
+                f"🔑 <code>{escape_html(result.get('username') or '')}</code>",
+            )
+        elif prize is not None and prize["discount_percent"]:
+            percent = int(prize["discount_percent"])
+            code, expires_at = (await asyncio.to_thread(db.generate_wheel_prize_code, user.id, percent))
             await message.answer(
                 tr(f"🎉 تبریک! برنده شدی!\n\n"
                 f"🎟 کد تخفیف {percent}٪ شما:\n`{code}`\n\n"
                 f"⏳ اعتبار: تا {settings['expiry_hours']} ساعت آینده\n"
                 f"این کد یکبارمصرف است و در خرید بعدی‌ات قابل استفاده است."),
                 parse_mode="Markdown",
+            )
+            await report_router.notify_prize(
+                bot, db, "برنده‌ی گردونه شانس (کد تخفیف)", user.id, user.full_name, user.username,
+                f"🎟 کد تخفیف {percent}٪ - <code>{escape_html(code)}</code>",
             )
         else:
             await message.answer(db.get_text('handlers_user.auto_93ef7080', '😔 امروز شانس با تو نبود! فردا دوباره امتحان کن.'))

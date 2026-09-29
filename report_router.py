@@ -26,6 +26,7 @@ TOPICS = {
     "nightly": "📊 گزارش شبانه",
     "signup": "🆕 ثبت‌نام",
     "referral": "🤝 رفرال",
+    "prize": "🎁 جوایز",
     "security": "🛡 امنیت",
     "other": "📌 سایر",
 }
@@ -218,6 +219,31 @@ async def notify_test_config(bot, db, user_id: int, name: str, username, detail_
         await send_text(bot, db, "test", text)
     except Exception:
         logger.warning("ارسال اعلان کانفیگ تست ناموفق بود.", exc_info=True)
+
+
+def build_prize_text(source_label: str, user_id: int, name: str, username, detail: str, html_mode: bool = True) -> str:
+    """متن کارت تاپیک «جوایز» برای هر جایزه‌ای که به کاربر داده می‌شود (گردونه، قرعه‌کشی، هدیه‌ی عضویت)."""
+    handle = f" (@{username})" if username else ""
+    if html_mode:
+        who = f'<a href="tg://user?id={user_id}">{html.escape(name or str(user_id))}</a>{html.escape(handle)}'
+        return f"🎁 {html.escape(source_label)}\n\n👤 {who}\n🆔 <code>{user_id}</code>\n{detail}"
+    return f"🎁 {source_label}\n\n👤 {name or user_id}{handle}\n🆔 {user_id}\n{detail}"
+
+
+async def notify_prize(bot, db, source_label: str, user_id: int, name: str, username, detail_html: str) -> None:
+    """گزارش جایزه به تاپیک «جوایز»؛ بدون گروه گزارش چیزی ارسال نمی‌شود."""
+    try:
+        await send_text(bot, db, "prize", build_prize_text(source_label, user_id, name, username, detail_html))
+    except Exception:
+        logger.warning("ارسال گزارش جایزه ناموفق بود.", exc_info=True)
+
+
+async def notify_prize_raw(bot_token: str, db, source_label: str, user_id: int, name: str, username, detail_text: str) -> None:
+    """مثل notify_prize برای مسیرهایی که فقط توکن بات دارند (متن ساده، بدون HTML)."""
+    try:
+        await send_raw_to_group(bot_token, db, "prize", build_prize_text(source_label, user_id, name, username, detail_text, html_mode=False))
+    except Exception:
+        logger.warning("ارسال گزارش جایزه (raw) ناموفق بود.", exc_info=True)
 
 
 async def setup_group(bot, db, chat_id: int) -> int:
