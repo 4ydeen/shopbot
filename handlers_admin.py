@@ -75,6 +75,7 @@ from states import (
     AdminAddTestPlan,
     AdminEditTestPlan, AdminCleanupSettings,
     AdminForceJoin,
+    AdminTerms,
     AdminServiceAlertChannel,
     AdminEditButton,
     AdminSetCard,
@@ -2469,6 +2470,68 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
 
     # -------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # قوانین و مقررات (فقط بات اصلی)
+    # -----------------------------------------------------------------------
+
+    @router.callback_query(F.data == "adm_terms_menu")
+    async def cb_admin_terms_menu(call: CallbackQuery):
+        if not is_main_bot or not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        settings = await asyncio.to_thread(db.get_terms_settings)
+        preview = settings["text"][:3000]
+        if len(settings["text"]) > 3000:
+            preview += "\n… ادامه دارد"
+        text = (
+            "📜 قوانین و مقررات:\n\n"
+            f"وضعیت: {'🟢 فعال' if settings['enabled'] else '🔴 غیرفعال'}\n\n"
+            f"متن فعلی:\n{preview}"
+        )
+        await replace_admin_view(call, text, reply_markup=kb.admin_terms_menu_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_terms_toggle")
+    async def cb_admin_terms_toggle(call: CallbackQuery):
+        if not is_main_bot or not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        current = await asyncio.to_thread(db.get_setting, "terms_enabled", "0")
+        if current != "1" and not (await asyncio.to_thread(db.get_setting, "terms_text", "")).strip():
+            await call.answer("اول متن قوانین را تنظیم کن.", show_alert=True)
+            return
+        await asyncio.to_thread(db.set_setting, "terms_enabled", "0" if current == "1" else "1")
+        await safe_edit(call, "📜 قوانین و مقررات:", reply_markup=kb.admin_terms_menu_kb(db))
+        await call.answer("وضعیت قوانین تغییر کرد.")
+
+    @router.callback_query(F.data == "adm_terms_set_text")
+    async def cb_admin_terms_set_text(call: CallbackQuery, state: FSMContext):
+        if not is_main_bot or not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.set_state(AdminTerms.waiting_text)
+        await safe_edit(
+            call,
+            "📝 متن کامل قوانین و مقررات را در یک یا چند خط ارسال کن.\n\n"
+            "پیام بعدی به‌عنوان متن قوانین ذخیره می‌شود.",
+            reply_markup=kb.admin_back_kb("adm_terms_menu"),
+        )
+        await call.answer()
+
+    @router.message(AdminTerms.waiting_text)
+    async def process_terms_text(message: Message, state: FSMContext):
+        if not is_main_bot or not full_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("متن قوانین نمی‌تواند خالی باشد.")
+            return
+        if len(text) > 3500:
+            await message.answer("متن قوانین خیلی طولانی است. حداکثر ۳۵۰۰ کاراکتر ارسال کن.")
+            return
+        await asyncio.to_thread(db.set_setting, "terms_text", text)
+        await asyncio.to_thread(db.set_setting, "terms_updated_at", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+        await state.clear()
+        await message.answer("✅ متن قوانین ذخیره شد.", reply_markup=kb.admin_terms_menu_kb(db))
+
     # سفارش‌های در انتظار
     # -------------------------------------------------------------------
 

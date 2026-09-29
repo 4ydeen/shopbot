@@ -38,7 +38,7 @@ from config_delivery import deliver_config_to_user, send_individual_configs, bui
 from renewal_engine import execute_renewal, RenewalError
 import renewal_log
 from temp_messages import schedule_message_autodelete
-from force_join import is_channel_member, CHECK_CALLBACK
+from force_join import is_channel_member, CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK, terms_keyboard
 from sub_info import fetch_sub_info, format_sub_info_fa, fetch_individual_links
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
@@ -212,6 +212,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             if data.get("pending_welcome"):
                 # اولین انتخاب زبان بعد از /start: به‌جای پیام تغییر زبان، مستقیم
                 # پیام خوش‌آمد و منوی اصلی فرستاده می‌شود.
+                terms = await asyncio.to_thread(db.get_terms_settings)
+                if terms["enabled"] and not await asyncio.to_thread(db.is_terms_accepted, user_id):
+                    await state.update_data(pending_welcome=True, pending_terms=True, pending_post_start_actions=[])
+                    await call.message.answer(terms["text"], reply_markup=terms_keyboard())
+                    return
                 await state.update_data(pending_welcome=False)
                 welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
                 reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
@@ -443,9 +448,52 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         else:
             await call.answer(db.get_text('handlers_user.auto_c1e947e8', 'این نظرسنجی معتبر نیست.'), show_alert=True)
 
+    async def _send_welcome_after_terms(message: Message, user_id: int, state: FSMContext, bot: Bot):
+        welcome = await asyncio.to_thread(db.get_setting, "welcome_text")
+        reply_enabled = await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1") == "1"
+        if reply_enabled:
+            await message.answer(welcome, reply_markup=kb.menu_for_user(db, user_id, is_main_bot))
+            await _send_inline_main_menu(message, user_id)
+        else:
+            inline_kb = await asyncio.to_thread(kb.inline_menu_for_user, db, user_id, is_main_bot)
+            await message.answer(
+                welcome,
+                reply_markup=inline_kb if inline_kb is not None else kb.menu_for_user(db, user_id, is_main_bot),
+            )
+        data = await state.get_data()
+        actions = data.get("pending_post_start_actions") or []
+        await state.update_data(pending_terms=False, pending_post_start_actions=[])
+        for action in actions:
+            if action == "__open_test__":
+                await get_test_config(message)
+            elif action == "__open_wheel__":
+                await wheel_of_fortune(message, bot)
+            elif action == "__open_buy__":
+                await show_categories(message, state)
+            elif action.startswith("__open_product__:"):
+                await _open_product_from_deeplink(message, state, int(action.split(":", 1)[1]))
+            else:
+                await message.answer(action)
+
+
     # -----------------------------------------------------------------------
     # عضویت اجباری در کانال
     # -----------------------------------------------------------------------
+
+    @router.callback_query(F.data == TERMS_ACCEPT_CALLBACK)
+    async def cb_accept_terms(call: CallbackQuery, state: FSMContext, bot: Bot):
+        terms = await asyncio.to_thread(db.get_terms_settings)
+        if not terms["enabled"]:
+            await call.answer()
+            return
+        await asyncio.to_thread(db.set_terms_accepted, call.from_user.id)
+        await call.answer("✅ قوانین با موفقیت تأیید شد.")
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await _send_welcome_after_terms(call.message, call.from_user.id, state, bot)
+
 
     @router.callback_query(F.data == CHECK_CALLBACK)
     async def cb_check_force_join(call: CallbackQuery, bot: Bot):
@@ -464,6 +512,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await call.message.delete()
             except Exception:
                 pass
+            terms = await asyncio.to_thread(db.get_terms_settings)
+            if terms["enabled"] and not await asyncio.to_thread(db.is_terms_accepted, call.from_user.id):
+                await call.message.answer(terms["text"], reply_markup=terms_keyboard())
+                return
             welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
             await call.message.answer(welcome, reply_markup=kb.menu_for_user(db, call.from_user.id, is_main_bot))
             await _send_inline_main_menu(call.message, call.from_user.id)
@@ -656,6 +708,19 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
             elif token:
                 (await asyncio.to_thread(db.set_acquisition_source, message.from_user.id, token))
+
+        # قوانین باید بعد از عضویت (یا معافیت عضویت) و قبل از استفاده از بات تأیید شوند.
+        # دیپ‌لینک‌ها تا اینجا پردازش و برای ادامه در state نگه داشته می‌شوند.
+        if (await asyncio.to_thread(db.get_setting, "terms_enabled", "0")) == "1" and not await asyncio.to_thread(db.is_terms_accepted, message.from_user.id):
+            if not existing_user:
+                await state.update_data(pending_post_start_actions=post_start_actions)
+            else:
+                await state.update_data(pending_post_start_actions=post_start_actions, pending_terms=True)
+                await message.answer(
+                    await asyncio.to_thread(db.get_setting, "terms_text"),
+                    reply_markup=terms_keyboard(),
+                )
+                return
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"

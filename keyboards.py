@@ -1414,6 +1414,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
     ("adm_cleanup_settings", "🧹 پاکسازی خودکار منقضی‌ها", "adm_cleanup_settings"),
     ("adm_forcejoin_menu", "📢 عضویت اجباری در کانال", "adm_forcejoin_menu"),
+    ("adm_terms_menu", "📜 قوانین و مقررات", "adm_terms_menu"),
     ("adm_service_alert_channel", "📣 کانال اعلان حذف/اتمام کانفیگ", "adm_service_alert_channel"),
     ("adm_pending_orders", "🧾 سفارش‌های در انتظار", "adm_pending_orders"),
     ("adm_order_surveys", "🗳 نظرسنجی سفارش‌ها", "adm_order_surveys"),
@@ -1539,6 +1540,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_broadcast",
         "adm_deeplink_tools",
         "adm_forcejoin_menu",
+        "adm_terms_menu",
         "adm_temp_message",
     ]),
     ("finance", "💰 مالی و پرداخت", [
@@ -2707,6 +2709,22 @@ def test_plan_panel_select_kb(db, plan_id) -> InlineKeyboardMarkup:
     back_cb = f"adm_tp_view:{plan_id}" if plan_id is not None else "adm_test_menu"
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_terms_menu_kb(db) -> InlineKeyboardMarkup:
+    enabled = db.get_setting("terms_enabled", "0") == "1"
+    text = (db.get_setting("terms_text", "") or "").strip()
+    preview = text.replace("\n", " ")[:90] if text else "متنی تنظیم نشده است"
+    toggle_text = "🔴 غیرفعال کردن قوانین" if enabled else "🟢 فعال کردن قوانین"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=tr(f"📜 وضعیت: {'🟢 فعال' if enabled else '🔴 غیرفعال'}"), callback_data="noop")],
+            [InlineKeyboardButton(text=tr(f"📝 متن فعلی: {preview}"), callback_data="noop")],
+            [InlineKeyboardButton(text=tr("✏️ تنظیم / تغییر متن قوانین"), callback_data="adm_terms_set_text")],
+            [InlineKeyboardButton(text=toggle_text, callback_data="adm_terms_toggle")],
+            [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
+        ]
+    )
 
 
 def admin_forcejoin_menu_kb(db) -> InlineKeyboardMarkup:

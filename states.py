@@ -163,6 +163,10 @@ class AdminForceJoin(StatesGroup):
     waiting_channel = State()
 
 
+class AdminTerms(StatesGroup):
+    waiting_text = State()
+
+
 class AdminServiceAlertChannel(StatesGroup):
     waiting_channel = State()
 

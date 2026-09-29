@@ -21,6 +21,15 @@ from aiogram.types import TelegramObject, Message, CallbackQuery, InlineKeyboard
 logger = logging.getLogger(__name__)
 
 CHECK_CALLBACK = "check_force_join"
+TERMS_ACCEPT_CALLBACK = "accept_terms"
+
+
+def terms_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=tr("✅ می‌پذیرم و ادامه می‌دهم"), callback_data=TERMS_ACCEPT_CALLBACK)],
+        ]
+    )
 
 
 def _join_keyboard(channel: str) -> InlineKeyboardMarkup:
@@ -51,9 +60,6 @@ class ForceJoinMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event: TelegramObject, data: dict):
         settings = self.db.get_force_join_settings()
-        if not settings["enabled"] or not settings["channel"]:
-            return await handler(event, data)
-
         user = data.get("event_from_user")
         if not user:
             return await handler(event, data)
@@ -61,44 +67,52 @@ class ForceJoinMiddleware(BaseMiddleware):
         if isinstance(event, Message) and event.successful_payment:
             return await handler(event, data)
 
-        # ادمین‌های بات از این محدودیت معاف هستند
+        # ادمین‌های بات از محدودیت عضویت/قوانین معاف هستند.
         if self.db.is_admin(user.id):
             return await handler(event, data)
 
-        # کاربرانی که با دیپ‌لینک تبلیغاتی nofj وارد شده‌اند، برای همیشه معاف‌اند.
-        # این یک SELECT synchronous واقعی روی دیتابیس است (کش نمی‌شود، چون
-        # به‌ازای هر کاربر جدا است)؛ فقط وقتی عضویت اجباری فعال باشد به اینجا
-        # می‌رسیم، ولی همان موقع هم باید با to_thread اجرا شود تا یک برخورد با
-        # قفل نوشتن، کل بات (همه‌ی کاربران/نمایندگی‌ها) را فریز نکند.
-        if await asyncio.to_thread(self.db.is_force_join_exempt, user.id):
+        # دکمه‌ی «بررسی مجدد عضویت» و دکمه‌ی پذیرش قوانین باید خودشان اجرا شوند.
+        if isinstance(event, CallbackQuery) and event.data in (CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK):
             return await handler(event, data)
 
-        # دکمه‌ی «بررسی مجدد» باید همیشه خودش اجرا شود (نه اینکه دوباره بلاک شود)
-        if isinstance(event, CallbackQuery) and event.data == CHECK_CALLBACK:
-            return await handler(event, data)
+        exempt = await asyncio.to_thread(self.db.is_force_join_exempt, user.id)
+        member = True
+        if settings["enabled"] and settings["channel"] and not exempt:
+            bot = data.get("bot")
+            member = await is_channel_member(bot, settings["channel"], user.id)
 
-        # پیام /start با هر دیپ‌لینکی (هر پارامتری) باید خودش رد شود تا cmd_start
-        # معافیت دائمی را ثبت کند؛ وگرنه این میدلور همان اولین پیامی که قرار است
-        # معافیت را فعال کند را بلاک می‌کرد. توجه: یعنی هر کسی با پارامتر دلخواه
-        # هم می‌تواند وارد شود و برای همیشه معاف بماند (طبق درخواست صریح کارفرما).
+        if not member:
+            text = "برای استفاده از بات، ابتدا باید در کانال زیر عضو شوید؛ سپس دکمه‌ی «بررسی مجدد عضویت» را بزنید:"
+            markup = _join_keyboard(settings["channel"])
+            if isinstance(event, CallbackQuery):
+                await event.answer(tr("هنوز عضو کانال نشده‌اید."), show_alert=True)
+                try:
+                    await event.message.answer(text, reply_markup=markup)
+                except Exception:
+                    pass
+            elif isinstance(event, Message):
+                await event.answer(text, reply_markup=markup)
+            return
+
+        # /start بعد از عبور از مرحله‌ی عضویت باید اجرا شود تا دیپ‌لینک‌ها و
+        # رفرال‌ها ثبت شوند؛ خود cmd_start قوانین را بلافاصله بعد از آن نشان می‌دهد.
         if isinstance(event, Message) and (event.text or "").startswith("/start"):
-            parts = event.text.split(maxsplit=1)
-            if len(parts) > 1 and parts[1].strip():
-                return await handler(event, data)
-
-        bot = data.get("bot")
-        member = await is_channel_member(bot, settings["channel"], user.id)
-        if member:
             return await handler(event, data)
 
-        text = "برای استفاده از بات، ابتدا باید در کانال زیر عضو شوید؛ سپس دکمه‌ی «بررسی مجدد عضویت» را بزنید:"
-        markup = _join_keyboard(settings["channel"])
+        terms = self.db.get_terms_settings()
+        if terms["enabled"] and not await asyncio.to_thread(self.db.is_terms_accepted, user.id):
+            await self._show_terms(event, terms["text"])
+            return
+
+        return await handler(event, data)
+
+    async def _show_terms(self, event: TelegramObject, text: str):
+        markup = terms_keyboard()
         if isinstance(event, CallbackQuery):
-            await event.answer(tr("هنوز عضو کانال نشده‌اید."), show_alert=True)
+            await event.answer(tr("ابتدا قوانین و مقررات را تأیید کنید."), show_alert=True)
             try:
                 await event.message.answer(text, reply_markup=markup)
             except Exception:
                 pass
         elif isinstance(event, Message):
             await event.answer(text, reply_markup=markup)
-        return  # هندلر اصلی اجرا نمی‌شود
