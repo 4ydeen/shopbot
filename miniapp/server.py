@@ -73,6 +73,7 @@ import extra_gateway_clients
 import extra_gateway_payment
 import extra_gateway_registry
 import payment_engine
+import ai_support
 import report_router
 import card_to_card_payment
 from asset_versioning import static_version, ApiNoStoreMiddleware
@@ -355,11 +356,52 @@ async def _force_join_check(tg_id: int, db: Database, tenant: "Tenant"):
 
 
 async def require_joined(auth=Depends(get_verified_user)):
-    """مثل get_verified_user، به‌علاوه‌ی چک عضویت اجباری کانال - برای همه‌ی
-    اکشن‌های نوشتنی/خرید (سفارش، تاپ‌آپ، کانفیگ تست، گردونه، کانفیگ شخصی)."""
+    """چک عضویت اجباری + قوانین قبل از اکشن‌های حساس مینی‌اپ."""
     tg_id, db, tenant = auth
     await _force_join_check(tg_id, db, tenant)
+    if not db.is_admin(tg_id):
+        terms = db.get_terms_settings()
+        if terms["enabled"] and not db.is_terms_accepted(tg_id):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "terms_required",
+                    "message": tr("ابتدا باید قوانین و مقررات را تأیید کنید."),
+                    "text": terms["text"],
+                },
+            )
     return auth
+
+
+@app.get("/api/terms")
+async def api_terms(auth=Depends(get_verified_user)):
+    """وضعیت قوانین برای ورود به مینی‌اپ؛ تنظیمات فقط از دیتابیس بات اصلی
+    و منوی ادمین بات انجام می‌شود."""
+    tg_id, db, tenant = auth
+    if tenant.tenant_id:
+        return {"enabled": False, "required": False, "accepted": True, "text": ""}
+    settings = db.get_terms_settings()
+    accepted = db.is_terms_accepted(tg_id) if settings["enabled"] else True
+    return {
+        "enabled": settings["enabled"],
+        "required": settings["enabled"] and not db.is_admin(tg_id),
+        "accepted": accepted,
+        "text": settings["text"],
+    }
+
+
+@app.post("/api/terms/accept")
+async def api_terms_accept(auth=Depends(get_verified_user)):
+    tg_id, db, tenant = auth
+    if tenant.tenant_id:
+        return {"ok": True, "accepted": True}
+    settings = db.get_terms_settings()
+    if not settings["enabled"] or db.is_admin(tg_id):
+        return {"ok": True, "accepted": True}
+    db.set_terms_accepted(tg_id)
+    return {"ok": True, "accepted": True}
+
+
 
 
 @app.get("/api/force-join-status")
@@ -554,6 +596,9 @@ def api_me(auth=Depends(get_verified_user)):
                     }
         except Exception:
             logging.getLogger("miniapp.reseller").exception("خواندن پروفایل نمایندگی ناموفق بود.")
+    terms = db.get_terms_settings()
+    terms_required = bool(terms["enabled"] and not tenant.tenant_id and not db.is_admin(tg_id))
+    terms_accepted = bool(not terms["enabled"] or db.is_admin(tg_id) or db.is_terms_accepted(tg_id))
     return {
         "telegram_id": tg_id,
         "language": db.get_user_language(tg_id),
@@ -561,6 +606,8 @@ def api_me(auth=Depends(get_verified_user)):
         "username": user["username"] if "username" in user.keys() else None,
         "joined_at": user["joined_at"] if "joined_at" in user.keys() else None,
         "wallet_credit": wallet,
+        "terms_required": terms_required,
+        "terms_accepted": terms_accepted,
         "referral_count": referral["count"],
         "orders_count": len(orders),
         "is_admin": db.is_admin(tg_id),
@@ -1560,6 +1607,102 @@ async def api_expiring(auth=Depends(get_verified_user)):
             "link": r["link"],
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# دستیار پشتیبانی هوشمند
+# ---------------------------------------------------------------------------
+
+@app.get("/api/ai-support/messages")
+async def api_ai_support_messages(auth=Depends(require_joined)):
+    tg_id, db, _ = auth
+    rows = db.get_ai_conversation(tg_id, limit=60)
+    return [
+        {"id": row["id"], "sender": "user" if row["role"] == "user" else "ai",
+         "message": row["message"], "created_at": row["created_at"]}
+        for row in rows
+    ]
+
+
+class AISupportMessageCreate(BaseModel):
+    message: str
+
+
+async def _forward_miniapp_ai_transcript_to_admin(db, tenant: Tenant, user_id: int, reason: str):
+    history = await asyncio.to_thread(db.get_ai_conversation, user_id)
+    user = db.get_user(user_id)
+    lines = [
+        f"🤖 ارجاع از دستیار هوشمند (مینی‌اپ)\n"
+        f"👤 {(user['first_name'] if user else '') or ''} (@{(user['username'] if user else '') or '---'})\n"
+        f"🆔 {user_id}"
+    ]
+    if reason:
+        lines.append(f"📌 دلیل: {reason}")
+    if history:
+        lines.append("\n--- تاریخچه‌ی گفتگو با دستیار ---")
+        for row in history:
+            who = "👤 کاربر" if row["role"] == "user" else "🤖 دستیار"
+            lines.append(f"{who}: {row['message']}")
+    target_admin = await asyncio.to_thread(db.resolve_support_admin_for_message, user_id)
+    admin_ids = [target_admin] if target_admin else await asyncio.to_thread(db.list_admins)
+    reply_markup = {"inline_keyboard": [[{"text": "↩️ پاسخ", "callback_data": f"reply_user:{user_id}"}]]}
+    async with aiohttp.ClientSession() as session:
+        for admin_id in admin_ids:
+            try:
+                await session.post(
+                    f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                    json={
+                        "chat_id": admin_id,
+                        "text": "\n".join(lines),
+                        "parse_mode": "Markdown",
+                        "reply_markup": reply_markup,
+                    },
+                )
+            except Exception:
+                logging.getLogger("miniapp.ai_support").exception(
+                    "ارسال ارجاع AI کاربر %s به ادمین %s ناموفق بود.", user_id, admin_id
+                )
+
+
+@app.post("/api/ai-support/messages")
+async def api_ai_support_send(body: AISupportMessageCreate, auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail=tr("پیام نمی‌تواند خالی باشد."))
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail=tr("پیام بیش از حد طولانی است."))
+
+    if db.get_setting("ai_support_enabled", "1") != "1" or not ai_support.is_configured(db):
+        raise HTTPException(status_code=503, detail=tr("دستیار هوشمند در حال حاضر فعال نیست."))
+
+    history = await asyncio.to_thread(db.get_ai_conversation, tg_id)
+    await asyncio.to_thread(db.add_ai_message, tg_id, "user", text)
+    try:
+        result = await ai_support.get_reply(db, tg_id, history, text)
+    except Exception:
+        logging.getLogger("miniapp.ai_support").exception("خطای AI برای کاربر %s.", tg_id)
+        result = {
+            "reply": "یه مشکلی پیش اومد؛ پیامت رو برای پشتیبانی انسانی می‌فرستم.",
+            "escalate": True,
+        }
+
+    reply = result.get("reply") or "متوجه شدم؛ لطفاً سوالت رو کمی دقیق‌تر بنویس."
+    await asyncio.to_thread(db.add_ai_message, tg_id, "model", reply)
+
+    if result.get("escalate"):
+        await _forward_miniapp_ai_transcript_to_admin(
+            db, tenant, tg_id, "دستیار هوشمند مکالمه را به پشتیبانی انسانی ارجاع داد."
+        )
+        await asyncio.to_thread(db.clear_ai_conversation, tg_id)
+
+    return {
+        "id": None,
+        "sender": "ai",
+        "message": reply,
+        "escalated": bool(result.get("escalate")),
+        "ui_action": result.get("ui_action"),
+    }
 
 
 # ---------------------------------------------------------------------------
