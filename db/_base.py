@@ -1419,6 +1419,25 @@ class DatabaseBase:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_hash ON receipt_hashes(file_hash)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS receipt_ai_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ref_kind TEXT NOT NULL,
+            ref_id INTEGER NOT NULL,
+            user_id INTEGER,
+            votes_json TEXT,
+            fields_json TEXT,
+            bank_key TEXT,
+            ref_number TEXT,
+            risk_score INTEGER DEFAULT 0,
+            weighted_score REAL DEFAULT 0,
+            auto_rejected INTEGER DEFAULT 0,
+            final_decision TEXT,
+            decided_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ref_kind, ref_id)
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_ai_feedback_decision ON receipt_ai_feedback(final_decision)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_ai_feedback_bank ON receipt_ai_feedback(bank_key, final_decision)")
         # Translation health/recovery state. These columns are additive so
         # existing installations keep their language data untouched.
         for _col, _typ in [
@@ -1432,6 +1451,7 @@ class DatabaseBase:
         migrations = [
             ("receipt_hashes", "ref_number", "TEXT"),
             ("receipt_hashes", "phash", "TEXT"),
+            ("receipt_hashes", "bank_key", "TEXT"),
             ("users", "referred_by", "INTEGER"),
             ("users", "owner_reseller_id", "INTEGER"),
             ("users", "inline_reseller_enabled", "INTEGER DEFAULT 0"),
@@ -1671,6 +1691,8 @@ class DatabaseBase:
             # مثلاً کلید API تنظیم نشده/خطای سرویس) روی خود سفارش/شارژ می‌ماند.
             ("orders", "receipt_ai_note", "TEXT"),
             ("wallet_topups", "receipt_ai_note", "TEXT"),
+            ("orders", "close_reason", "TEXT"),
+            ("wallet_topups", "close_reason", "TEXT"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
@@ -1683,6 +1705,14 @@ class DatabaseBase:
         # فشرده‌سازی/کراپ مجدد کاملاً عوض می‌شود، این هش تصویر را از نظر بصری مقایسه
         # می‌کند تا رسید تکراری‌ای که کمی ویرایش/فشرده/برش خورده هم لو برود.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_receipt_hashes_phash ON receipt_hashes(phash)")
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='uq_receipt_hashes_hash_ref'").fetchone():
+            conn.execute(
+                "DELETE FROM receipt_hashes WHERE id NOT IN "
+                "(SELECT MAX(id) FROM receipt_hashes GROUP BY file_hash, ref_kind, ref_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_receipt_hashes_hash_ref ON receipt_hashes(file_hash, ref_kind, ref_id)"
+            )
 
         # مهاجرت نقش‌های ثابت قدیمی (owner/admin/mid/support) به مجموعه
         # مجوزهای granular. فقط رکوردهایی که هنوز permissions ندارند پر می‌شوند

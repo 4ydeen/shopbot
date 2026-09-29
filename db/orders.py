@@ -381,6 +381,7 @@ class OrdersMixin:
             )
             if cur.rowcount == 0:
                 return False
+            self._mark_receipt_decision(conn, "order", order_id, "approved")
             conn.executemany(
                 "UPDATE configs SET order_id=? WHERE id=?",
                 [(order_id, cid) for cid in config_ids],
@@ -401,6 +402,7 @@ class OrdersMixin:
                 (datetime.utcnow().isoformat(), order_id),
             )
             if cur.rowcount:
+                self._mark_receipt_decision(conn, "order", order_id, "approved")
                 self._award_order_score(conn, order_id, purchase_points, coin_days)
             return cur.rowcount > 0
 
@@ -410,7 +412,7 @@ class OrdersMixin:
         حذف می‌کند و کاربر را بلاک می‌کند. فقط همان سفارش هدف قرار می‌گیرد؛ سایر
         سرویس‌ها/کانفیگ‌های کاربر دست‌نخورده می‌مانند. در صورت رد سفارش، سهم کیف‌پول
         و مصرف کد تخفیف نیز مانند رد عادی سفارش برگشت داده می‌شود."""
-        if not self.reject_order(order_id):
+        if not self.reject_order(order_id, "fake"):
             return None
         with self._get_conn() as conn:
             order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
@@ -426,16 +428,18 @@ class OrdersMixin:
             }
 
 
-    def reject_order(self, order_id: int) -> bool:
+    def reject_order(self, order_id: int, reason: str = "") -> bool:
         """فقط سفارش pending را رد می‌کند (نه processing/approved)، تا با یک تایید
         هم‌زمان (claim_order) تداخل نکند. در صورت رد شدن، مبلغ کیف پول را برمی‌گرداند."""
         with self._get_conn() as conn:
             cur = conn.execute(
-                "UPDATE orders SET status='rejected', updated_at=? WHERE id=? AND status='pending'",
-                (datetime.utcnow().isoformat(), order_id),
+                "UPDATE orders SET status='rejected', close_reason=?, updated_at=? WHERE id=? AND status='pending'",
+                (reason or "", datetime.utcnow().isoformat(), order_id),
             )
             if cur.rowcount == 0:
                 return False
+            if reason != "user_cancel":
+                self._mark_receipt_decision(conn, "order", order_id, "rejected")
         order = self.get_order(order_id)
         if order:
             if order["wallet_used"]:
@@ -1708,35 +1712,94 @@ class OrdersMixin:
     # تشخیص رسید جعلی/تکراری با هوش مصنوعی (receipt_ai_check.py)
     # -----------------------------------------------------------------------
 
-    def find_receipt_hash_reuse(self, file_hash: str, ref_kind: str, ref_id: int):
-        """اگر همین عکس رسید (بر اساس هش فایل) قبلاً برای سفارش/شارژ دیگری
-        ثبت شده باشد، آن ردیف را برمی‌گرداند (رایج‌ترین الگوی تقلب: ری‌یوز یه
-        رسید تاییدشده‌ی قدیمی برای خرید جدید). ردیف‌های مربوط به همین
-        ref_kind/ref_id نادیده گرفته می‌شوند."""
+    _RECEIPT_HARD_CLOSE_REASONS = ("fake",)
+
+    @classmethod
+    def _receipt_reuse_is_soft(cls, prior_status, close_reason) -> bool:
+        """استفاده‌ی دوباره از رسید وقتی «نرم» است که رکورد قبلی منقضی شده، خودِ کاربر
+        لغوش کرده، ادمین یا سیستم خودکار رد کرده باشد (هر دو ممکن است اشتباه کرده باشند)؛
+        در این حالت رسید دوباره کامل بررسی می‌شود ولی صرفِ تکراری بودن رد قطعی نیست.
+        فقط رسیدی که ادمین به‌عنوان جعلی علامت زده هرگز نرم نیست."""
+        if prior_status == "expired":
+            return True
+        if prior_status == "rejected":
+            return (close_reason or "") not in cls._RECEIPT_HARD_CLOSE_REASONS
+        return False
+
+    def _find_receipt_reuse(self, conn, column: str, value: str, ref_kind: str, ref_id: int, bank_key: str = None):
+        """رکورد قبلیِ دیگری با همین هش/شماره مرجع؛ رکوردِ تاییدنشده/فعال بر رد/منقضی‌شده ارجحیت دارد."""
+        rows = conn.execute(
+            f"SELECT h.*, CASE h.ref_kind WHEN 'order' THEN o.status ELSE t.status END AS prior_status, "
+            f"CASE h.ref_kind WHEN 'order' THEN o.close_reason ELSE t.close_reason END AS prior_close_reason "
+            f"FROM receipt_hashes h "
+            f"LEFT JOIN orders o ON h.ref_kind='order' AND o.id=h.ref_id "
+            f"LEFT JOIN wallet_topups t ON h.ref_kind<>'order' AND t.id=h.ref_id "
+            f"WHERE h.{column}=? AND NOT (h.ref_kind=? AND h.ref_id=?) ORDER BY h.id",
+            (value, ref_kind, ref_id),
+        ).fetchall()
+        if bank_key:
+            rows = [r for r in rows if not r["bank_key"] or r["bank_key"] == bank_key]
+        if not rows:
+            return None
+        for row in rows:
+            if not self._receipt_reuse_is_soft(row["prior_status"], row["prior_close_reason"]):
+                return {**dict(row), "soft": False}
+        return {**dict(rows[0]), "soft": True}
+
+
+    def claim_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int, phash: str = None):
+        """هش رسید را اتمیک ثبت می‌کند و رکورد قبلیِ دیگر با همین هش را (اگر بود) برمی‌گرداند."""
         with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM receipt_hashes WHERE file_hash=? "
-                "AND NOT (ref_kind=? AND ref_id=?) ORDER BY id LIMIT 1",
-                (file_hash, ref_kind, ref_id),
-            ).fetchone()
+            found = self._find_receipt_reuse(conn, "file_hash", file_hash, ref_kind, ref_id)
+            conn.execute(
+                "INSERT OR IGNORE INTO receipt_hashes (file_hash, ref_kind, ref_id, phash) VALUES (?, ?, ?, ?)",
+                (file_hash, ref_kind, ref_id, phash or None),
+            )
+            return found
 
 
-    def find_receipt_ref_reuse(self, ref_number: str, ref_kind: str, ref_id: int):
-        """مشابه find_receipt_hash_reuse ولی بر اساس شماره پیگیری/مرجع/سندی
-        که مدل تصویری از داخل متن رسید خوانده - نه هش فایل. این کمک می‌کند
-        رسید تکراری‌ای که کاربر با فشرده‌سازی/برش/تغییر جزئی عکس (که هش را
-        عوض می‌کند) دوباره ارسال کرده هم شناسایی شود، چون شماره مرجع بانکی
-        داخل متن تغییر نمی‌کند. ref_number خالی هرگز جست‌وجو نمی‌شود چون
-        خیلی از رسیدها ممکن است این فیلد در آن‌ها خوانده نشده باشد و یک
-        مقدار خالی مشترک نباید به اشتباه «تکراری» تشخیص داده شود."""
+    def claim_receipt_ref(self, ref_number: str, file_hash: str, ref_kind: str, ref_id: int, bank_key: str = None):
+        """شماره مرجع را اتمیک روی رکورد همین رسید ثبت می‌کند و رکورد قبلیِ دیگر با همین شماره را برمی‌گرداند."""
         if not ref_number:
             return None
         with self._get_conn() as conn:
-            return conn.execute(
-                "SELECT * FROM receipt_hashes WHERE ref_number=? AND ref_number<>'' "
-                "AND NOT (ref_kind=? AND ref_id=?) ORDER BY id LIMIT 1",
-                (ref_number, ref_kind, ref_id),
-            ).fetchone()
+            found = self._find_receipt_reuse(conn, "ref_number", ref_number, ref_kind, ref_id, bank_key)
+            conn.execute(
+                "INSERT OR IGNORE INTO receipt_hashes (file_hash, ref_kind, ref_id) VALUES (?, ?, ?)",
+                (file_hash, ref_kind, ref_id),
+            )
+            conn.execute(
+                "UPDATE receipt_hashes SET ref_number=?, bank_key=? WHERE file_hash=? AND ref_kind=? AND ref_id=?",
+                (ref_number, bank_key or None, file_hash, ref_kind, ref_id),
+            )
+            return found
+
+
+    def get_receipt_card_candidates(self, since_utc_iso: str) -> list:
+        """کارت‌هایی که پس از since جایگزین شده‌اند + همه‌ی کارت‌های جدول card_to_card_cards."""
+        try:
+            since = datetime.fromisoformat(str(since_utc_iso))
+        except (TypeError, ValueError):
+            since = datetime.utcnow() - timedelta(hours=24)
+        try:
+            history = json.loads(self.get_setting("card_number_history", "") or "[]")
+        except ValueError:
+            history = []
+        cards = []
+        for item in history:
+            try:
+                until = datetime.fromisoformat(str(item.get("until")))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if until >= since and item.get("card"):
+                cards.append(str(item["card"]))
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT card_number FROM card_to_card_cards").fetchall()
+            cards.extend(str(r["card_number"]) for r in rows if r["card_number"])
+        except sqlite3.Error:
+            pass
+        return list(dict.fromkeys(cards))
 
 
     def find_receipt_phash_candidates(self, ref_kind: str, ref_id: int):
@@ -1750,12 +1813,102 @@ class OrdersMixin:
                 (ref_kind, ref_id),
             ).fetchall()
 
-    def record_receipt_hash(self, file_hash: str, ref_kind: str, ref_id: int, ref_number: str = None, phash: str = None):
+    def _mark_receipt_decision(self, conn, ref_kind: str, ref_id: int, decision: str):
+        """تصمیم نهایی (تایید/رد) یک سفارش/شارژ را روی ردیف بازخورد رسید ثبت
+        می‌کند تا دقت هر مدل با داده‌ی واقعی سنجیده شود. رد خودکارِ خود سیستم
+        با برچسب auto_rejected جدا نگه داشته می‌شود چون تصمیم انسانی نیست.
+        بدون ردیف بازخورد (پرداخت‌های غیررسیدی) اثری ندارد و هرگز خطا نمی‌دهد."""
+        try:
+            conn.execute(
+                "UPDATE receipt_ai_feedback SET "
+                "final_decision=CASE WHEN ?='rejected' AND auto_rejected=1 THEN 'auto_rejected' ELSE ? END, "
+                "decided_at=? WHERE ref_kind=? AND ref_id=? AND final_decision IS NULL",
+                (decision, decision, datetime.utcnow().isoformat(), ref_kind, ref_id),
+            )
+        except Exception:  # intentional broad catch: feedback logging must never block an approve/reject
+            pass
+
+
+    def record_receipt_ai_feedback(self, ref_kind: str, ref_id: int, user_id, votes: list, fields: dict,
+                                   bank_key: str, ref_number: str, risk_score: int,
+                                   weighted_score: float, auto_rejected: bool):
+        """رأی هر مدل، وضعیت اجماع فیلدها و امتیازها را برای یک رسید ذخیره
+        می‌کند؛ تصمیم ادمین بعداً توسط approve/reject روی همین ردیف می‌نشیند."""
+        import json as _json
         with self._get_conn() as conn:
             conn.execute(
-                "INSERT INTO receipt_hashes (file_hash, ref_kind, ref_id, ref_number, phash) VALUES (?, ?, ?, ?, ?)",
-                (file_hash, ref_kind, ref_id, ref_number or None, phash or None),
+                "INSERT OR REPLACE INTO receipt_ai_feedback (ref_kind, ref_id, user_id, votes_json, fields_json, "
+                "bank_key, ref_number, risk_score, weighted_score, auto_rejected) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (ref_kind, ref_id, user_id, _json.dumps(votes, ensure_ascii=False),
+                 _json.dumps(fields, ensure_ascii=False), bank_key or None, ref_number or None,
+                 int(risk_score or 0), float(weighted_score or 0), 1 if auto_rejected else 0),
             )
+
+
+    def get_receipt_feedback_labeled(self, limit: int = 2000):
+        """جدیدترین رسیدهایی که ادمین درباره‌شان تصمیم نهایی گرفته (approved/rejected)."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT ref_kind, ref_id, votes_json, weighted_score, final_decision FROM receipt_ai_feedback "
+                "WHERE final_decision IN ('approved','rejected') ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+
+
+    def get_receipt_feedback_counts(self) -> dict:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT COALESCE(final_decision,'pending') AS d, COUNT(*) AS n FROM receipt_ai_feedback GROUP BY d"
+            ).fetchall()
+        return {r["d"]: int(r["n"]) for r in rows}
+
+
+    def get_receipt_bank_ref_samples(self, bank_key: str, limit: int = 300) -> list:
+        """شماره‌های پیگیریِ رسیدهای تاییدشده‌ی یک بانک/اپ، برای یادگیری الگوی طول/پیشوند."""
+        if not bank_key:
+            return []
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT ref_number FROM receipt_ai_feedback WHERE bank_key=? AND final_decision='approved' "
+                "AND ref_number IS NOT NULL AND ref_number<>'' ORDER BY id DESC LIMIT ?",
+                (bank_key, int(limit)),
+            ).fetchall()
+        return [r["ref_number"] for r in rows]
+
+
+    def get_receipt_behavior(self, ref_kind: str, ref_id: int) -> dict:
+        """سیگنال‌های رفتاری صاحب رسید: سن اکانت، سابقه‌ی خرید/رد، و زمان ساخت
+        سفارش (فقط برای سفارش؛ شارژ کیف پول هنگام ارسال رسید ساخته می‌شود)."""
+        table = "orders" if ref_kind == "order" else "wallet_topups"
+        with self._get_conn() as conn:
+            ref = conn.execute(f"SELECT user_id, created_at FROM {table} WHERE id=?", (ref_id,)).fetchone()
+            if not ref:
+                return {}
+            uid = ref["user_id"]
+            user = conn.execute("SELECT joined_at FROM users WHERE telegram_id=?", (uid,)).fetchone()
+            approved = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM orders WHERE user_id=? AND status='approved' AND id<>?) + "
+                "(SELECT COUNT(*) FROM wallet_topups WHERE user_id=? AND status='approved' AND id<>?)",
+                (uid, ref_id if ref_kind == "order" else -1, uid, ref_id if ref_kind != "order" else -1),
+            ).fetchone()[0]
+            rejected = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM orders WHERE user_id=? AND status='rejected' AND id<>?) + "
+                "(SELECT COUNT(*) FROM wallet_topups WHERE user_id=? AND status='rejected' AND id<>?)",
+                (uid, ref_id if ref_kind == "order" else -1, uid, ref_id if ref_kind != "order" else -1),
+            ).fetchone()[0]
+            ai_rejected = conn.execute(
+                "SELECT COUNT(*) FROM receipt_ai_feedback WHERE user_id=? AND auto_rejected=1 "
+                "AND NOT (ref_kind=? AND ref_id=?)",
+                (uid, ref_kind, ref_id),
+            ).fetchone()[0]
+        return {
+            "user_id": uid,
+            "joined_at": user["joined_at"] if user else None,
+            "ref_created_at": ref["created_at"] if ref_kind == "order" else None,
+            "approved_count": int(approved or 0),
+            "rejected_count": int(rejected or 0),
+            "ai_rejected_count": int(ai_rejected or 0),
+        }
 
 
     def set_topup_admin_message(self, topup_id: int, admin_chat_id: int, admin_message_id: int):
@@ -1799,6 +1952,7 @@ class OrdersMixin:
             )
             if cur.rowcount == 0:
                 return False
+            self._mark_receipt_decision(conn, "topup", topup_id, "approved")
             with _wallet_tag(conn, topup["user_id"], "topup", f"شارژ کیف پول #{topup_id}"):
                 conn.execute(
                     "UPDATE users SET referral_credit=MAX(referral_credit + ?, MIN(referral_credit,0)) WHERE telegram_id=?",
@@ -1813,13 +1967,15 @@ class OrdersMixin:
         return int(row["cashback_amount"] or 0) if row else 0
 
 
-    def reject_topup(self, topup_id: int) -> bool:
+    def reject_topup(self, topup_id: int, reason: str = "") -> bool:
         """فقط topup pending را رد می‌کند (نه processing/approved)."""
         with self._get_conn() as conn:
             cur = conn.execute(
-                "UPDATE wallet_topups SET status='rejected', updated_at=? WHERE id=? AND status='pending'",
-                (datetime.utcnow().isoformat(), topup_id),
+                "UPDATE wallet_topups SET status='rejected', close_reason=?, updated_at=? WHERE id=? AND status='pending'",
+                (reason or "", datetime.utcnow().isoformat(), topup_id),
             )
+            if cur.rowcount and reason != "user_cancel":
+                self._mark_receipt_decision(conn, "topup", topup_id, "rejected")
             return cur.rowcount > 0
 
 

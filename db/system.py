@@ -105,8 +105,34 @@ class SystemMixin:
             self._settings_cache_loaded_at = time.monotonic()
 
 
+    def _remember_replaced_card(self, conn, old_card: str):
+        """کارت جایگزین‌شده را با زمان جایگزینی نگه می‌دارد تا رسیدهای سفارش‌های قبلی رد نشوند."""
+        old_card = (old_card or "").strip()
+        if not any(ch in "123456789" for ch in old_card):
+            return
+        row = conn.execute("SELECT value FROM settings WHERE key='card_number_history'").fetchone()
+        try:
+            history = json.loads(row["value"]) if row and row["value"] else []
+        except ValueError:
+            history = []
+        history.append({"card": old_card, "until": datetime.utcnow().isoformat()})
+        payload = json.dumps(history[-10:], ensure_ascii=False)
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('card_number_history', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (payload,),
+        )
+        if self._settings_cache is not None:
+            self._settings_cache["card_number_history"] = payload
+
+
     def set_setting(self, key: str, value: str):
         with self._get_conn() as conn:
+            if key == "card_number":
+                row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+                old = (row["value"] if row else "") or ""
+                if old.strip() and old.strip() != str(value or "").strip():
+                    self._remember_replaced_card(conn, old)
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
