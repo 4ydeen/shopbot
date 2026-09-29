@@ -177,6 +177,10 @@ async function api(path, options = {}) {
       showForceJoinGate(err.detail);
       throw new Error(err.detail.message || "برای ادامه باید در کانال عضو شوید.");
     }
+    if (res.status === 403 && err.detail && err.detail.code === "terms_required") {
+      showTermsGate(err.detail.text || "ابتدا قوانین و مقررات را تأیید کنید.");
+      throw new Error(err.detail.message || "ابتدا قوانین و مقررات را تأیید کنید.");
+    }
     const msg = typeof err.detail === "string" ? err.detail : (err.detail && err.detail.message) || "خطای ناشناخته";
     throw new Error(msg);
   }
@@ -185,7 +189,8 @@ async function api(path, options = {}) {
 
 // بنر/صفحه‌ی عضویت اجباری در کانال - هم‌تراز با force_join.py در ربات اصلی
 // که قبل از هر اکشنی (خرید/تاپ‌آپ/تست/گردونه) عضویت را چک می‌کند.
-function showForceJoinGate(info) {
+function showForceJoinGate(info, onSuccess = null) {
+  document.querySelectorAll(".force-join-overlay").forEach((x) => x.remove());
   const overlay = document.createElement("div");
   overlay.className = "force-join-overlay";
   overlay.innerHTML = `
@@ -194,22 +199,67 @@ function showForceJoinGate(info) {
       <p style="margin:10px 0">برای استفاده از این بخش، ابتدا باید در کانال زیر عضو شوید:</p>
       <a class="btn" href="${info.join_link}" target="_blank" style="text-decoration:none;display:block;margin-bottom:8px">📢 عضویت در کانال</a>
       <button class="btn outline" id="force-join-recheck-btn">✅ بررسی مجدد عضویت</button>
-      <button class="btn outline small" id="force-join-close-btn" style="margin-top:8px">بستن</button>
+      ${onSuccess ? "" : '<button class="btn outline small" id="force-join-close-btn" style="margin-top:8px">بستن</button>'}
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById("force-join-close-btn").onclick = () => overlay.remove();
+  document.getElementById("force-join-close-btn")?.addEventListener("click", () => overlay.remove());
   document.getElementById("force-join-recheck-btn").onclick = async () => {
     try {
       const status = await api("/api/force-join-status");
       if (!status.required || status.member) {
         notify("✅ عضویت شما تایید شد.");
         overlay.remove();
+        if (onSuccess) onSuccess();
       } else {
         notify("هنوز عضو کانال نشده‌اید.");
       }
-    } catch (e) { /* از خود force-join-status هیچ‌وقت force_join throw نمی‌کند */ }
+    } catch (e) {}
   };
+}
+
+function showTermsGate(text) {
+  document.querySelectorAll(".terms-overlay").forEach((x) => x.remove());
+  const overlay = document.createElement("div");
+  overlay.className = "force-join-overlay terms-overlay";
+  overlay.innerHTML = `
+    <div class="card" style="max-width:420px;max-height:82vh;display:flex;flex-direction:column">
+      <h3><span class="ic">📜</span>قوانین و مقررات</h3>
+      <div style="white-space:pre-wrap;overflow:auto;line-height:1.9;text-align:start;margin:10px 0 14px;padding:12px;border-radius:14px;background:rgba(128,128,128,.08)">${escHtml(text)}</div>
+      <button class="btn" id="terms-accept-btn">✅ می‌پذیرم و ادامه می‌دهم</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById("terms-accept-btn").onclick = async () => {
+    const btn = document.getElementById("terms-accept-btn");
+    btn.disabled = true;
+    try {
+      await api("/api/terms/accept", { method: "POST" });
+      overlay.remove();
+      bootstrapEntryGates();
+    } catch (e) {
+      notify("خطا: " + e.message);
+      btn.disabled = false;
+    }
+  };
+}
+
+async function bootstrapEntryGates() {
+  try {
+    const join = await api("/api/force-join-status");
+    if (join.required && !join.member) {
+      showForceJoinGate(join, () => bootstrapEntryGates());
+      return;
+    }
+    const terms = await api("/api/terms");
+    if (terms.required && !terms.accepted) {
+      showTermsGate(terms.text);
+      return;
+    }
+  } catch (e) {
+    // در صورت خطای موقت، خود اپ باز می‌شود و اکشن‌های حساس همچنان سمت سرور محافظت می‌شوند.
+  }
+  bootstrapEntryGates();
 }
 
 // آپلود فایل (مولتی‌پارت) - بدون Content-Type دستی تا مرورگر boundary را ست کند
@@ -354,14 +404,16 @@ async function renderReferral() {
 
 let supportPollTimer = null;
 let supportLastId = 0;
-let supportSection = "chat"; // chat | tickets
+let aiSupportSectionLastId = 0;
+let supportSection = "ai"; // ai | chat | tickets
 let ticketView = { level: "list" }; // list | thread
 
 function renderSupport() {
   content.innerHTML = `
     <div class="segmented" id="support-section-tabs">
-      <button class="seg-btn ${supportSection === "chat" ? "active" : ""}" data-section="chat">گفتگوی زنده</button>
-      <button class="seg-btn ${supportSection === "tickets" ? "active" : ""}" data-section="tickets">تیکت‌ها</button>
+      <button class="seg-btn ${supportSection === "ai" ? "active" : ""}" data-section="ai">🤖 پشتیبانی هوشمند</button>
+      <button class="seg-btn ${supportSection === "chat" ? "active" : ""}" data-section="chat">💬 گفتگوی زنده</button>
+      <button class="seg-btn ${supportSection === "tickets" ? "active" : ""}" data-section="tickets">🎫 تیکت‌ها</button>
     </div>
     <div id="support-section-body"></div>
   `;
@@ -373,8 +425,85 @@ function renderSupport() {
       renderSupport();
     };
   });
-  if (supportSection === "chat") renderSupportChat();
+  if (supportSection === "ai") renderAISupportChat();
+  else if (supportSection === "chat") renderSupportChat();
   else renderTicketsSection();
+}
+
+function renderAISupportChat() {
+  const body = document.getElementById("support-section-body");
+  body.innerHTML = `
+    <div class="chat-wrap">
+      <div class="chat-messages" id="ai-chat-messages">${skeleton(2)}</div>
+      <form class="chat-input-row" id="ai-chat-form">
+        <input type="text" id="ai-chat-input" placeholder="سؤالت را برای پشتیبانی هوشمند بنویس..." autocomplete="off" />
+        <button type="submit" class="chat-send-btn" aria-label="ارسال">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+    </div>
+  `;
+
+  const form = document.getElementById("ai-chat-form");
+  const input = document.getElementById("ai-chat-input");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    input.disabled = true;
+    appendAIChatMessage({ sender: "user", message: text, created_at: new Date().toISOString() });
+    try {
+      const result = await api("/api/ai-support/messages", {
+        method: "POST",
+        body: JSON.stringify({ message: text }),
+      });
+      appendAIChatMessage({
+        sender: "ai",
+        message: result.message,
+        created_at: new Date().toISOString(),
+      });
+      if (result.escalated) {
+        notify("پیام شما برای پشتیبانی انسانی هم ارسال شد. 🙏");
+      }
+    } catch (e2) {
+      notify("خطا: " + e2.message);
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
+  };
+
+  loadAISupportMessages();
+}
+
+async function loadAISupportMessages() {
+  const box = document.getElementById("ai-chat-messages");
+  if (!box) return;
+  try {
+    const msgs = await api("/api/ai-support/messages");
+    box.innerHTML = "";
+    if (!msgs.length) {
+      box.innerHTML = `<div class="state-msg"><span class="ic">🤖</span>سلام! سوالت درباره خرید، سرویس، پرداخت یا اتصال را همینجا بپرس.</div>`;
+      return;
+    }
+    msgs.forEach((m) => appendAIChatMessage(m));
+  } catch (e) {
+    box.innerHTML = `<div class="state-msg error">خطا در دریافت گفتگوی هوشمند.</div>`;
+  }
+}
+
+function appendAIChatMessage(m) {
+  const box = document.getElementById("ai-chat-messages");
+  if (!box) return;
+  if (box.querySelector(".state-msg")) box.innerHTML = "";
+  const time = new Date(m.created_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${m.sender === "user" ? "mine" : "admin"}`;
+  bubble.innerHTML = `<div class="chat-text"></div><div class="chat-time">${time}</div>`;
+  bubble.querySelector(".chat-text").textContent = m.message;
+  box.appendChild(bubble);
+  box.scrollTop = box.scrollHeight;
 }
 
 function renderSupportChat() {
@@ -385,7 +514,7 @@ function renderSupportChat() {
       <form class="chat-input-row" id="chat-form">
         <input type="text" id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off" />
         <button type="submit" class="chat-send-btn" aria-label="ارسال">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-3-7-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 20 4l-6 16-7-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         </button>
       </form>
     </div>
@@ -422,7 +551,7 @@ async function loadSupportMessages(initial) {
     }
     msgs.forEach((m) => appendChatMessage(m, false));
   } catch (e) {
-    // در پس‌زمینه صامت (ارور نمایش داده نمی‌شود تا مزاحم تایپ کاربر نشود)
+    // در پس‌زمینه صامت
   }
 }
 
@@ -2318,7 +2447,7 @@ async function buyProduct(productId, quantity, code) {
     if (result.status === "approved") {
       tg.HapticFeedback.notificationOccurred("success");
       notify("✅ خرید تایید شد! از تب خانه لینک را ببینید.");
-      switchTab("home");
+      bootstrapEntryGates();
     } else {
       content.innerHTML = `
         <button class="btn outline small" id="back-to-store-btn" style="width:auto;margin-bottom:12px">→ بازگشت به فروشگاه</button>
@@ -6792,4 +6921,4 @@ document.querySelectorAll("#tabbar button").forEach((b) => b.onclick = () => swi
 const headerWalletBtn = document.getElementById("header-wallet-btn");
 if (headerWalletBtn) headerWalletBtn.onclick = () => switchTab("wallet");
 
-switchTab("home");
+bootstrapEntryGates();
