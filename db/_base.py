@@ -1629,6 +1629,7 @@ class DatabaseBase:
             # لیست کاربر مخفی می‌شوند ولی برای گزارش‌های ادمین دست‌نخورده می‌مانند.
             ("orders", "user_deleted", "INTEGER DEFAULT 0"),
             ("users", "force_join_exempt", "INTEGER DEFAULT 0"),
+            ("users", "terms_accepted_at", "TEXT"),
             ("users", "acquisition_source", "TEXT"),
             # محدودسازی روش پرداخت مجاز به ازای هر محصول: JSON آرایه‌ای از
             # کلیدهای روش (مثلاً ["wallet","card"])؛ NULL/خالی یعنی همه‌ی

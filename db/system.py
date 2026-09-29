@@ -1298,6 +1298,37 @@ class SystemMixin:
         }
 
 
+    def get_terms_settings(self) -> dict:
+        text = self.get_setting(
+            "terms_text",
+            "📜 قوانین و مقررات\n\nلطفاً قوانین و مقررات استفاده از این سرویس را مطالعه کنید و برای ادامه آن را تأیید کنید."
+        ).strip()
+        return {
+            "enabled": self.get_setting("terms_enabled", "0") == "1",
+            "text": text,
+            "updated_at": self.get_setting("terms_updated_at", ""),
+        }
+
+
+    def is_terms_accepted(self, tg_id: int) -> bool:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT terms_accepted_at FROM users WHERE telegram_id=?", (tg_id,)
+            ).fetchone()
+            if not row or not row["terms_accepted_at"]:
+                return False
+            updated_at = self.get_setting("terms_updated_at", "")
+            return not updated_at or str(row["terms_accepted_at"]) >= str(updated_at)
+
+
+    def set_terms_accepted(self, tg_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET terms_accepted_at=CURRENT_TIMESTAMP WHERE telegram_id=?",
+                (tg_id,),
+            )
+
+
     def is_force_join_exempt(self, tg_id: int) -> bool:
         with self._get_conn() as conn:
             row = conn.execute(
