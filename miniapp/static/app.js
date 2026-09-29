@@ -2715,7 +2715,13 @@ async function spinWheel() {
         tg.HapticFeedback.notificationOccurred(apiResult.won ? "success" : "error");
         if (apiResult.won) {
           reels.forEach((rr) => rr.classList.add("win"));
-          resultBox.innerHTML = `
+          resultBox.innerHTML = apiResult.kind === "config"
+            ? `
+            <div class="jackpot-result win">
+              🎉 جکپات بردی! ${escHtml(apiResult.title)} (${escHtml(apiResult.amount_label)})
+              <div class="code">${escHtml(apiResult.link)}</div>
+            </div>`
+            : `
             <div class="jackpot-result win">
               🎉 جکپات بردی! کد تخفیف ${apiResult.percent}٪
               <div class="code">${apiResult.code}</div>
