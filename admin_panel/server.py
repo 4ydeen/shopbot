@@ -1717,6 +1717,13 @@ def api_app_config(admin=Depends(get_current_admin)):
                     ]},
                     {"key": "openrouter_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                 ]},
+                {"title": "🧾 ایجنت‌های اضافی تشخیص رسید", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
+                    {"key": "github_models_api_key", "label": "GitHub Models - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                    {"key": "mistral_api_key", "label": "Mistral - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                    {"key": "cohere_api_key", "label": "Cohere - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                    {"key": "cloudflare_api_token", "label": "Cloudflare Workers AI - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                    {"key": "cloudflare_account_id", "label": "Cloudflare Workers AI - Account ID", "type": "text"},
+                ]},
             ],
         })
         tabs.append({
@@ -2108,6 +2115,11 @@ class AiSupportSettingsBody(BaseModel):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     openrouter_api_key: str = ""
+    github_models_api_key: str = ""
+    mistral_api_key: str = ""
+    cohere_api_key: str = ""
+    cloudflare_api_token: str = ""
+    cloudflare_account_id: Optional[str] = None
 
 
 @app.get("/api/settings/ai-support")
@@ -2124,6 +2136,11 @@ def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
         "gemini_api_key": _mask_key_lines(db.get_setting("gemini_api_key", "")),
         "groq_api_key": _mask_key_lines(db.get_setting("groq_api_key", "")),
         "openrouter_api_key": _mask_key_lines(db.get_setting("openrouter_api_key", "")),
+        "github_models_api_key": _mask_key_lines(db.get_setting("github_models_api_key", "")),
+        "mistral_api_key": _mask_key_lines(db.get_setting("mistral_api_key", "")),
+        "cohere_api_key": _mask_key_lines(db.get_setting("cohere_api_key", "")),
+        "cloudflare_api_token": _mask_key_lines(db.get_setting("cloudflare_api_token", "")),
+        "cloudflare_account_id": db.get_setting("cloudflare_account_id", ""),
     }
 
 
@@ -2145,12 +2162,18 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         ("gemini_api_key", "gemini_api_key"),
         ("groq_api_key", "groq_api_key"),
         ("openrouter_api_key", "openrouter_api_key"),
+        ("github_models_api_key", "github_models_api_key"),
+        ("mistral_api_key", "mistral_api_key"),
+        ("cohere_api_key", "cohere_api_key"),
+        ("cloudflare_api_token", "cloudflare_api_token"),
     ):
         raw = getattr(body, field)
         current_masked = _mask_key_lines(db.get_setting(setting_key, ""))
         if raw.strip() == current_masked.strip():
             continue  # دست‌نخورده مانده؛ کلید تغییر نکند
         db.set_setting(setting_key, "\n".join(ai_support._split_keys(raw)))
+    if body.cloudflare_account_id is not None:
+        db.set_setting("cloudflare_account_id", body.cloudflare_account_id.strip())
     db.log_admin_action(admin["id"], "ai_support_settings_change", f"تنظیمات دستیار هوشمند تغییر کرد (پنل وب - {admin['username']}).")
     return {"ok": True}
 
@@ -2643,7 +2666,7 @@ async def api_reject_order(order_id: int, admin=Depends(require_permission("orde
     order = (await asyncio.to_thread(db.get_order, order_id))
     if not order or order["status"] != "pending":
         raise HTTPException(400, tr("سفارش یافت نشد یا قبلاً بررسی شده."))
-    if not (await asyncio.to_thread(db.reject_order, order_id)):
+    if not (await asyncio.to_thread(db.reject_order, order_id, "admin")):
         raise HTTPException(400, tr("سفارش یافت نشد یا قبلاً بررسی شده."))
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "order_reject", f"سفارش #{order_id} رد شد (پنل وب - {admin['username']})", "order", order_id))
     await notify_user(order["user_id"], "⛔️ سفارش شما رد شد. در صورت کسر از کیف پول، مبلغ برگشت داده شد.")
@@ -2727,7 +2750,7 @@ async def api_reject_topup(topup_id: int, admin=Depends(require_permission("orde
     topup = (await asyncio.to_thread(db.get_topup, topup_id))
     if not topup or topup["status"] != "pending":
         raise HTTPException(400, tr("یافت نشد یا قبلاً بررسی شده."))
-    if not (await asyncio.to_thread(db.reject_topup, topup_id)):
+    if not (await asyncio.to_thread(db.reject_topup, topup_id, "admin")):
         raise HTTPException(400, tr("یافت نشد یا قبلاً بررسی شده."))
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "topup_reject", f"شارژ #{topup_id} رد شد (پنل وب - {admin['username']})", "topup", topup_id))
     await notify_user(topup["user_id"], "⛔️ درخواست شارژ کیف پول شما رد شد.")
