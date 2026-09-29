@@ -2411,14 +2411,111 @@ class OrdersMixin:
     # -----------------------------------------------------------------------
 
 
+    def _seed_wheel_prizes(self, conn):
+        """مهاجرت یک‌باره: تنظیمات قدیمی گردونه (درصد برد کلی + لیست درصدهای تخفیف) به
+        ردیف‌های wheel_prizes تبدیل می‌شود؛ شانس کل برد بین جوایز تخفیف تقسیم می‌شود."""
+        def _setting(key, default):
+            row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+            return row["value"] if row and row["value"] is not None else default
+
+        if _setting("wheel_prizes_seeded", "") == "1":
+            return
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wheel_prizes_seeded', '1')")
+        if conn.execute("SELECT 1 FROM wheel_prizes LIMIT 1").fetchone() is not None:
+            return
+        try:
+            win = float(_setting("wheel_win_percent", "10") or 0)
+        except ValueError:
+            win = 0.0
+        percents = [int(p) for p in (_setting("wheel_prizes", "10,20,30,50") or "").split(",") if p.strip().isdigit()]
+        if not percents or win <= 0:
+            return
+        each = round(min(win, 100.0) / len(percents), 2)
+        for idx, percent in enumerate(percents):
+            conn.execute(
+                "INSERT INTO wheel_prizes (kind, title, chance, discount_percent, is_active, sort_order) "
+                "VALUES ('discount', ?, ?, ?, 1, ?)",
+                (f"کد تخفیف {percent}٪", each, percent, idx),
+            )
+
     def get_wheel_settings(self) -> dict:
+        rows = self.list_wheel_prizes(active_only=True)
         return {
             "enabled": self.get_setting("wheel_enabled", "1") == "1",
-            "win_percent": int(self.get_setting("wheel_win_percent", "10") or 0),
-            "prizes": [int(p) for p in self.get_setting("wheel_prizes", "10,20,30,50").split(",") if p.strip().isdigit()],
+            "win_percent": int(round(sum(r["chance"] for r in rows))),
+            "prizes": [int(r["discount_percent"]) for r in rows if r["kind"] == "discount" and r["discount_percent"]],
             "expiry_hours": int(self.get_setting("wheel_code_expiry_hours", "24") or 24),
             "cooldown_hours": int(self.get_setting("wheel_cooldown_hours", "24") or 24),
         }
+
+    def list_wheel_prizes(self, active_only: bool = False):
+        q = "SELECT * FROM wheel_prizes"
+        if active_only:
+            q += " WHERE is_active=1"
+        q += " ORDER BY sort_order, id"
+        with self._get_conn() as conn:
+            return conn.execute(q).fetchall()
+
+    def get_wheel_prize(self, prize_id: int):
+        with self._get_conn() as conn:
+            return conn.execute("SELECT * FROM wheel_prizes WHERE id=?", (prize_id,)).fetchone()
+
+    def wheel_chance_total(self, exclude_id: int = None) -> float:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(chance), 0) AS t FROM wheel_prizes WHERE is_active=1 AND id != ?",
+                (exclude_id or 0,),
+            ).fetchone()
+        return float(row["t"] or 0)
+
+    def create_wheel_prize(self, kind: str, title: str, chance: float, discount_percent: int = None,
+                           name_prefix: str = None, panel_server_id: int = None,
+                           volume_mb: int = None, duration_hours: int = None) -> int:
+        with self._get_conn() as conn:
+            order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) AS m FROM wheel_prizes").fetchone()
+            cur = conn.execute(
+                "INSERT INTO wheel_prizes (kind, title, chance, discount_percent, name_prefix, panel_server_id, "
+                "volume_mb, duration_hours, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (kind, title, chance, discount_percent, name_prefix, panel_server_id,
+                 volume_mb, duration_hours, order["m"] + 1),
+            )
+            return cur.lastrowid
+
+    def update_wheel_prize(self, prize_id: int, **fields) -> None:
+        allowed = {"title", "chance", "is_active"}
+        sets, values = [], []
+        for key, value in fields.items():
+            if key in allowed:
+                sets.append(f"{key}=?")
+                values.append(value)
+        if not sets:
+            return
+        values.append(prize_id)
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE wheel_prizes SET {', '.join(sets)} WHERE id=?", values)
+
+    def delete_wheel_prize(self, prize_id: int) -> None:
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM wheel_prizes WHERE id=?", (prize_id,))
+
+    def pick_wheel_prize(self, allow_config: bool = True):
+        """یک جایزه‌ی فعال را با شانس مستقل خودش انتخاب می‌کند؛ اگر عدد تصادفی به هیچ
+        جایزه‌ای نیفتد (مجموع شانس‌ها کمتر از ۱۰۰) None یعنی «باخت»."""
+        import random as _random
+        rows = [r for r in self.list_wheel_prizes(active_only=True)
+                if r["chance"] > 0 and (allow_config or r["kind"] != "config")]
+        roll = _random.uniform(0, 100)
+        cumulative = 0.0
+        for row in rows:
+            cumulative += float(row["chance"])
+            if roll < cumulative:
+                return row
+        return None
+
+    def release_wheel_spin(self, user_tg_id: int):
+        """اگر ساخت جایزه‌ی کانفیگ شکست خورد، چرخش کاربر برگردانده می‌شود تا دوباره بتواند بچرخاند."""
+        with self._get_conn() as conn:
+            conn.execute("UPDATE users SET last_wheel_spin_at=NULL WHERE telegram_id=?", (user_tg_id,))
 
 
     def set_wheel_prizes(self, prizes: list):

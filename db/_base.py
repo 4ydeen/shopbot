@@ -281,6 +281,24 @@ class DatabaseBase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_test_plans_active ON test_config_plans(is_active);
 
+                -- جوایز گردونه شانس: هر ردیف یک جایزه با درصد شانس مستقل خودش است.
+                -- kind='discount' فقط discount_percent دارد؛ kind='config' مثل پلن تست
+                -- (پیشوند نام، پنل، حجم به مگابایت، مدت به ساعت) یک کانفیگ واقعی می‌سازد.
+                CREATE TABLE IF NOT EXISTS wheel_prizes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL DEFAULT 'discount',
+                    title TEXT NOT NULL DEFAULT '',
+                    chance REAL NOT NULL DEFAULT 0,
+                    discount_percent INTEGER,
+                    name_prefix TEXT,
+                    panel_server_id INTEGER REFERENCES panel_servers(id),
+                    volume_mb INTEGER,
+                    duration_hours INTEGER,
+                    is_active INTEGER DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS orders (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -1270,6 +1288,7 @@ class DatabaseBase:
 
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
+            self._seed_wheel_prizes(conn)
             self._seed_default_reseller_tiers(conn)
 
             # رفع باگ: این فایل دیتابیس ممکن است از یک بات نمایندگیِ حذف‌شده‌ی قبلی
@@ -1331,7 +1350,7 @@ class DatabaseBase:
     # این بات، و factory reset یک بات نباید بات‌های نماینده‌ی دیگرش را قطع کند.
     FACTORY_RESET_TABLES = (
         "users", "categories", "products", "configs", "config_activity", "test_configs",
-        "test_config_plans", "orders", "discount_codes", "discount_redemptions", "wallet_topups",
+        "test_config_plans", "wheel_prizes", "orders", "discount_codes", "discount_redemptions", "wallet_topups",
         "crypto_invoices", "support_messages", "support_conversations",
         "admin_presence", "tickets", "ticket_messages", "ticket_departments", "ticket_department_admins", "admin_logs",
         "abangateway_invoices", "blupal_invoices", "noapay_invoices", "extra_gateway_invoices", "custom_gateways", "custom_gateway_invoices",
@@ -1379,6 +1398,7 @@ class DatabaseBase:
 
             self._seed_default_custom_config_product(conn)
             self._seed_default_test_config_plan(conn)
+            self._seed_wheel_prizes(conn)
             self._seed_default_reseller_tiers(conn)
 
         self._settings_cache = None
