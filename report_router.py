@@ -132,12 +132,40 @@ async def send_text(bot, db, topic_key: str, text: str, reply_markup=None):
 
 
 async def send_media(bot, db, topic_key: str, file_id: str, media_type: str, caption: str, reply_markup=None):
-    def _factory(chat_id, thread_id):
-        if media_type == "document":
-            return bot.send_document(chat_id, file_id, caption=caption, message_thread_id=thread_id, reply_markup=reply_markup)
-        return bot.send_photo(chat_id, file_id, caption=caption, message_thread_id=thread_id, reply_markup=reply_markup)
+    """ارسال رسید/مدیای گزارش با رعایت سقف ۱۰۲۴ کاراکتری کپشن تلگرام.
 
-    return await send_to_group(bot, db, topic_key, _factory)
+    در صورت طولانی بودن کپشن، رسید با کپشن کوتاه و دکمه‌های همان گزارش ارسال
+    می‌شود و متن کامل بلافاصله در پیام بعدی همان تاپیک قرار می‌گیرد. این کار
+    باعث نمی‌شود خطای ``message caption is too long`` کل مسیر گزارش را متوقف کند.
+    """
+    max_caption = 1000
+
+    async def _send_full_text(chat_id: int, thread_id: int):
+        text = caption or ""
+        for start in range(0, len(text), 4000):
+            await bot.send_message(
+                chat_id, text[start:start + 4000], message_thread_id=thread_id
+            )
+
+    def _factory(chat_id, thread_id):
+        if len(caption or "") <= max_caption:
+            if media_type == "document":
+                return bot.send_document(chat_id, file_id, caption=caption, message_thread_id=thread_id, reply_markup=reply_markup)
+            return bot.send_photo(chat_id, file_id, caption=caption, message_thread_id=thread_id, reply_markup=reply_markup)
+
+        short_caption = (caption[:max_caption - 30].rstrip() +
+                         "\n\n⚠️ ادامه جزئیات در پیام بعدی…")
+        if media_type == "document":
+            return bot.send_document(chat_id, file_id, caption=short_caption, message_thread_id=thread_id, reply_markup=reply_markup)
+        return bot.send_photo(chat_id, file_id, caption=short_caption, message_thread_id=thread_id, reply_markup=reply_markup)
+
+    sent = await send_to_group(bot, db, topic_key, _factory)
+    if sent and len(caption or "") > max_caption:
+        try:
+            await _send_full_text(sent.chat.id, sent.message_thread_id or 0)
+        except Exception:
+            logger.exception("ارسال جزئیات کامل گزارش مدیا ناموفق بود؛ خود رسید ارسال شده است.")
+    return sent
 
 
 async def report(bot, db, topic_key: str, text: str, reply_markup=None, senior_only: bool = False) -> bool:

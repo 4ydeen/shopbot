@@ -137,9 +137,30 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     _AI_COOLDOWN_SECONDS = 3.0
 
     async def _send_receipt_to_admin(bot: Bot, admin_id: int, file_id: str, receipt_type: str, caption: str, reply_markup=None):
+        """ارسال رسید به مدیر بدون شکست خوردن به‌خاطر محدودیت ۱۰۲۴ کاراکتری کپشن تلگرام.
+
+        اطلاعات کامل سفارش باید حفظ شود، اما عکس/فایل رسید فقط می‌تواند کپشن کوتاه
+        داشته باشد. اگر کپشن طولانی باشد، خود رسید با یک کپشن کوتاه و همان دکمه‌های
+        بررسی ارسال می‌شود و متن کامل در پیام بعدی برای همان مدیر فرستاده می‌شود.
+        """
+        max_caption = 1000  # کمی حاشیه امن نسبت به سقف 1024 کاراکتری Telegram
+        if len(caption or "") <= max_caption:
+            if receipt_type == "document":
+                return await bot.send_document(admin_id, file_id, caption=caption, reply_markup=reply_markup)
+            return await bot.send_photo(admin_id, file_id, caption=caption, reply_markup=reply_markup)
+
+        short_caption = (caption[:max_caption - 30].rstrip() +
+                         "\n\n⚠️ ادامه جزئیات در پیام بعدی…")
         if receipt_type == "document":
-            return await bot.send_document(admin_id, file_id, caption=caption, reply_markup=reply_markup)
-        return await bot.send_photo(admin_id, file_id, caption=caption, reply_markup=reply_markup)
+            sent = await bot.send_document(admin_id, file_id, caption=short_caption, reply_markup=reply_markup)
+        else:
+            sent = await bot.send_photo(admin_id, file_id, caption=short_caption, reply_markup=reply_markup)
+
+        # متن کامل را جداگانه می‌فرستیم تا هیچ اطلاعاتی از سفارش از بین نرود.
+        full_caption = caption or ""
+        for start in range(0, len(full_caption), 4000):
+            await bot.send_message(admin_id, full_caption[start:start + 4000])
+        return sent
 
     def _receipt_payload(message: Message):
         if message.photo:
