@@ -4007,8 +4007,8 @@ def api_wheel_status(auth=Depends(get_verified_user)):
 
 
 @app.post("/api/wheel/spin")
-def api_wheel_spin(auth=Depends(require_joined)):
-    tg_id, db, _ = auth
+async def api_wheel_spin(auth=Depends(require_joined)):
+    tg_id, db, tenant = auth
     settings = db.get_wheel_settings()
     if not settings["enabled"]:
         raise HTTPException(status_code=400, detail=tr("گردونه غیرفعال است."))
@@ -4017,11 +4017,40 @@ def api_wheel_spin(auth=Depends(require_joined)):
         raise HTTPException(status_code=429, detail=tr(f"حدود {int(remaining_hours)+1} ساعت دیگر دوباره امتحان کن."))
 
     db.record_wheel_spin(tg_id)
-    won = random.randint(1, 100) <= settings["win_percent"]
-    if won and settings["prizes"]:
-        percent = random.choice(settings["prizes"])
+    is_full_access = db.is_full_access_bot(not bool(tenant.tenant_id))
+    prize = db.pick_wheel_prize(is_full_access)
+    user_row = db.get_user(tg_id)
+    name = (user_row["first_name"] if user_row else "") or ""
+    username = user_row["username"] if user_row else None
+
+    if prize is not None and prize["kind"] == "config":
+        plan = {
+            "id": prize["id"], "name": prize["title"], "name_prefix": prize["name_prefix"] or "gift",
+            "panel_server_id": prize["panel_server_id"], "volume_mb": prize["volume_mb"],
+            "duration_hours": prize["duration_hours"],
+        }
+        try:
+            result = await provision_test_plan(db, plan, user_id=tg_id, source="wheel", track_product=False)
+        except TestPlanProvisionError as e:
+            db.release_wheel_spin(tg_id)
+            raise HTTPException(status_code=409, detail=str(e))
+        amount = format_plan_amount(plan)
+        await report_router.notify_prize_raw(
+            tenant.bot_token, db, "برنده‌ی گردونه شانس (کانفیگ)", tg_id, name, username,
+            f"📦 {prize['title']} - {amount}\n🔑 {result.get('username') or ''}",
+        )
+        return {
+            "won": True, "kind": "config", "title": prize["title"],
+            "amount_label": amount, "link": result["subscription_url"],
+        }
+    if prize is not None and prize["discount_percent"]:
+        percent = int(prize["discount_percent"])
         code, expires_at = db.generate_wheel_prize_code(tg_id, percent)
-        return {"won": True, "percent": percent, "code": code, "expires_at": expires_at}
+        await report_router.notify_prize_raw(
+            tenant.bot_token, db, "برنده‌ی گردونه شانس (کد تخفیف)", tg_id, name, username,
+            f"🎟 کد تخفیف {percent}٪ - {code}",
+        )
+        return {"won": True, "kind": "discount", "percent": percent, "code": code, "expires_at": expires_at}
     return {"won": False}
 
 
