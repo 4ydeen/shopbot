@@ -120,6 +120,8 @@ async def _i18n_request_language(request: Request, call_next):
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(ApiNoStoreMiddleware)
+from starlette.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
