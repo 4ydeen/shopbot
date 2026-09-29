@@ -203,7 +203,7 @@ _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌ز�
 ۱. فقط بر اساس اطلاعات واقعی که از ابزارها (tools) می‌گیری یا در «دانش پایه» زیر آمده جواب بده. هرگز چیزی را حدس نزن یا وعده‌ی چیزی که مطمئن نیستی نده. قیمت/موجودی/مشخصات محصولات را همیشه با ابزار list_products بگیر؛ هرگز از حافظه یا حدس نگو.
 ۲. تو خودت هیچ عملیات مالی را نهایی نمی‌کنی: نمی‌توانی رفاند بدهی، سرویس را تمدید کنی، تخفیف بدهی، کانفیگ بسازی یا مستقیماً از کیف پول کسر کنی. اما اگر کاربر خواست چیزی بخرد، اجازه داری با ابزار show_purchase_options همان کارت خرید واقعی (قیمت، اعمال خودکار کیف پول، دکمه‌های پرداخت) را برایش باز کنی تا خودش با زدن دکمه نهایی کند، یا (فقط بعد از تاییدِ صریحِ کاربر در یک پیامِ جداگانه - قانون ۱۳) با request_purchase_with_wallet بگذاری اگر موجودی کیف پولش کافی بود سیستم خودش خرید را نهایی کند. این کار را دریغ نکن، بخشی از وظیفه‌ی توست که خرید را برای کاربر ساده و کامل کنی. برای رفاند/تمدید/تخفیف دستی/شکایت مالی همچنان باید escalate_to_human را صدا بزنی.
 ۳. اگر کاربر صراحتاً خواست با انسان صحبت کند، ناراحت/عصبانی بود، یا موضوع شکایت/اختلاف مالی بود، بلافاصله (بدون معطلی و بدون اصرار برای ادامه‌ی گفتگو با تو) escalate_to_human را صدا بزن.
-۴. اگر سوال درباره‌ی وضعیت شخصیِ خودِ کاربر است (سرویسش، حجم باقی‌مانده، انقضا، موجودی کیف پول، سفارش‌ها)، همیشه اول ابزار مربوطه را صدا بزن؛ از حافظه یا حدس جواب نده.
+۴. اگر سوال درباره‌ی وضعیت شخصیِ خودِ کاربر است (سرویس، حجم باقی‌مانده، انقضا، کیف پول، سفارش‌ها، سکه‌ها، حالت سکه، تبدیل سکه، قرعه‌کشی شبانه، برنده‌شدن در قرعه‌کشی یا زیرمجموعه‌ها)، همیشه اول check_account_status را صدا بزن؛ این ابزار اطلاعات واقعی همین کاربر را از دیتابیس می‌خواند. از حافظه یا حدس جواب نده و اطلاعات کاربران دیگر را افشا نکن.
 ۴-۱. برای اینکه سرویس «فعال» یا «غیرفعال» است، فقط و فقط به فیلد panel_status نگاه کن (اگر موجود بود)؛ داشتنِ حجم باقی‌مانده یا نرسیدن تاریخ انقضا به این معنی نیست که سرویس روشن است - ممکن است دستی یا به هر دلیلی روی پنل خاموش شده باشد.
 ۵. کوتاه، دوستانه و محاوره‌ای فارسی بنویس؛ از ایموجی مناسب (نه زیاد) استفاده کن. از پاراگراف‌های طولانی خودداری کن.
 ۶. اگر بعد از تلاش نتوانستی مشکل را حل کنی (نه اینکه صرفاً کاربر یک‌بار درخواست انسان نکرده)، صادقانه بگو و escalate_to_human را صدا بزن؛ کاربر را سردرگم نگه نداری. دکمه‌ی «صحبت با پشتیبانی انسانی» از ابتدا در اختیار کاربر نیست - این خودِ توست که باید موقع نیاز واقعی (سوال مالی، شکایت، درخواست صریح کاربر، یا ناتوانی از پاسخ) او را ارجاع بدهی، نه اینکه منتظر بمانی کاربر خودش درخواست کند.
@@ -236,13 +236,14 @@ _TOOLS = [
     {
         "name": "check_account_status",
         "description": (
-            "وضعیت واقعی حساب کاربر را برمی‌گرداند: موجودی کیف پول، لیست "
-            "سرویس‌های فعال با حجم/انقضای زنده، و سفارش‌های در انتظار بررسی. "
-            "برای هر سوالی درباره‌ی «چرا وصل نمیشم»، «حجمم چقدر مونده»، "
-            "«کی تموم میشه»، «موجودی کیف پولم چقدره» این ابزار را صدا بزن. هر "
-            "سرویس یک service_id دارد که برای محاسبه/انجام تمدید (calculate_renewal_cost، "
-            "renew_service_with_wallet) و روشن/خاموش‌کردن تمدید خودکار "
-            "(set_service_auto_renew) لازم است."
+            "وضعیت واقعی و جامع حساب خودِ کاربر را برمی‌گرداند: موجودی کیف پول، "
+            "سرویس‌ها با حجم/انقضای زنده، سفارش‌های در انتظار، سکه‌ها و تاریخ "
+            "انقضای آن‌ها، حالت سکه (کیف پول/قرعه‌کشی)، تنظیمات و وضعیت واجدشرایط "
+            "بودن برای قرعه‌کشی شبانه، نتیجه آخرین قرعه‌کشی و اینکه آیا خود کاربر "
+            "در آن برنده بوده، به‌علاوه آمار زیرمجموعه. برای هر سوال شخصی درباره "
+            "حساب، سکه، قرعه‌کشی، کیف پول، سرویس، سفارش یا زیرمجموعه اول این ابزار "
+            "را صدا بزن و هرگز این اطلاعات را حدس نزن. هر سرویس یک service_id دارد "
+            "که برای ابزارهای مربوط به تمدید و مدیریت سرویس لازم است."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -624,9 +625,20 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
         wallet = db.get_wallet_credit(user_tg_id)
         orders = db.get_user_orders(user_tg_id)
         custom_configs = db.get_custom_configs_for_user(user_tg_id)
-        return wallet, orders, custom_configs
+        # این بخش عمداً در همان ابزار اصلی حساب خوانده می‌شود تا Agent برای
+        # سوال‌های مربوط به سکه/قرعه‌کشی مجبور نباشد حدس بزند یا به UI متکی باشد.
+        coin_settings = db.get_coin_settings()
+        coins = db.get_user_score(user_tg_id)
+        coin_mode = db.get_user_coin_mode(user_tg_id)
+        coin_expiry = db.get_coin_expiry_lines(user_tg_id)
+        lottery = db.get_lottery_settings()
+        lottery_logs = db.list_lottery_logs(10)
+        referral = db.get_referral_stats(user_tg_id)
+        is_reseller = bool(db.is_reseller(user_tg_id))
+        return wallet, orders, custom_configs, coin_settings, coins, coin_mode, coin_expiry, lottery, lottery_logs, referral, is_reseller
 
-    wallet, orders, custom_configs = await asyncio.to_thread(_read)
+    (wallet, orders, custom_configs, coin_settings, coins, coin_mode, coin_expiry,
+     lottery, lottery_logs, referral, is_reseller) = await asyncio.to_thread(_read)
 
     pending = [
         {"order_id": o["id"], "status": o["status"]}
@@ -695,10 +707,66 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
     )
     services = [r for r in results if r is not None]
 
+    # آخرین نتیجه‌ی واقعی قرعه‌کشی را به‌صورت خلاصه و قابل‌استفاده برای مدل
+    # برمی‌گردانیم؛ خودِ winners_json ممکن است شامل داده‌ی چند کاربر باشد،
+    # بنابراین فقط نتیجه‌ی لازم و وضعیت خود کاربر استخراج می‌شود.
+    latest_lottery = None
+    for log in lottery_logs:
+        try:
+            raw_winners = json.loads(log["winners_json"] or "[]")
+        except Exception:
+            raw_winners = []
+        user_win = next((w for w in raw_winners if int(w.get("user_id", -1)) == int(user_tg_id)), None)
+        latest_lottery = {
+            "lottery_date": str(log["lottery_date"]),
+            "prize_type": log["prize_type"],
+            "winners_count": len(raw_winners),
+            "user_won": bool(user_win),
+            "user_rank": user_win.get("rank") if user_win else None,
+            "user_prize": user_win.get("prize") if user_win else None,
+        }
+        break
+
+    lottery_eligible = bool(
+        coin_settings["enabled"]
+        and lottery["enabled"]
+        and coins >= lottery["min_coins"]
+        and coin_mode == "lottery"
+        and (not is_reseller or lottery["agent_enabled"])
+    )
+
     return {
         "wallet_balance_toman": wallet,
         "active_services": services,
         "pending_orders": pending,
+        "coins": {
+            "balance": coins,
+            "mode": coin_mode,
+            "mode_label": "lottery" if coin_mode == "lottery" else "wallet",
+            "value_per_coin_toman": coin_settings["value"],
+            "total_value_toman": coins * coin_settings["value"],
+            "convert_min": coin_settings["convert_min"],
+            "convert_max": coin_settings["convert_max"],
+            "expiry_days": coin_settings["expiry_days"],
+            "expiry": [{"date": d, "coins": n} for d, n in coin_expiry],
+        },
+        "lottery": {
+            "enabled": bool(lottery["enabled"] and lottery["score_enabled"]),
+            "agent_enabled": lottery["agent_enabled"],
+            "min_coins": lottery["min_coins"],
+            "prize_type": lottery["prize_type"],
+            "prizes": lottery["prizes"],
+            "discount_expiry_hours": lottery["discount_expiry_hours"],
+            "user_eligible_now": lottery_eligible,
+            "latest_result": latest_lottery,
+        },
+        "referral": {
+            "count": int(referral.get("count", 0)),
+            "wallet_credit_toman": int(referral.get("credit", 0) or 0),
+        },
+        "account_flags": {
+            "is_reseller": is_reseller,
+        },
     }
 
 
