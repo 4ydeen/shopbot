@@ -259,7 +259,7 @@ async function bootstrapEntryGates() {
   } catch (e) {
     // در صورت خطای موقت، خود اپ باز می‌شود و اکشن‌های حساس همچنان سمت سرور محافظت می‌شوند.
   }
-  bootstrapEntryGates();
+  switchTab("home");
 }
 
 // آپلود فایل (مولتی‌پارت) - بدون Content-Type دستی تا مرورگر boundary را ست کند
