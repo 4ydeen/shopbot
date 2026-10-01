@@ -606,6 +606,10 @@ class ServiceTransferFlow(StatesGroup):
     waiting_target_id = State()
 
 
+class AddServiceFlow(StatesGroup):
+    waiting_input = State()
+
+
 class RenewalFlow(StatesGroup):
     waiting_amount = State()
     waiting_receipt = State()

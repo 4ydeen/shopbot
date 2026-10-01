@@ -652,6 +652,7 @@ _ACCOUNT_HUB_CALLBACKS = {
     "acct_tutorial": ("acct_show_tutorial", "svc_tutorial"),
     "acct_referral": ("acct_show_referral", "acct:referral"),
     "acct_wallet": ("acct_show_wallet", "acct:wallet"),
+    "acct_add_service": ("acct_show_add_service", "acct:addsvc"),
 }
 
 
@@ -669,6 +670,21 @@ def account_hub_kb(db) -> InlineKeyboardMarkup:
         rows.append([_styled_inline(db, text, callback_data, f"{key}_style")])
     rows.append([InlineKeyboardButton(text=tr(LANGUAGE_BTN_TEXT), callback_data="acct:language")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت به منوی اصلی"), callback_data="acct:main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_service_cancel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("❌ انصراف"), callback_data="acct:addsvc_cancel")],
+    ])
+
+
+def add_service_pick_kb(candidates) -> InlineKeyboardMarkup:
+    rows = []
+    for idx, cand in enumerate(candidates):
+        label = tr("✅ افزودن") + f": {cand['server_name']} - {cand['username']}"
+        rows.append([InlineKeyboardButton(text=label[:60], callback_data=f"acct_add_ok:{idx}")])
+    rows.append([InlineKeyboardButton(text=tr("❌ انصراف"), callback_data="acct:addsvc_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
