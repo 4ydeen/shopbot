@@ -2248,7 +2248,7 @@ setup_libretranslate() {
     fi
 
     echo -e "${CYAN}🌍 Installing/repairing Argos models and the local LibreTranslate runtime...${RESET}"
-    if bash "$INSTALL_DIR/setup_local_translation.sh"; then
+    if SHOPVPN_TRANSLATION_CHOOSE=1 bash "$INSTALL_DIR/setup_local_translation.sh"; then
         echo -e "${GREEN}${BOLD}$(t lt_done)${RESET}"
     else
         echo -e "${RED}$(t lt_pip_failed)${RESET}"

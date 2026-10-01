@@ -1153,12 +1153,15 @@ def translation_languages_kb(db) -> InlineKeyboardMarkup:
     """لیست همه‌ی زبان‌های قابل‌پشتیبانی با وضعیت فعال/غیرفعال و دکمه‌ی تغییر وضعیت.
 
     فارسی/انگلیسی همیشه فعال‌اند و دکمه‌ی تغییر وضعیت ندارند."""
-    from i18n import LANGUAGE_CATALOG
+    from i18n import LANGUAGE_CATALOG, installed_languages
     known = {r["code"]: r for r in db.list_languages()}
+    installed = installed_languages()
     rows = []
     for code, meta in LANGUAGE_CATALOG.items():
         row = known.get(code)
         enabled = bool(row["enabled"]) if row else (code in {"fa", "en"})
+        if code not in installed and not enabled:
+            continue
         label = f"{meta['flag']} {meta['native_name']}"
         if code in {"fa", "en"}:
             rows.append([

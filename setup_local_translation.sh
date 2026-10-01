@@ -39,6 +39,89 @@ install_system_prereqs() {
 
 install_system_prereqs
 
+ENV_FILE="$ROOT_DIR/.env"
+touch "$ENV_FILE"
+
+set_env() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s#^${key}=.*#${key}=${value}#" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+has_tty() {
+  ( : </dev/tty ) 2>/dev/null
+}
+
+optional_languages() {
+  SHOPVPN_ROOT="$ROOT_DIR" python3 - <<'PY'
+import os
+import sys
+sys.path.insert(0, os.environ["SHOPVPN_ROOT"])
+from i18n import LANGUAGE_CATALOG
+for code, meta in LANGUAGE_CATALOG.items():
+    if code not in {"en", "fa"}:
+        print(code, meta["native_name"], meta["name"], sep="|")
+PY
+}
+
+choose_languages() {
+  local saved="" has_key=0
+  if grep -q '^SHOPVPN_TRANSLATION_LANGS=' "$ENV_FILE"; then
+    has_key=1
+    saved="$(grep -m1 '^SHOPVPN_TRANSLATION_LANGS=' "$ENV_FILE" | cut -d= -f2-)"
+  fi
+  if [ -n "${SHOPVPN_TRANSLATION_LANGS+x}" ]; then
+    SELECTED="$SHOPVPN_TRANSLATION_LANGS"
+  elif [ "$has_key" -eq 1 ] && [ "${SHOPVPN_TRANSLATION_CHOOSE:-0}" != "1" ]; then
+    SELECTED="$saved"
+    return
+  elif has_tty; then
+    local codes=() line code native name idx=1 answer
+    echo "" >/dev/tty
+    echo "[translation] زبان‌هایی که می‌خواهید نصب شوند را انتخاب کنید (فارسی و انگلیسی همیشه فعال‌اند)." >/dev/tty
+    echo "[translation] Choose the languages to install (Persian and English are always available)." >/dev/tty
+    while IFS='|' read -r code native name; do
+      codes+=("$code")
+      printf '  %2d) %s - %s\n' "$idx" "$native" "$name" >/dev/tty
+      idx=$((idx + 1))
+    done < <(optional_languages)
+    echo "   a) همه / all" >/dev/tty
+    echo "   Enter) هیچ‌کدام / none" >/dev/tty
+    printf 'شماره‌ها یا کد زبان‌ها را با کاما یا فاصله وارد کنید (مثال: 1,3,5 یا tr,de): ' >/dev/tty
+    read -r answer </dev/tty || answer=""
+    answer="$(echo "$answer" | sed 's/،/,/g' | tr 'A-Z' 'a-z' | tr ',' ' ')"
+    local picked=()
+    if [ "$answer" = "a" ] || [ "$answer" = "all" ]; then
+      picked=("${codes[@]}")
+    else
+      local tok
+      for tok in $answer; do
+        if [[ "$tok" =~ ^[0-9]+$ ]] && [ "$tok" -ge 1 ] && [ "$tok" -le "${#codes[@]}" ]; then
+          picked+=("${codes[$((tok - 1))]}")
+        else
+          for code in "${codes[@]}"; do
+            [ "$code" = "$tok" ] && picked+=("$code")
+          done
+        fi
+      done
+    fi
+    SELECTED="$(printf '%s\n' ${picked[@]+"${picked[@]}"} | awk 'NF && !seen[$0]++' | paste -sd, -)"
+  else
+    SELECTED="$saved"
+    echo "[translation] No language selection found and no terminal available; installing no extra languages." >&2
+    echo "[translation] Set SHOPVPN_TRANSLATION_LANGS=tr,de,... or run manage.sh to choose." >&2
+  fi
+  SELECTED="$(echo "$SELECTED" | tr -d ' ' | tr 'A-Z' 'a-z')"
+  set_env SHOPVPN_TRANSLATION_LANGS "$SELECTED"
+}
+
+SELECTED=""
+choose_languages
+echo "[translation] Selected languages: ${SELECTED:-none}"
+
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "[translation] Creating Python virtual environment..."
   python3 -m venv "$VENV_DIR"
@@ -47,27 +130,16 @@ fi
 "$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel >/dev/null
 "$PYTHON_BIN" -m pip install -q 'argostranslate>=1.11.0'
 
-# Keep LibreTranslate in its own virtualenv so its large dependency tree cannot
-# conflict with ShopVPN/aiogram/FastAPI dependencies during future updates.
-if [ ! -x "$LT_PYTHON" ]; then
-  echo "[translation] Creating isolated LibreTranslate environment..."
-  python3 -m venv "$TRANSLATION_VENV_DIR"
+if [ -n "$SELECTED" ]; then
+  if [ ! -x "$LT_PYTHON" ]; then
+    echo "[translation] Creating isolated LibreTranslate environment..."
+    python3 -m venv "$TRANSLATION_VENV_DIR"
+  fi
+  "$LT_PYTHON" -m pip install --upgrade pip setuptools wheel >/dev/null
+  "$LT_PYTHON" -m pip install -q --upgrade 'libretranslate>=1.9.0'
 fi
-"$LT_PYTHON" -m pip install --upgrade pip setuptools wheel >/dev/null
-"$LT_PYTHON" -m pip install -q --upgrade 'libretranslate>=1.9.0'
 
-# Ask the project's own language registry which target languages are needed.
-# This avoids maintaining a second hard-coded language list in the installer.
-mapfile -t TARGETS < <(SHOPVPN_ROOT="$ROOT_DIR" "$PYTHON_BIN" - <<'PY'
-import os
-import sys
-sys.path.insert(0, os.environ["SHOPVPN_ROOT"])
-from i18n import LANGUAGE_CATALOG
-for code in sorted(LANGUAGE_CATALOG):
-    if code not in {"en", "fa"}:
-        print(code)
-PY
-)
+IFS=',' read -r -a TARGETS <<< "$SELECTED"
 
 # Argos package metadata is public/open and does not require an API key.
 "$VENV_DIR/bin/argospm" update
@@ -81,6 +153,7 @@ install_pair() {
 }
 
 for lang in "${TARGETS[@]}"; do
+  [ -n "$lang" ] || continue
   install_pair "en_${lang}"
 done
 
@@ -89,23 +162,18 @@ install_pair "fa_en"
 
 # The local engine is the source of truth. Public providers are disabled by
 # default so Google/MyMemory/OpenRouter rate limits can never break the UI.
-ENV_FILE="$ROOT_DIR/.env"
-touch "$ENV_FILE"
-set_env() {
-  local key="$1" value="$2"
-  if grep -q "^${key}=" "$ENV_FILE"; then
-    sed -i "s#^${key}=.*#${key}=${value}#" "$ENV_FILE"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  fi
-}
 set_env SHOPVPN_TRANSLATION_ALLOW_PUBLIC_APIS 0
-set_env SHOPVPN_TRANSLATION_PROVIDERS 'argos,libretranslate'
-set_env SHOPVPN_LIBRETRANSLATE_URL 'http://127.0.0.1:5000'
+if [ -n "$SELECTED" ]; then
+  set_env SHOPVPN_TRANSLATION_PROVIDERS 'argos,libretranslate'
+  set_env SHOPVPN_LIBRETRANSLATE_URL 'http://127.0.0.1:5000'
+else
+  set_env SHOPVPN_TRANSLATION_PROVIDERS 'argos'
+fi
 
 # Run LibreTranslate locally as a second free/offline-capable fallback. Argos
 # remains first and therefore avoids HTTP overhead for normal short UI strings.
-if command -v systemctl >/dev/null 2>&1; then
+if [ -n "$SELECTED" ] && command -v systemctl >/dev/null 2>&1; then
+  LT_LOAD="en,fa,${SELECTED}"
   SERVICE_FILE=/etc/systemd/system/shopvpn-libretranslate.service
   as_root mkdir -p "$TRANSLATION_HOME"
   as_root chmod 755 "$TRANSLATION_HOME"
@@ -119,7 +187,7 @@ Type=simple
 WorkingDirectory=$ROOT_DIR
 Environment=HOME=$TRANSLATION_HOME
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$TRANSLATION_VENV_DIR/bin/libretranslate --host 127.0.0.1 --port 5000 --load-only en,fa,tr,ar,de,fr,es,it,pt,zh,ja,ko,nl,pl,uk,ru --disable-web-ui
+ExecStart=$TRANSLATION_VENV_DIR/bin/libretranslate --host 127.0.0.1 --port 5000 --load-only ${LT_LOAD} --disable-web-ui
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=15min
@@ -154,7 +222,7 @@ import argostranslate
 print("[translation] Argos Translate: ready")
 PY
 
-if command -v curl >/dev/null 2>&1; then
+if [ -n "$SELECTED" ] && command -v curl >/dev/null 2>&1; then
   if curl -fsS --max-time 5 http://127.0.0.1:5000/languages >/dev/null 2>&1; then
     echo "[translation] Local LibreTranslate: ready"
   else

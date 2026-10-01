@@ -11570,11 +11570,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         code = call.data.split(":", 1)[1].strip().lower()
-        from i18n import LANGUAGE_CATALOG
+        from i18n import LANGUAGE_CATALOG, installed_languages
         if code in {"fa", "en"} or code not in LANGUAGE_CATALOG:
             return await call.answer(tr("⚠️ این زبان قابل تغییر نیست."), show_alert=True)
         row = await asyncio.to_thread(db.get_language, code)
         currently_enabled = bool(row["enabled"]) if row else False
+        if not currently_enabled and code not in installed_languages():
+            return await call.answer(
+                tr("⚠️ مدل این زبان نصب نشده. از manage.sh گزینه نصب/آپدیت موتور ترجمه را بزن و این زبان را انتخاب کن."),
+                show_alert=True,
+            )
         if currently_enabled:
             await asyncio.to_thread(db.disable_language, code)
             await asyncio.to_thread(db.log_admin_action, call.from_user.id, "language_disable", code)

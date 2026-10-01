@@ -1397,6 +1397,7 @@ EXTRA_PHRASES.update({
     '❌ مسیر نامعتبر': '❌ Invalid path',
     '❌ مدل نامعتبر': '❌ Invalid model',
     '⚠️ این زبان قابل تغییر نیست.': '⚠️ This language cannot be changed.',
+    '⚠️ مدل این زبان نصب نشده. از manage.sh گزینه نصب/آپدیت موتور ترجمه را بزن و این زبان را انتخاب کن.': '⚠️ This language model is not installed. Run manage.sh, choose the translation runtime install/update option and select this language.',
     '⚪️ زبان غیرفعال شد.': '⚪️ Language disabled.',
     '✅ کلیدها حذف شدند.': '✅ Keys removed.',
     'لطفاً متن سوال را به\u200cصورت نوشتاری ارسال کن:': 'Please send the question text as writing:',
