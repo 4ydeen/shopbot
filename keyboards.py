@@ -1412,6 +1412,7 @@ def support_contact_settings_kb(db) -> InlineKeyboardMarkup:
 ADMIN_PANEL_ITEMS = [
     ("adm_categories", "📂 مدیریت دسته‌بندی‌ها", "adm_categories"),
     ("adm_products", "📦 مدیریت محصولات", "adm_products"),
+    ("adm_my_volume", "📊 حجم و پنل من", "adm_my_volume"),
     ("adm_add_configs", "🔗 افزودن کانفیگ به محصول", "adm_add_configs"),
     ("adm_random_cfg", "🎲 دریافت کانفیگ رندوم", "adm_random_cfg"),
     ("adm_test_menu", "🧪 مدیریت کانفیگ تست", "adm_test_menu"),
@@ -1517,6 +1518,7 @@ ADMIN_PANEL_CATEGORIES = [
     ("products", "📦 محصولات و کانفیگ", [
         "adm_categories",
         "adm_products",
+        "adm_my_volume",
         "adm_add_configs",
         "adm_random_cfg",
         "adm_test_menu",
@@ -1612,7 +1614,24 @@ def _admin_item_label_and_cb(key: str):
     return key, key
 
 
+def _is_volume_credit_owner(db) -> bool:
+    """مالکِ این بات (نمایندگی VIP/اعتبار حجمی) در بات اصلی اعتبار حجمی دارد؟"""
+    try:
+        from config import DB_PATH as _MAIN_DB_PATH
+        from database import Database as _Database
+        owner_id = db.get_owner_telegram_id()
+        if not owner_id:
+            return False
+        main_db = _Database(_MAIN_DB_PATH)
+        return bool(main_db.is_reseller(owner_id)) and main_db.get_reseller_supply(owner_id)["model"] != "fixed_product"
+    except Exception:
+        return False
+
+
 def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
+    if key == "adm_my_volume":
+        # فقط داخل بات اختصاصی نمایندگی VIP (اعتبار حجمی)؛ نه بات اصلی، نه طلایی
+        return (not is_main_bot) and _is_volume_credit_owner(db)
     if key.startswith(("adm_set_xgw_", "adm_xgw_pay_")) and not is_main_bot:
         return False
     if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu", "adm_commission_resellers_menu") and not is_main_bot:
@@ -2572,13 +2591,25 @@ def admin_pick_category_kb(categories, prefix) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_new_product_source_kb() -> InlineKeyboardMarkup:
-    rows = [
+def admin_new_product_source_kb(show_credit: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if show_credit:
+        rows.append([InlineKeyboardButton(text=tr("📊 از حجم اعتباری من (پنل نمایندگی)"), callback_data="adm_newprod_src:credit")])
+    rows += [
         [InlineKeyboardButton(text=tr("📦 بانک کانفیگ (لینک‌های آماده)"), callback_data="adm_newprod_src:bank")],
         [InlineKeyboardButton(text=tr("🔌 اتصال مستقیم به پنل"), callback_data="adm_newprod_src:direct")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:products")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_my_volume_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("➕ ساخت محصول با این حجم"), callback_data="adm_prod_add")],
+        [InlineKeyboardButton(text=tr("📦 محصولات من"), callback_data="adm_products")],
+        [InlineKeyboardButton(text=tr("🔄 بروزرسانی"), callback_data="adm_my_volume")],
+        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:products")],
+    ])
 
 
 def admin_pick_provision_server_kb(servers) -> InlineKeyboardMarkup:

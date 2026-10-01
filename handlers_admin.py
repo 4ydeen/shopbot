@@ -30,7 +30,7 @@ from force_join import is_channel_member
 
 import keyboards as kb
 from database import Database, MENU_BUTTON_META
-from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL, BOT_TOKEN
+from config import RESELLER_DBS_DIR, resolve_db_path, ADMIN_PANEL_URL, BOT_TOKEN, DB_PATH as MAIN_DB_PATH
 from config_delivery import (
     deliver_config_to_user, build_qr_bytes, has_qr_background, qr_background_enabled,
     save_qr_background, remove_qr_background,
@@ -1508,6 +1508,45 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
         await call.answer()
 
+    def _volume_credit_info():
+        """اعتبار حجمی و پنلِ اختصاص‌داده‌شده به مالک این بات (نمایندگی VIP) را از
+        دیتابیس بات اصلی می‌خواند. برای بات اصلی یا نمایندگی غیر-VIP None می‌دهد.
+        فقط نام پنل برمی‌گردد؛ آدرس/مشخصات پنل هرگز به نماینده نشان داده نمی‌شود."""
+        if is_main_bot:
+            return None
+        owner_id = db.get_owner_telegram_id()
+        if not owner_id:
+            return None
+        main_db = Database(MAIN_DB_PATH)
+        if not main_db.is_reseller(owner_id):
+            return None
+        if main_db.get_reseller_supply(owner_id)["model"] == "fixed_product":
+            return None
+        server = main_db.get_reseller_panel(owner_id)
+        return {
+            "credit_gb": int(main_db.get_reseller_credit(owner_id) or 0),
+            "panel_name": server["name"] if server and server["is_active"] else None,
+        }
+
+    @router.callback_query(F.data == "adm_my_volume")
+    async def cb_admin_my_volume(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        info = await asyncio.to_thread(_volume_credit_info)
+        if info is None:
+            await call.answer(tr("این بخش فقط برای نمایندگی VIP (اعتبار حجمی) فعال است."), show_alert=True)
+            return
+        panel_line = f"🖥 پنل شما: {info['panel_name']}" if info["panel_name"] else "🖥 پنل شما: هنوز توسط ادمین تنظیم نشده ⚠️"
+        text = (
+            "📊 حجم و پنل من\n\n"
+            f"📦 حجم باقی‌مانده: {info['credit_gb']:,} گیگابایت\n"
+            f"{panel_line}\n\n"
+            "هر محصولی که با «ساخت محصول با این حجم» بسازی، با هر فروش، حجمش از همین اعتبار "
+            "کم می‌شود و روی همین پنل ساخته می‌شود. قیمت فروش را خودت تعیین می‌کنی."
+        )
+        await replace_admin_view(call, tr(text), reply_markup=kb.admin_my_volume_kb())
+        await call.answer()
+
     @router.callback_query(F.data == "adm_prod_add")
     async def cb_admin_prod_add(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -1571,7 +1610,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await state.set_state(AdminAddProduct.waiting_provision_choice)
             await message.answer(
                 db.get_text('handlers_admin.auto_3da796e7', 'منبع کانفیگ این محصول چیست؟\n\n📦 بانک کانفیگ: از لینک\u200cهای از پیش آماده\u200cشده تحویل داده می\u200cشود.\n🔌 اتصال مستقیم به پنل: هر بار خرید، همان لحظه یک کاربر واقعی روی پنل انتخابی ساخته می\u200cشود (نیازی به پر کردن بانک کانفیگ نیست).'),
-                reply_markup=kb.admin_new_product_source_kb(),
+                reply_markup=kb.admin_new_product_source_kb(
+                    show_credit=bool(await asyncio.to_thread(_volume_credit_info))
+                ),
             )
             return
 
@@ -1582,6 +1623,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.callback_query(AdminAddProduct.waiting_provision_choice, F.data.startswith("adm_newprod_src:"))
     async def cb_pick_product_source(call: CallbackQuery, state: FSMContext):
         source = call.data.split(":", 1)[1]
+        if source == "credit":
+            info = await asyncio.to_thread(_volume_credit_info)
+            if info is None:
+                await call.answer(tr("این گزینه فقط برای نمایندگی VIP (اعتبار حجمی) فعال است."), show_alert=True)
+                return
+            if not info["panel_name"]:
+                await call.answer(tr("هنوز پنلی برای نمایندگی شما تنظیم نشده؛ با ادمین تماس بگیرید."), show_alert=True)
+                return
+            # بدون provision_server_id: تحویل خرید از مسیر provision_auto_config و از اعتبار حجمی نماینده انجام می‌شود
+            await state.update_data(provision_server_id=None)
+            await state.set_state(AdminAddProduct.waiting_auto_provision_volume)
+            await safe_edit(
+                call,
+                tr(f"📊 حجم باقی‌مانده شما: {info['credit_gb']:,} گیگ (پنل: {info['panel_name']})\n\n"
+                   "این محصول چند گیگابایت باشد؟ فقط عدد وارد کنید (مثال: 30):"),
+            )
+            await call.answer()
+            return
         if source == "bank":
             await state.update_data(payment_methods=None)
             await state.set_state(AdminAddProduct.waiting_payment_methods)

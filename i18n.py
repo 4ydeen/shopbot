@@ -889,6 +889,7 @@ _PHRASE_TRANSLATIONS.update({
     # ADMIN_PANEL_ITEMS
     "📂 مدیریت دسته‌بندی‌ها": "📂 Manage categories",
     "📦 مدیریت محصولات": "📦 Manage products",
+    "📊 حجم و پنل من": "📊 My volume & panel",
     "🔗 افزودن کانفیگ به محصول": "🔗 Add configs to a product",
     "🎲 دریافت کانفیگ رندوم": "🎲 Get a random config",
     "🧪 مدیریت کانفیگ تست": "🧪 Manage test configs",
