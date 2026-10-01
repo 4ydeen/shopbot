@@ -557,6 +557,18 @@ MSG_EN[menu_27]="Repair / install local translation runtime (automatic)"
 MSG_FA[menu_27]="نصب/آپدیت خودکار موتور ترجمه محلی"
 MSG_EN[menu_28]="Remove LibreTranslate"
 MSG_FA[menu_28]="حذف LibreTranslate"
+MSG_EN[menu_30]="Remove unwanted translation languages (free disk space)"
+MSG_FA[menu_30]="حذف زبان‌های ناخواسته (آزاد کردن فضا)"
+MSG_EN[rl_header]="Remove translation languages"
+MSG_FA[rl_header]="حذف زبان‌های ترجمه"
+MSG_EN[rl_none]="No removable extra language is installed."
+MSG_FA[rl_none]="هیچ زبان اضافه‌ای برای حذف نصب نیست."
+MSG_EN[rl_prompt]="Numbers or codes to remove (comma/space separated, a = all, Enter = cancel): "
+MSG_FA[rl_prompt]="شماره یا کد زبان‌هایی که حذف می‌شوند (با کاما/فاصله، a = همه، Enter = انصراف): "
+MSG_EN[rl_warn]="These languages will be removed: models, cached translations and settings. Persian and English are never touched."
+MSG_FA[rl_warn]="این زبان‌ها حذف می‌شوند: مدل‌ها، ترجمه‌های ذخیره‌شده و تنظیمات. فارسی و انگلیسی هرگز حذف نمی‌شوند."
+MSG_EN[rl_done]="✅ Languages removed."
+MSG_FA[rl_done]="✅ زبان‌ها حذف شدند."
 MSG_EN[menu_29]="Full cleanup / factory reset"
 MSG_FA[menu_29]="پاک‌سازی کامل و بازگشت به حالت اولیه"
 MSG_EN[fr_warn]="⚠️ FULL RESET: this will permanently delete ALL bot services (bot, mini app, admin panel, API, LibreTranslate), their nginx configs, the database, resellers, .env and the whole project folder. The server returns to its state before ShopVPN was installed."
@@ -2286,6 +2298,156 @@ remove_libretranslate() {
     echo -e "${GREEN}$(t lt_removed)${RESET}"
 }
 
+remove_translation_languages() {
+    section_header "$(t rl_header)"
+    local ENV_FILE="$INSTALL_DIR/.env"
+    if [ ! -f "$ENV_FILE" ] || [ ! -f "$INSTALL_DIR/i18n.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
+        return
+    fi
+
+    local saved codes=() names=() code native name
+    saved="$(grep -m1 '^SHOPVPN_TRANSLATION_LANGS=' "$ENV_FILE" | cut -d= -f2- | tr -d ' ')"
+    while IFS='|' read -r code native name; do
+        [ -n "$code" ] || continue
+        case ",$saved," in *",$code,"*) codes+=("$code"); names+=("$native - $name") ;; esac
+    done < <(SHOPVPN_ROOT="$INSTALL_DIR" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SHOPVPN_ROOT"])
+from i18n import LANGUAGE_CATALOG
+for c, m in LANGUAGE_CATALOG.items():
+    if c not in {"fa", "en"}:
+        print(c, m["native_name"], m["name"], sep="|")
+PY
+)
+
+    if [ "${#codes[@]}" -eq 0 ]; then
+        echo -e "${YELLOW}$(t rl_none)${RESET}"
+        return
+    fi
+
+    local i
+    for i in "${!codes[@]}"; do
+        printf '  %2d) %s (%s)\n' "$((i + 1))" "${names[$i]}" "${codes[$i]}"
+    done
+    local answer
+    read -rp "$(t rl_prompt)" answer
+    answer="$(echo "$answer" | sed 's/،/,/g' | tr 'A-Z' 'a-z' | tr ',' ' ')"
+    [ -z "$answer" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+
+    local picked=() tok c
+    if [ "$answer" = "a" ] || [ "$answer" = "all" ]; then
+        picked=("${codes[@]}")
+    else
+        for tok in $answer; do
+            if [[ "$tok" =~ ^[0-9]+$ ]] && [ "$tok" -ge 1 ] && [ "$tok" -le "${#codes[@]}" ]; then
+                picked+=("${codes[$((tok - 1))]}")
+            else
+                for c in "${codes[@]}"; do
+                    [ "$c" = "$tok" ] && picked+=("$c")
+                done
+            fi
+        done
+    fi
+    picked=($(printf '%s\n' "${picked[@]}" | awk 'NF && !seen[$0]++'))
+    if [ "${#picked[@]}" -eq 0 ]; then
+        echo -e "${YELLOW}$(t cancelled)${RESET}"
+        return
+    fi
+
+    echo -e "${RED}${BOLD}$(t rl_warn)${RESET}"
+    echo "  -> ${picked[*]}"
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+
+    local was_active=0
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        was_active=1
+        sudo systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    fi
+
+    local csv
+    csv="$(IFS=,; echo "${picked[*]}")"
+    INSTALL_DIR="$INSTALL_DIR" LANG_CSV="$csv" python3 - <<'PY'
+import glob, os, sqlite3
+root = os.environ["INSTALL_DIR"]
+codes = [c for c in os.environ["LANG_CSV"].split(",") if c and c not in {"fa", "en"}]
+paths = [os.path.join(root, "bot_database.db")] + sorted(glob.glob(os.path.join(root, "reseller_dbs", "*.db")))
+for path in paths:
+    if not os.path.isfile(path):
+        continue
+    conn = sqlite3.connect(path, timeout=30)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "languages" not in tables:
+            continue
+        for code in codes:
+            for table in ("translations", "translation_manifests", "translation_history"):
+                if table in tables:
+                    conn.execute(f"DELETE FROM {table} WHERE language_code=?", (code,))
+            conn.execute("UPDATE languages SET enabled=0, generated=0, translation_auto_quarantined=0 WHERE code=?", (code,))
+            if "users" in tables:
+                conn.execute("UPDATE users SET language_code='fa' WHERE language_code=?", (code,))
+            if "web_admins" in tables:
+                conn.execute("UPDATE web_admins SET language_code='fa' WHERE language_code=?", (code,))
+        conn.commit()
+        conn.execute("VACUUM")
+        print("cleaned:", path)
+    except Exception as exc:
+        print("skipped:", path, exc)
+    finally:
+        conn.close()
+PY
+
+    local lang dir base pkg_dirs=()
+    pkg_dirs+=("${XDG_DATA_HOME:-$HOME/.local/share}/argos-translate/packages")
+    pkg_dirs+=("$HOME/.local/share/argos-translate/packages")
+    pkg_dirs+=("$INSTALL_DIR/.translation-home/.local/share/argos-translate/packages")
+    for lang in "${picked[@]}"; do
+        if [ -x "$INSTALL_DIR/venv/bin/argospm" ]; then
+            "$INSTALL_DIR/venv/bin/argospm" remove "translate-en_${lang}" >/dev/null 2>&1 || true
+            "$INSTALL_DIR/venv/bin/argospm" remove "translate-${lang}_en" >/dev/null 2>&1 || true
+        fi
+        for dir in $(printf '%s\n' "${pkg_dirs[@]}" | awk '!seen[$0]++'); do
+            [ -d "$dir" ] || continue
+            for base in "$dir"/*; do
+                [ -d "$base" ] || continue
+                pkg="$(basename "$base")"
+                if [[ "$pkg" =~ ^(translate-)?(en_${lang}|${lang}_en)($|[-_.]) ]]; then
+                    rm -rf "$base"
+                fi
+            done
+        done
+    done
+
+    local remaining="" item
+    for item in ${saved//,/ }; do
+        local keep=1
+        for lang in "${picked[@]}"; do
+            [ "$item" = "$lang" ] && keep=0
+        done
+        [ "$keep" -eq 1 ] && remaining="${remaining:+$remaining,}$item"
+    done
+    if grep -q '^SHOPVPN_TRANSLATION_LANGS=' "$ENV_FILE"; then
+        sed -i "s#^SHOPVPN_TRANSLATION_LANGS=.*#SHOPVPN_TRANSLATION_LANGS=${remaining}#" "$ENV_FILE"
+    else
+        printf '\nSHOPVPN_TRANSLATION_LANGS=%s\n' "$remaining" >> "$ENV_FILE"
+    fi
+
+    local unit="/etc/systemd/system/${LIBRETRANSLATE_SERVICE}.service" load="en,fa"
+    [ -n "$remaining" ] && load="en,fa,${remaining}"
+    if [ -f "$unit" ]; then
+        sudo sed -i "s#--load-only [^ ]*#--load-only ${load}#" "$unit"
+        sudo systemctl daemon-reload
+        sudo systemctl restart "$LIBRETRANSLATE_SERVICE" >/dev/null 2>&1 || true
+    fi
+
+    if [ "$was_active" -eq 1 ]; then
+        sudo systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
+    fi
+    echo -e "${GREEN}${BOLD}$(t rl_done)${RESET}"
+}
+
 # ---------------------------------------------------------------------------
 # Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
@@ -2325,6 +2487,7 @@ while true; do
     menu_section sec_translation
     menu_item 27 menu_27
     menu_item 28 menu_28 "$RED"
+    menu_item 30 menu_30 "$RED"
     menu_item 29 menu_29 "$RED"
     menu_section sec_advanced
     menu_item 21 menu_21
@@ -2367,6 +2530,7 @@ while true; do
         27) setup_libretranslate; pause ;;
         28) remove_libretranslate; pause ;;
         29) factory_reset; pause ;;
+        30) remove_translation_languages; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
