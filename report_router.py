@@ -210,14 +210,19 @@ def build_block_toggle_text(user_row, tg_id: int, blocked: bool, actor_label: st
 async def notify_test_config(bot, db, user_id: int, name: str, username, detail_html: str) -> None:
     """اعلان تحویل کانفیگ تست به تاپیک «تست»؛ بدون گروه گزارش چیزی ارسال نمی‌شود."""
     handle = f" (@{html.escape(username)})" if username else ""
+    from datetime import datetime
+    from jalali import to_jalali_str
     text = (
         "🧪 کانفیگ تست تحویل داده شد\n\n"
         f"👤 <a href=\"tg://user?id={user_id}\">{html.escape(name or '')}</a>{handle}\n"
         f"🆔 <code>{user_id}</code>\n"
-        f"{detail_html}"
+        f"{detail_html}\n\n"
+        "💡 پیشنهاد: یه پیام براش بفرست و ترغیبش کن به خرید اکانت 😍\n"
+        f"🕒 {to_jalali_str(datetime.now(), with_time=True)}"
     )
     try:
-        await send_text(bot, db, "test", text)
+        import keyboards as _kb
+        await send_text(bot, db, "test", text, _kb.user_quick_actions_kb(user_id))
     except Exception:
         logger.warning("ارسال اعلان کانفیگ تست ناموفق بود.", exc_info=True)
 

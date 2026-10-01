@@ -620,6 +620,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             ref_username = (referrer_row["username"] if referrer_row else "") or ""
             ref_handle = f" (@{escape_html(ref_username)})" if ref_username else ""
             text += f"\n🤝 معرف: {ref_name}{ref_handle} — <code>{referred_by}</code>"
+        from datetime import datetime as _dt
+        from jalali import to_jalali_str as _jstr
+        text += (
+            "\n\n💡 پیشنهاد: یه پیام براش بفرست (تبلیغی یا خوش‌آمدگویی) 😍"
+            f"\n🕒 {_jstr(_dt.now(), with_time=True)}"
+        )
         try:
             await report_router.send_text(bot, db, "signup", text, kb.user_quick_actions_kb(message.from_user.id))
         except Exception:
