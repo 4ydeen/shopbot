@@ -134,6 +134,9 @@ DEFAULT_SETTINGS = {
     # دستیار پشتیبانی هوش مصنوعی (Gemini) - در صورت خالی بودن GEMINI_API_KEY
     # در .env، این بخش حتی اگر "1" باشد غیرفعال می‌ماند.
     "ai_support_enabled": "1",
+    "business_enabled": "0",
+    "business_mark_read": "0",
+    "business_notify_changes": "1",
     "ai_support_intro_text": (
         "🤖 دستیار هوشمند پشتیبانی\n"
         "سوالت رو بپرس؛ سعی می‌کنم با بررسی وضعیت واقعی حسابت و پلن‌ها سریع "
