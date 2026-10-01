@@ -1593,6 +1593,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_admins_menu",
         "adm_set_support_contact",
         "adm_ai_support_settings",
+        "adm_ai_admin_chat",
         "adm_business_settings",
         "adm_translation_settings",
         "adm_lang_settings",
@@ -1620,6 +1621,7 @@ ADMIN_PANEL_CATEGORIES = [
 _EXTRA_PANEL_ITEM_LABELS = {
     "adm_panel_colors_menu": "🎨 رنگ‌آمیزی دکمه‌های پنل مدیریت",
     "adm_buyflow_colors_menu": "🎨 رنگ‌آمیزی دکمه‌های مسیر خرید",
+    "adm_ai_admin_chat": "🧠 گفتگو با دستیار هوشمند مدیر",
 }
 
 

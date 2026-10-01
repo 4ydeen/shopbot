@@ -688,3 +688,7 @@ class AdminSettingInput(StatesGroup):
     waiting_value = State()
     waiting_prizes = State()
     waiting_report_chat = State()
+
+
+class AdminAIChat(StatesGroup):
+    chatting = State()

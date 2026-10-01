@@ -47,6 +47,8 @@ import blupal_payment
 import noapay_payment
 import extra_gateway_admin
 import ai_support
+import ai_admin
+import ai_media
 import admin_tools
 import bulk_gifts
 import report_router
@@ -63,6 +65,7 @@ from reseller_auto_provision import provision_auto_config, ProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from renewal_engine import execute_renewal, RenewalError
 from states import (
+    AdminAIChat,
     AdminCreateDiscount,
     AdminBulkDiscount,
     AdminUserManage,
@@ -13782,6 +13785,79 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         await state.clear()
         await message.answer(db.get_text('handlers_admin.auto_4741add8', '🔧 پنل مدیریت:'), reply_markup=kb.admin_panel_kb(db, is_main_bot))
+
+    def _ai_admin_end_kb():
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ پایان گفتگو", callback_data="adm_ai_end")]])
+
+    _AI_ADMIN_INTRO = (
+        "🧠 دستیار هوشمند مدیر آماده است. متن یا ویس بفرست؛ مثلاً:\n"
+        "• فروش این هفته نسبت به هفته قبل؟\n"
+        "• اطلاعات کاربر @username\n"
+        "• چند سفارش و تیکت منتظر بررسی است؟\n"
+        "• کدام محصولات کم‌موجودی‌اند؟\n\n"
+        "فقط می‌خواند و هیچ تغییری نمی‌دهد."
+    )
+    _AI_ADMIN_NOT_CONFIGURED = "دستیار هوشمند تنظیم نشده؛ ابتدا کلید API را از بخش دستیار هوشمند وارد کن."
+
+    @router.message(Command("ai"))
+    async def cmd_admin_ai(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            return
+        if not ai_support.is_configured(db):
+            await message.answer(_AI_ADMIN_NOT_CONFIGURED)
+            return
+        ai_admin.reset(message.from_user.id)
+        await state.set_state(AdminAIChat.chatting)
+        await message.answer(_AI_ADMIN_INTRO, reply_markup=_ai_admin_end_kb())
+
+    @router.callback_query(F.data == "adm_ai_admin_chat")
+    async def cb_admin_ai_start(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            await call.answer("این بخش فقط برای مالک و مدیر کامل است.", show_alert=True)
+            return
+        if not ai_support.is_configured(db):
+            await call.answer(_AI_ADMIN_NOT_CONFIGURED, show_alert=True)
+            return
+        ai_admin.reset(call.from_user.id)
+        await state.set_state(AdminAIChat.chatting)
+        await call.message.answer(_AI_ADMIN_INTRO, reply_markup=_ai_admin_end_kb())
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_end")
+    async def cb_admin_ai_end(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            await call.answer()
+            return
+        ai_admin.reset(call.from_user.id)
+        await state.clear()
+        await safe_edit(call, "گفتگو با دستیار هوشمند مدیر پایان یافت.")
+        await call.answer()
+
+    @router.message(AdminAIChat.chatting, F.text | F.voice | F.audio)
+    async def admin_ai_receive(message: Message, state: FSMContext, bot: Bot):
+        user_id = message.from_user.id
+        if not senior_admin_only(user_id):
+            await state.clear()
+            return
+        if message.text and message.text.startswith("/"):
+            await message.answer("برای خروج از گفتگو دکمه‌ی پایان را بزن یا /admin را بفرست.", reply_markup=_ai_admin_end_kb())
+            return
+        thinking = await message.answer("در حال بررسی... ⏳")
+        try:
+            text = await ai_media.message_to_text(bot, db, message)
+            reply = await ai_admin.get_reply(db, user_id, text)
+        except Exception as exc:
+            if not isinstance(exc, ai_media.MediaError):
+                logging.getLogger("handlers_admin").exception("خطای دستیار هوشمند مدیر")
+            reply = ai_media.error_text(exc) if isinstance(exc, ai_media.MediaError) else "یه مشکلی پیش اومد؛ دوباره امتحان کن."
+        try:
+            await thinking.delete()
+        except Exception:
+            pass
+        reply = html.escape(reply)
+        chunks = [reply[i:i + 3900] for i in range(0, len(reply), 3900)] or ["—"]
+        for i, chunk in enumerate(chunks):
+            await message.answer(chunk, reply_markup=_ai_admin_end_kb() if i == len(chunks) - 1 else None)
 
     admin_tools.register(
         router, db, is_main_bot, full_admin_only, senior_admin_only,
