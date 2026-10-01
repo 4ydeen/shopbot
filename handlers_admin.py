@@ -305,9 +305,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except Exception:
             pass
 
-    async def _notify_admin_panel_menu(bot: Bot, admin_tg_id: int):
+    async def _notify_admin_panel_menu(bot: Bot, admin_tg_id: int, call: CallbackQuery = None):
         """بعد از تایید/رد یک رسید یا درخواست، پنل مدیریت (منوی شیشه‌ای) دوباره
-        برای همان مدیر ارسال می‌شود؛ چون آن منو به پیام رسید چسبیده بود، نه به چت."""
+        برای همان مدیر ارسال می‌شود؛ چون آن منو به پیام رسید چسبیده بود، نه به چت.
+        وقتی اکشن از داخل گروه گزارش زده شده باشد، پنل ارسال نمی‌شود."""
+        if call is not None and report_router.is_report_group_message(db, call.message):
+            return
         try:
             await bot.send_message(admin_tg_id, tr("🔧 پنل مدیریت:"), reply_markup=kb.admin_panel_kb(db, is_main_bot))
         except Exception:
@@ -2749,14 +2752,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 pass
             try:
-                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و سرویس تمدید شد.")
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و سرویس تمدید شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 try:
-                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و سرویس تمدید شد.")
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و سرویس تمدید شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
                 except Exception:
                     pass
             await call.answer(db.get_text('handlers_admin.auto_a501e91f', 'سفارش تایید و سرویس تمدید شد.'))
-            await _notify_admin_panel_menu(bot, call.from_user.id)
+            await _notify_admin_panel_menu(bot, call.from_user.id, call)
             return
 
         # ===== سفارش کانفیگ شخصی: به‌جای برداشتن از انبار، کاربر روی پنل ساخته می‌شود =====
@@ -2815,14 +2818,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 pass
             try:
-                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 try:
-                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
                 except Exception:
                     pass
             await call.answer(db.get_text('handlers_admin.auto_2dfda996', 'سفارش تایید و کانفیگ شخصی روی پنل ساخته شد.'))
-            await _notify_admin_panel_menu(bot, call.from_user.id)
+            await _notify_admin_panel_menu(bot, call.from_user.id, call)
             return
 
         product = (await asyncio.to_thread(db.get_product, order["product_id"]))
@@ -2854,14 +2857,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             except Exception:
                 pass
             try:
-                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 try:
-                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.")
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ساخته شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
                 except Exception:
                     pass
             await call.answer(db.get_text('handlers_admin.auto_c1fd6d87', 'سفارش تایید و کانفیگ به\u200cصورت خودکار ساخته شد.'))
-            await _notify_admin_panel_menu(bot, call.from_user.id)
+            await _notify_admin_panel_menu(bot, call.from_user.id, call)
             return
 
         quantity = order["quantity"] or 1
@@ -2906,14 +2909,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
 
         try:
-            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.")
+            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
         except Exception:
             try:
-                await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.")
+                await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و کانفیگ ارسال شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 pass
         await call.answer(db.get_text('handlers_admin.auto_bcd7b5a4', 'سفارش تایید و کانفیگ برای کاربر ارسال شد.'))
-        await _notify_admin_panel_menu(bot, call.from_user.id)
+        await _notify_admin_panel_menu(bot, call.from_user.id, call)
 
     @router.callback_query(F.data.startswith("order_fake_receipt:"))
     async def cb_order_fake_receipt(call: CallbackQuery, bot: Bot):
@@ -2955,14 +2958,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
 
         try:
-            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n🚫 فیش فیک؛ سفارش رد و کاربر بلاک شد.")
+            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n🚫 فیش فیک؛ سفارش رد و کاربر بلاک شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
         except Exception:
             try:
-                await safe_edit(call, (call.message.text or "") + "\n\n🚫 فیش فیک؛ سفارش رد و کاربر بلاک شد.")
+                await safe_edit(call, (call.message.text or "") + "\n\n🚫 فیش فیک؛ سفارش رد و کاربر بلاک شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 pass
         await call.answer(tr("فیش فیک ثبت شد؛ کاربر بلاک و کانفیگ مرتبط حذف شد."))
-        await _notify_admin_panel_menu(bot, call.from_user.id)
+        await _notify_admin_panel_menu(bot, call.from_user.id, call)
 
     @router.callback_query(F.data.startswith("order_reject:"))
     async def cb_order_reject(call: CallbackQuery, bot: Bot):
@@ -2998,14 +3001,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
 
         try:
-            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.")
+            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
         except Exception:
             try:
-                await safe_edit(call, (call.message.text or "") + "\n\n❌ رد شد.")
+                await safe_edit(call, (call.message.text or "") + "\n\n❌ رد شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
             except Exception:
                 pass
         await call.answer(db.get_text('handlers_admin.auto_94afef67', 'سفارش رد شد.'))
-        await _notify_admin_panel_menu(bot, call.from_user.id)
+        await _notify_admin_panel_menu(bot, call.from_user.id, call)
 
     # -------------------------------------------------------------------
     # درخواست‌های شارژ کیف پول
@@ -4086,14 +4089,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
 
         try:
-            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید و شارژ شد.")
+            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید و شارژ شد.", reply_markup=kb.user_quick_actions_kb(topup["user_id"]))
         except Exception:
             try:
-                await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید و شارژ شد.")
+                await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید و شارژ شد.", reply_markup=kb.user_quick_actions_kb(topup["user_id"]))
             except Exception:
                 pass
         await call.answer(db.get_text('handlers_admin.auto_da8aa62a', 'شارژ کیف پول تایید شد.'))
-        await _notify_admin_panel_menu(bot, call.from_user.id)
+        await _notify_admin_panel_menu(bot, call.from_user.id, call)
 
     @router.callback_query(F.data.startswith("topup_reject:"))
     async def cb_topup_reject(call: CallbackQuery, bot: Bot):
@@ -4129,14 +4132,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             pass
 
         try:
-            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.")
+            await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n❌ رد شد.", reply_markup=kb.user_quick_actions_kb(topup["user_id"]))
         except Exception:
             try:
-                await safe_edit(call, (call.message.text or "") + "\n\n❌ رد شد.")
+                await safe_edit(call, (call.message.text or "") + "\n\n❌ رد شد.", reply_markup=kb.user_quick_actions_kb(topup["user_id"]))
             except Exception:
                 pass
         await call.answer(db.get_text('handlers_admin.auto_cde89184', 'درخواست رد شد.'))
-        await _notify_admin_panel_menu(bot, call.from_user.id)
+        await _notify_admin_panel_menu(bot, call.from_user.id, call)
 
     # -------------------------------------------------------------------
     # مدیریت کدهای تخفیف
@@ -12923,6 +12926,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         stats = await asyncio.to_thread(db.get_user_full_stats, tg_id)
         is_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
         text = _fmt_user_full_stats_report(stats)
+        if report_router.is_report_group_message(db, call.message):
+            try:
+                await call.bot.send_message(call.from_user.id, text)
+            except Exception:
+                await call.answer(tr("ارسال به پی‌وی ناموفق بود؛ ابتدا در پی‌وی بات /start بزن."), show_alert=True)
+                return
+            await call.answer(tr("پروفایل در پی‌وی بات برایت ارسال شد."))
+            return
         markup = kb.user_full_stats_kb(tg_id, is_blocked)
         try:
             await call.message.reply(text, reply_markup=markup)
@@ -12988,12 +12999,30 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.answer()
 
     @router.callback_query(F.data.startswith("qa_msg:"))
-    async def cb_quick_action_msg_ask(call: CallbackQuery, state: FSMContext):
+    async def cb_quick_action_msg_ask(call: CallbackQuery, state: FSMContext, bot: Bot):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         tg_id = callback_id(call.data, "qa_msg")
         if tg_id is None:
             await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        if report_router.is_report_group_message(db, call.message):
+            admin_id = call.from_user.id
+            private_state = FSMContext(
+                storage=state.storage,
+                key=StorageKey(bot_id=bot.id, chat_id=admin_id, user_id=admin_id),
+            )
+            try:
+                await bot.send_message(
+                    admin_id, tr(f"✉️ متن پیام برای کاربر {tg_id} را بفرست:"),
+                    reply_markup=ForceReply(input_field_placeholder="متن پیام...", selective=True),
+                )
+            except Exception:
+                await call.answer(tr("ارسال به پی‌وی ناموفق بود؛ ابتدا در پی‌وی بات /start بزن."), show_alert=True)
+                return
+            await private_state.set_state(AdminQuickAction.waiting_message_text)
+            await private_state.update_data(qa_target_user=tg_id)
+            await call.answer(tr("برای نوشتن پیام به پی‌وی بات برو."))
             return
         await state.set_state(AdminQuickAction.waiting_message_text)
         await state.update_data(qa_target_user=tg_id)
