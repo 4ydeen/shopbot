@@ -1495,6 +1495,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
     ("adm_set_support_contact", "📞 روش‌های ارتباط با پشتیبانی", "adm_set_support_contact"),
     ("adm_ai_support_settings", "🤖 دستیار هوشمند (سوالات متداول)", "adm_ai_support_settings"),
+    ("adm_business_settings", "💼 تلگرام بیزنس", "adm_business_settings"),
     ("adm_translation_settings", "🌐 ترجمه خودکار", "adm_translation_settings"),
     ("adm_lang_settings", "🌐 زبان ادمین/کاربران", "adm_lang_settings"),
 ]
@@ -1592,6 +1593,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_admins_menu",
         "adm_set_support_contact",
         "adm_ai_support_settings",
+        "adm_business_settings",
         "adm_translation_settings",
         "adm_lang_settings",
     ]),

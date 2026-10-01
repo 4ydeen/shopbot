@@ -28,6 +28,7 @@ from config import (
 )
 from database import Database
 from handlers_user import create_user_router
+from business_chat import create_business_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
 from connect_alerts import connect_alert_loop
@@ -405,6 +406,8 @@ class BotManager:
 
         tutorial_hub.install(bot, dp, db)
 
+        if is_main_bot:
+            dp.include_router(create_business_router(db, language_mw))
         dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
         dp.include_router(create_user_router(db, is_main_bot=is_main_bot, bot_manager=self))
 
@@ -424,6 +427,7 @@ class BotManager:
                     webhook_url,
                     secret_token=WEBHOOK_SECRET or None,
                     drop_pending_updates=True,
+                    allowed_updates=dp.resolve_used_update_types(),
                 )
             except Exception:
                 logger.warning(

@@ -888,6 +888,7 @@ _PHRASE_TRANSLATIONS.update({
     "🎨 رنگ‌آمیزی دکمه‌های مسیر خرید": "🎨 Buy-flow button colors",
     # ADMIN_PANEL_ITEMS
     "📂 مدیریت دسته‌بندی‌ها": "📂 Manage categories",
+    "💼 تلگرام بیزنس": "💼 Telegram Business",
     "📦 مدیریت محصولات": "📦 Manage products",
     "📊 حجم و پنل من": "📊 My volume & panel",
     "🔗 افزودن کانفیگ به محصول": "🔗 Add configs to a product",
