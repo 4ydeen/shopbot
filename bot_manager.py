@@ -493,7 +493,7 @@ class BotManager:
         inst["task"].cancel()
         try:
             await inst["task"]
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             pass
         for key in self._STOP_TASK_KEYS:
             task = inst.get(key)
@@ -502,21 +502,21 @@ class BotManager:
             task.cancel()
             try:
                 await task
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
         if BOT_MODE == "webhook" and self.webhook_server is not None:
             self.webhook_server.unregister(token)
             try:
                 await inst["bot"].delete_webhook(drop_pending_updates=False)
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
         try:
             await inst["bot"].session.close()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             pass
         try:
             await inst["dp"].storage.close()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             pass
         logger.info("بات با db_path=%s متوقف شد.", inst["db_path"])
         return True
