@@ -557,12 +557,32 @@ MSG_EN[menu_27]="Repair / install local translation runtime (automatic)"
 MSG_FA[menu_27]="نصب/آپدیت خودکار موتور ترجمه محلی"
 MSG_EN[menu_28]="Remove LibreTranslate"
 MSG_FA[menu_28]="حذف LibreTranslate"
+MSG_EN[menu_29]="Full cleanup / factory reset"
+MSG_FA[menu_29]="پاک‌سازی کامل و بازگشت به حالت اولیه"
+MSG_EN[fr_warn]="⚠️ FULL RESET: this will permanently delete ALL bot services (bot, mini app, admin panel, API, LibreTranslate), their nginx configs, the database, resellers, .env and the whole project folder. The server returns to its state before ShopVPN was installed."
+MSG_FA[fr_warn]="⚠️ پاک‌سازی کامل: همه‌ی سرویس‌ها (بات، مینی‌اپ، پنل ادمین، API، LibreTranslate)، کانفیگ‌های nginx، دیتابیس، نماینده‌ها، فایل .env و کل پوشه‌ی پروژه برای همیشه حذف می‌شود. سرور به حالت قبل از نصب ShopVPN برمی‌گردد."
+MSG_EN[fr_type_reset]="To continue type RESET (anything else cancels): "
+MSG_FA[fr_type_reset]="برای ادامه کلمه RESET را تایپ کن (هر چیز دیگر لغو می‌کند): "
+MSG_EN[fr_backup_ask]="Create a backup archive of database and .env in your home folder first? [Y/n]: "
+MSG_FA[fr_backup_ask]="قبل از پاک‌سازی از دیتابیس و .env یک بکاپ در پوشه‌ی هوم گرفته شود؟ [Y/n]: "
+MSG_EN[fr_backup_done]="Backup saved: %s"
+MSG_FA[fr_backup_done]="بکاپ ذخیره شد: %s"
+MSG_EN[fr_backup_failed]="Backup failed, reset aborted. Nothing was deleted."
+MSG_FA[fr_backup_failed]="بکاپ ناموفق بود، پاک‌سازی لغو شد. چیزی حذف نشد."
+MSG_EN[fr_domains_found]="nginx configs that will be removed:"
+MSG_FA[fr_domains_found]="کانفیگ‌های nginx که حذف می‌شوند:"
+MSG_EN[fr_ssl_ask]="Also delete the Let's Encrypt SSL certificates of these domains? [y/N]: "
+MSG_FA[fr_ssl_ask]="گواهی‌های SSL (Let's Encrypt) این دامنه‌ها هم حذف شود؟ [y/N]: "
+MSG_EN[fr_unsafe_dir]="Refusing to delete unsafe install path: %s"
+MSG_FA[fr_unsafe_dir]="مسیر نصب ناامن است، حذف انجام نشد: %s"
+MSG_EN[fr_done]="✅ Full cleanup finished. To install again, run option 1 (or the install command)."
+MSG_FA[fr_done]="✅ پاک‌سازی کامل انجام شد. برای نصب دوباره گزینه‌ی ۱ (یا دستور نصب) را اجرا کن."
 MSG_EN[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_FA[menu_lang]="Language / زبان (English ⇄ فارسی)"
 MSG_EN[menu_0]="Exit"
 MSG_FA[menu_0]="خروج"
-MSG_EN[enter_choice_prompt]="Enter choice [0-28, L]: "
-MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-28, L]: "
+MSG_EN[enter_choice_prompt]="Enter choice [0-29, L]: "
+MSG_FA[enter_choice_prompt]="یک گزینه انتخاب کن [0-29, L]: "
 MSG_EN[invalid_choice]="Invalid option."
 MSG_FA[invalid_choice]="گزینه نامعتبر است."
 MSG_EN[goodbye]="Goodbye 👋"
@@ -914,6 +934,96 @@ update_miniapp() {
 # ---------------------------------------------------------------------------
 # Action: full removal / عملیات: حذف کامل
 # ---------------------------------------------------------------------------
+shopvpn_nginx_domains() {
+    local dir="${1:-/etc/nginx/sites-available}" env_file="$INSTALL_DIR/.env" key f d wport
+    {
+        if [ -f "$env_file" ]; then
+            for key in MINIAPP_URL ADMIN_PANEL_URL WEBHOOK_BASE_URL; do
+                grep -m1 "^${key}=" "$env_file" | cut -d= -f2- | sed -E 's#^"?https?://##; s#[/"]+.*$##'
+            done
+            wport=$(grep -m1 "^WEBHOOK_LISTEN_PORT=" "$env_file" | cut -d= -f2)
+        fi
+        wport="${wport:-8010}"
+        for f in "$dir"/*.conf; do
+            [ -f "$f" ] || continue
+            if grep -q "managed-by-shopvpn-panel-proxy" "$f" 2>/dev/null \
+               || grep -qE "proxy_pass http://127\.0\.0\.1:(8001|8002|8003|${wport});" "$f" 2>/dev/null; then
+                d=$(basename "$f" .conf)
+                echo "$d"
+            fi
+        done
+    } | grep -E '^[A-Za-z0-9.-]+$' | sort -u
+}
+
+factory_reset() {
+    local CONFIRM ans_backup ans_ssl real_dir script_path unit domain backup_file
+    local -a DOMAINS=()
+    real_dir=$(readlink -f "$INSTALL_DIR" 2>/dev/null || echo "$INSTALL_DIR")
+    if [ -z "$real_dir" ] || [ "$real_dir" = "/" ] || [ "$real_dir" = "$HOME" ] || [ "$real_dir" = "/root" ] || [ "${#real_dir}" -lt 8 ]; then
+        echo -e "${RED}$(t fr_unsafe_dir "$INSTALL_DIR")${RESET}"
+        return 1
+    fi
+
+    echo -e "${RED}${BOLD}$(t fr_warn)${RESET}"
+    read -rp "$(t fr_type_reset)" CONFIRM
+    if [ "$CONFIRM" != "RESET" ]; then
+        echo -e "${YELLOW}$(t cancelled)${RESET}"
+        return
+    fi
+
+    mapfile -t DOMAINS < <(shopvpn_nginx_domains)
+    if [ "${#DOMAINS[@]}" -gt 0 ]; then
+        echo -e "${CYAN}$(t fr_domains_found)${RESET}"
+        for domain in "${DOMAINS[@]}"; do echo "  - $domain"; done
+    fi
+
+    read -rp "$(t fr_backup_ask)" ans_backup
+    if [[ ! "$ans_backup" =~ ^[nN]$ ]] && [ -d "$real_dir" ]; then
+        backup_file="$HOME/shopvpn_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+        if tar -czf "$backup_file" --exclude="venv" --exclude="translation-venv" --exclude="__pycache__" \
+            -C "$(dirname "$real_dir")" "$(basename "$real_dir")" 2>/dev/null; then
+            chmod 600 "$backup_file"
+            echo -e "${GREEN}$(t fr_backup_done "$backup_file")${RESET}"
+        else
+            rm -f "$backup_file"
+            echo -e "${RED}$(t fr_backup_failed)${RESET}"
+            return 1
+        fi
+    fi
+
+    ans_ssl="n"
+    if [ "${#DOMAINS[@]}" -gt 0 ]; then
+        read -rp "$(t fr_ssl_ask)" ans_ssl
+    fi
+
+    cd "$HOME" || cd /
+    for unit in "$SERVICE_NAME" "${SERVICE_NAME}-miniapp" "${SERVICE_NAME}-adminpanel" "${SERVICE_NAME}-api" "$LIBRETRANSLATE_SERVICE"; do
+        sudo systemctl stop "$unit" >/dev/null 2>&1 || true
+        sudo systemctl disable "$unit" >/dev/null 2>&1 || true
+        sudo rm -f "/etc/systemd/system/${unit}.service"
+    done
+    sudo systemctl daemon-reload
+    sudo systemctl reset-failed >/dev/null 2>&1 || true
+
+    for domain in "${DOMAINS[@]}"; do
+        sudo rm -f "/etc/nginx/sites-enabled/${domain}.conf" "/etc/nginx/sites-available/${domain}.conf"
+        if [[ "$ans_ssl" =~ ^[yY]$ ]] && [ -d "/etc/letsencrypt/live/${domain}" ]; then
+            sudo certbot delete --cert-name "$domain" --non-interactive >/dev/null 2>&1 || true
+        fi
+    done
+    if [ "${#DOMAINS[@]}" -gt 0 ]; then
+        sudo nginx -t >/dev/null 2>&1 && sudo systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+
+    rm -rf "$real_dir"
+    echo -e "${GREEN}$(t fr_done)${RESET}"
+
+    script_path=$(readlink -f "$0" 2>/dev/null || echo "")
+    case "$script_path" in
+        "$real_dir"/*) exit 0 ;;
+    esac
+}
+
 uninstall_bot() {
     echo -e "${RED}${BOLD}$(t uninstall_warning)${RESET}"
     read -rp "$(t confirm_prompt)" CONFIRM
@@ -2215,6 +2325,7 @@ while true; do
     menu_section sec_translation
     menu_item 27 menu_27
     menu_item 28 menu_28 "$RED"
+    menu_item 29 menu_29 "$RED"
     menu_section sec_advanced
     menu_item 21 menu_21
     menu_item 22 menu_22
@@ -2255,6 +2366,7 @@ while true; do
         26) update_api; pause ;;
         27) setup_libretranslate; pause ;;
         28) remove_libretranslate; pause ;;
+        29) factory_reset; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
