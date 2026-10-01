@@ -256,6 +256,20 @@ MSG_EN[prompt_new_owner]="New admin numeric ID (press Enter to keep current): "
 MSG_FA[prompt_new_owner]="آیدی عددی جدید ادمین (اگر تغییری نیست Enter بزن): "
 MSG_EN[saved_restarting]="✅ Saved. Restarting..."
 MSG_FA[saved_restarting]="✅ ذخیره شد. در حال ری‌استارت..."
+MSG_EN[env_dir_missing]="Install directory not found: %s"
+MSG_FA[env_dir_missing]="پوشه نصب پیدا نشد: %s"
+MSG_EN[invalid_token_fmt]="Invalid token format. Expected like 123456789:AAxxxxxxxx (no spaces)."
+MSG_FA[invalid_token_fmt]="فرمت توکن نامعتبر است. باید مثل 123456789:AAxxxxxxxx باشد (بدون فاصله)."
+MSG_EN[token_rejected]="Telegram rejected this token (getMe failed). Nothing was changed."
+MSG_FA[token_rejected]="تلگرام این توکن را رد کرد (getMe ناموفق). هیچ تغییری اعمال نشد."
+MSG_EN[invalid_owner_fmt]="Admin ID must be a numeric Telegram ID."
+MSG_FA[invalid_owner_fmt]="آیدی ادمین باید یک عدد (آیدی عددی تلگرام) باشد."
+MSG_EN[owner_change_warn]="Changing the admin ID rebuilds the admins table: all other admins will be removed on restart. Continue? [y/N]: "
+MSG_FA[owner_change_warn]="تغییر آیدی ادمین جدول ادمین‌ها را بازسازی می‌کند: بقیه ادمین‌ها بعد از ری‌استارت حذف می‌شوند. ادامه می‌دهی؟ [y/N]: "
+MSG_EN[env_backup_done]="Backup saved: %s"
+MSG_FA[env_backup_done]="بکاپ ذخیره شد: %s"
+MSG_EN[env_service_failed]="Service %s is not active after restart. Last log lines:"
+MSG_FA[env_service_failed]="سرویس %s بعد از ری‌استارت فعال نیست. آخرین خطوط لاگ:"
 
 # restore_backup_cli (new-server migration wizard)
 MSG_EN[prompt_backup_path]="Full path of the backup .db file already placed on this server (e.g. /root/bot_database.db): "
@@ -984,31 +998,69 @@ PYEOF
 # ---------------------------------------------------------------------------
 # Action: change admin token or ID / عملیات: تغییر توکن یا آیدی ادمین
 # ---------------------------------------------------------------------------
+set_env_key() {
+    local key="$1" val="$2" file="$INSTALL_DIR/.env"
+    touch "$file"
+    KEY="$key" VAL="$val" awk 'BEGIN{k=ENVIRON["KEY"];v=ENVIRON["VAL"];d=0}
+        index($0,k"=")==1{if(!d){print k"="v;d=1};next}
+        {print}
+        END{if(!d)print k"="v}' "$file" > "$file.tmp" \
+        && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
+}
+
 edit_env() {
+    local env_file="$INSTALL_DIR/.env" ans resp unit failed=0
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo -e "${RED}$(t env_dir_missing "$INSTALL_DIR")${RESET}"
+        return 1
+    fi
     read -rp "$(t prompt_new_token)" NEW_TOKEN
     read -rp "$(t prompt_new_owner)" NEW_OWNER
+    NEW_TOKEN=$(printf '%s' "$NEW_TOKEN" | tr -d '[:space:]')
+    NEW_OWNER=$(printf '%s' "$NEW_OWNER" | tr -d '[:space:]')
+    [ -z "$NEW_TOKEN" ] && [ -z "$NEW_OWNER" ] && return 0
 
-    # قبلاً این تابع کل .env را با فقط BOT_TOKEN/OWNER_ID بازنویسی می‌کرد و در
-    # نتیجه هر کلید دیگری (MINIAPP_URL، ADMIN_PANEL_URL، BOT_MODE/WEBHOOK_*،
-    # کلیدهای درگاه پرداخت و ...) را پاک می‌کرد؛ حالا فقط همین دو کلید در جای
-    # خودشان به‌روزرسانی می‌شوند و بقیه‌ی فایل دست‌نخورده می‌ماند.
     if [ -n "$NEW_TOKEN" ]; then
-        if grep -q "^BOT_TOKEN=" "$INSTALL_DIR/.env" 2>/dev/null; then
-            sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=$NEW_TOKEN|" "$INSTALL_DIR/.env"
-        else
-            echo "BOT_TOKEN=$NEW_TOKEN" >> "$INSTALL_DIR/.env"
+        if ! [[ "$NEW_TOKEN" =~ ^[0-9]{5,}:[A-Za-z0-9_-]{20,}$ ]]; then
+            echo -e "${RED}$(t invalid_token_fmt)${RESET}"
+            return 1
+        fi
+        resp=$(curl -sS --max-time 10 "https://api.telegram.org/bot${NEW_TOKEN}/getMe" 2>/dev/null || true)
+        if [[ "$resp" == *'"ok":false'* ]]; then
+            echo -e "${RED}$(t token_rejected)${RESET}"
+            return 1
         fi
     fi
     if [ -n "$NEW_OWNER" ]; then
-        if grep -q "^OWNER_ID=" "$INSTALL_DIR/.env" 2>/dev/null; then
-            sed -i "s|^OWNER_ID=.*|OWNER_ID=$NEW_OWNER|" "$INSTALL_DIR/.env"
-        else
-            echo "OWNER_ID=$NEW_OWNER" >> "$INSTALL_DIR/.env"
+        if ! [[ "$NEW_OWNER" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${RED}$(t invalid_owner_fmt)${RESET}"
+            return 1
         fi
+        read -rp "$(t owner_change_warn)" ans
+        [[ "$ans" =~ ^[yY]$ ]] || return 0
     fi
 
+    touch "$env_file"
+    cp -p "$env_file" "$env_file.bak.$(date +%Y%m%d%H%M%S)"
+    echo -e "${DIM}$(t env_backup_done "$env_file.bak.*")${RESET}"
+    [ -n "$NEW_TOKEN" ] && set_env_key BOT_TOKEN "$NEW_TOKEN"
+    [ -n "$NEW_OWNER" ] && set_env_key OWNER_ID "$NEW_OWNER"
+
     echo -e "${GREEN}$(t saved_restarting)${RESET}"
-    sudo systemctl restart "$SERVICE_NAME"
+    for unit in "$SERVICE_NAME" "${SERVICE_NAME}-miniapp" "${SERVICE_NAME}-adminpanel" "${SERVICE_NAME}-api"; do
+        [ -f "/etc/systemd/system/${unit}.service" ] || continue
+        sudo systemctl restart "$unit"
+    done
+    sleep 3
+    for unit in "$SERVICE_NAME" "${SERVICE_NAME}-miniapp" "${SERVICE_NAME}-adminpanel" "${SERVICE_NAME}-api"; do
+        [ -f "/etc/systemd/system/${unit}.service" ] || continue
+        if ! systemctl is-active --quiet "$unit"; then
+            failed=1
+            echo -e "${RED}$(t env_service_failed "$unit")${RESET}"
+            sudo journalctl -u "$unit" -n 15 --no-pager
+        fi
+    done
+    return $failed
 }
 
 # ---------------------------------------------------------------------------
