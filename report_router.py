@@ -18,6 +18,7 @@ DEFAULT_TOPIC = "other"
 TOPICS = {
     "purchase": "🛒 خرید",
     "service": "🛠 سرویس",
+    "config_alert": "🗑 حذف/اتمام کانفیگ",
     "renewal": "🔄 تمدید",
     "test": "🧪 تست",
     "finance": "💰 مالی",
