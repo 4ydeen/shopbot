@@ -49,7 +49,14 @@ import extra_gateway_registry
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel import mobile_auth
 from asset_versioning import file_digest, static_version, ApiNoStoreMiddleware
-from admin_panel.telegram_notify import send_message as tg_send, send_document as tg_send_document, fetch_telegram_file, get_me as tg_get_me
+from admin_panel.telegram_notify import (
+    send_message as tg_send,
+    send_photo as tg_send_photo,
+    send_voice as tg_send_voice,
+    send_document as tg_send_document,
+    fetch_telegram_file,
+    get_me as tg_get_me,
+)
 from admin_panel.config_delivery_web import deliver_config_to_user_web
 from admin_panel.webpush import PUSH_ENABLED, send_push
 import fcm_client
@@ -1830,12 +1837,14 @@ def api_app_config(admin=Depends(get_current_admin)):
                 ]},
                 {"title": "یادآوری تمدید", "load_url": "/api/settings/renewal", "submit_url": "/api/settings/renewal", "fields": [
                     {"key": "enabled", "label": "فعال", "type": "bool"},
+                    {"key": "send_discount_code", "label": "ارسال کد تخفیف همراه اعلان", "type": "bool"},
                     {"key": "days_before", "label": "چند روز قبل از انقضا", "type": "number"},
                     {"key": "discount_percent", "label": "درصد تخفیف", "type": "number"},
                     {"key": "discount_expiry_hours", "label": "اعتبار کد (ساعت)", "type": "number"},
                 ]},
                 {"title": "یادآوری حجم", "load_url": "/api/settings/volume-reminder", "submit_url": "/api/settings/volume-reminder", "fields": [
                     {"key": "enabled", "label": "فعال", "type": "bool"},
+                    {"key": "send_discount_code", "label": "ارسال کد تخفیف همراه اعلان", "type": "bool"},
                     {"key": "mode", "label": "مبنا: percent یا gb", "type": "text"},
                     {"key": "percent", "label": "درصد آستانه", "type": "number"},
                     {"key": "gb_left", "label": "گیگ باقی‌مانده", "type": "number"},
@@ -3911,6 +3920,28 @@ def api_add_discount(body: DiscountBody, admin=Depends(require_permission("disco
     return {"id": code_id}
 
 
+class DiscountBulkDeleteBody(BaseModel):
+    category_id: Optional[int] = None
+
+
+@app.post("/api/discounts/delete-all")
+def api_delete_all_discounts(admin=Depends(require_permission("discounts"))):
+    count = db.delete_all_discount_codes()
+    db.log_admin_action(admin["id"], "discount_delete_all", f"حذف همه کدهای تخفیف ({count})", "discount", None)
+    return {"ok": True, "deleted": count}
+
+
+@app.post("/api/discounts/delete-category")
+def api_delete_category_discounts(
+    body: DiscountBulkDeleteBody,
+    admin=Depends(require_permission("discounts")),
+):
+    count = db.delete_discount_codes_by_category(body.category_id)
+    label = f"دسته #{body.category_id}" if body.category_id is not None else "بدون دسته‌بندی"
+    db.log_admin_action(admin["id"], "discount_delete_category", f"حذف کدهای {label} ({count})", "discount", body.category_id)
+    return {"ok": True, "deleted": count}
+
+
 @app.post("/api/discounts/{code_id}/toggle")
 def api_toggle_discount(code_id: int, admin=Depends(require_permission("discounts"))):
     db.toggle_discount_code(code_id)
@@ -3972,32 +4003,66 @@ def api_ticket_close(ticket_id: int, admin=Depends(require_permission("tickets")
 
 
 class BroadcastBody(BaseModel):
-    message: str
+    message: str = ""
+    media_type: str = ""
 
 
 @app.post("/api/broadcast")
-async def api_broadcast(body: BroadcastBody, admin=Depends(require_permission("broadcast"))):
-    text = (body.message or "").strip()
-    if not text:
-        raise HTTPException(400, tr("متن پیام نمی‌تواند خالی باشد."))
+async def api_broadcast(
+    message: str = Form(""),
+    media_type: str = Form(""),
+    file: UploadFile | None = File(None),
+    admin=Depends(require_permission("broadcast")),
+):
+    text = (message or "").strip()
+    media_type = (media_type or "").strip().lower()
     if len(text) > 4000:
         raise HTTPException(400, tr("متن پیام بیش از حد طولانی است."))
 
-    user_ids = (await asyncio.to_thread(db.get_all_user_ids))
-    sem = asyncio.Semaphore(20)
+    media_bytes = None
+    filename = None
+    content_type = None
+    if file is not None:
+        filename = file.filename or "media"
+        content_type = file.content_type or "application/octet-stream"
+        media_bytes = await file.read()
+        if not media_bytes:
+            raise HTTPException(400, tr("فایل انتخاب‌شده خالی است."))
+        if media_type not in ("photo", "voice"):
+            raise HTTPException(400, tr("نوع فایل پیام همگانی نامعتبر است."))
+        max_size = 10 * 1024 * 1024 if media_type == "photo" else 50 * 1024 * 1024
+        if len(media_bytes) > max_size:
+            raise HTTPException(400, tr("حجم فایل بیش از حد مجاز است."))
+
+    if not text and media_bytes is None:
+        raise HTTPException(400, tr("متن یا فایل پیام نمی‌تواند خالی باشد."))
+
+    user_ids = await asyncio.to_thread(db.get_all_user_ids)
+    sem = asyncio.Semaphore(10 if media_bytes is not None else 20)
     counters = {"success": 0, "failed": 0}
 
     async def _send(uid):
         async with sem:
-            ok = await tg_send(_bot_token(), uid, text)
+            if media_bytes is None:
+                ok = await tg_send(_bot_token(), uid, text)
+            elif media_type == "photo":
+                ok = await tg_send_photo(
+                    _bot_token(), uid, media_bytes, filename=filename,
+                    caption=text, content_type=content_type,
+                )
+            else:
+                ok = await tg_send_voice(
+                    _bot_token(), uid, media_bytes, filename=filename, caption=text,
+                )
             counters["success" if ok else "failed"] += 1
 
     await asyncio.gather(*[_send(uid) for uid in user_ids])
-    (await asyncio.to_thread(db.log_admin_action, 
+    await asyncio.to_thread(
+        db.log_admin_action,
         admin["id"], "broadcast",
-        f"ارسال به {len(user_ids)} کاربر | موفق: {counters['success']} | ناموفق: {counters['failed']} "
+        f"ارسال {media_type or 'متن'} به {len(user_ids)} کاربر | موفق: {counters['success']} | ناموفق: {counters['failed']} "
         f"(پنل وب - {admin['username']})",
-    ))
+    )
     return {"total": len(user_ids), "success": counters["success"], "failed": counters["failed"]}
 
 
@@ -6308,6 +6373,7 @@ def api_set_wheel_settings(body: WheelSettingsBody, admin=Depends(require_permis
 
 class RenewalSettingsBody(BaseModel):
     enabled: bool
+    send_discount_code: bool = True
     days_before: int
     discount_percent: int
     discount_expiry_hours: int
@@ -6325,6 +6391,7 @@ def api_set_renewal_settings(body: RenewalSettingsBody, admin=Depends(require_pe
     if body.days_before <= 0 or body.discount_expiry_hours <= 0:
         raise HTTPException(400, tr("مقادیر روز/ساعت باید بزرگ‌تر از صفر باشند."))
     db.set_setting("renewal_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("renewal_send_discount_code", "1" if body.send_discount_code else "0")
     db.set_setting("renewal_reminder_days_before", str(body.days_before))
     db.set_setting("renewal_discount_percent", str(body.discount_percent))
     db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
@@ -6370,6 +6437,7 @@ def api_set_churn_settings(body: ChurnSettingsBody, admin=Depends(require_permis
 
 class VolumeReminderSettingsBody(BaseModel):
     enabled: bool
+    send_discount_code: bool = True
     mode: str
     percent: int
     gb_left: int
@@ -6395,6 +6463,7 @@ def api_set_volume_reminder_settings(body: VolumeReminderSettingsBody, admin=Dep
     if body.discount_expiry_hours <= 0:
         raise HTTPException(400, tr("اعتبار کد تخفیف باید بزرگ‌تر از صفر باشد."))
     db.set_setting("volume_reminder_enabled", "1" if body.enabled else "0")
+    db.set_setting("volume_send_discount_code", "1" if body.send_discount_code else "0")
     db.set_setting("volume_reminder_mode", body.mode)
     db.set_setting("volume_reminder_percent", str(body.percent))
     db.set_setting("volume_reminder_gb_left", str(body.gb_left))
