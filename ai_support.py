@@ -1450,7 +1450,90 @@ async def _openai_chat(provider: str, api_key: str, model: str, messages: list, 
                 raise RuntimeError(f"{provider} پاسخ JSON نامعتبر داد") from exc
 
 
-async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, system_prompt: str, business_mode: bool = False):
+async def _gemini_round(client, model_name, contents, gen_config, on_text=None):
+    """یک دور تولید Gemini؛ خروجی (content, parts). با on_text، متنِ تجمعیِ این دور حین دریافت اعلام می‌شود."""
+    if on_text is None:
+        response = await asyncio.to_thread(client.models.generate_content, model=model_name, contents=contents, config=gen_config)
+        candidate = response.candidates[0]
+        return candidate.content, (candidate.content.parts or [])
+
+    from google.genai import types
+    loop = asyncio.get_running_loop()
+
+    def consume():
+        collected, acc = [], ""
+        for chunk in client.models.generate_content_stream(model=model_name, contents=contents, config=gen_config):
+            cands = getattr(chunk, "candidates", None) or []
+            if not cands or not cands[0].content:
+                continue
+            for part in (cands[0].content.parts or []):
+                collected.append(part)
+                piece = getattr(part, "text", None)
+                if piece:
+                    acc += piece
+                    asyncio.run_coroutine_threadsafe(on_text(acc), loop)
+        return collected
+
+    parts = await asyncio.to_thread(consume)
+    return types.Content(role="model", parts=parts), parts
+
+
+async def _openai_chat_stream(provider: str, api_key: str, model: str, messages: list, tools=None, on_text=None):
+    """مثل _openai_chat ولی با stream؛ همان شکل خروجی را برمی‌گرداند. اگر پاسخ SSE قابل پردازش نبود به حالت عادی برمی‌گردد."""
+    url = "https://api.groq.com/openai/v1/chat/completions" if provider == "groq" else "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://telegram.org/"
+        headers["X-Title"] = "ShopVPN AI Support"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "tools": _openai_tools(tools),
+        "tool_choice": "auto",
+        "temperature": 0.2,
+        "stream": True,
+    }
+    content = ""
+    calls: dict = {}
+    timeout = aiohttp.ClientTimeout(total=60, connect=10, sock_read=30)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise RuntimeError(f"{provider} HTTP {resp.status}: {body[:600]}")
+                async for raw in resp.content:
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    delta = ((json.loads(data_str).get("choices") or [{}])[0]).get("delta") or {}
+                    piece = delta.get("content")
+                    if piece:
+                        content += piece
+                        if on_text is not None:
+                            await on_text(content)
+                    for tc in delta.get("tool_calls") or []:
+                        slot = calls.setdefault(tc.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["function"]["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            slot["function"]["arguments"] += fn["arguments"]
+    except (json.JSONDecodeError, KeyError, AttributeError, TypeError, ValueError):
+        _log.warning("%s stream parse failed; falling back to non-stream call.", provider)
+        return await _openai_chat(provider, api_key, model, messages, tools)
+    message = {"content": content}
+    if calls:
+        message["tool_calls"] = [calls[i] for i in sorted(calls)]
+    return {"choices": [{"message": message}]}
+
+
+async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, system_prompt: str, business_mode: bool = False, on_text=None):
     from google.genai import types
     api_keys = resolve_gemini_keys(db)
     if not api_keys:
@@ -1470,14 +1553,12 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
         try:
             escalate, ui_action = False, None
             for _ in range(_MAX_TOOL_ROUNDS):
-                response = await asyncio.to_thread(client.models.generate_content, model=model_name, contents=contents, config=gen_config)
-                candidate = response.candidates[0]
-                parts = candidate.content.parts or []
+                round_content, parts = await _gemini_round(client, model_name, contents, gen_config, on_text)
                 calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
                 if not calls:
                     text = "".join(p.text for p in parts if getattr(p, "text", None)).strip()
                     return {"reply": text, "escalate": escalate, "ui_action": ui_action, "tools_used": tools_used}
-                contents.append(candidate.content)
+                contents.append(round_content)
                 # اگر مدل در یک دور چند ابزارِ مستقل را هم‌زمان صدا بزند (مثلاً
                 # list_products و list_payment_methods)، هر دو به‌صورت موازی
                 # اجرا می‌شوند نه پشت‌سرهم - نتیجه‌ها همان ترتیبِ calls برمی‌گردند
@@ -1538,7 +1619,7 @@ async def _run_gemini(db, user_tg_id: int, history: list, user_message: str, sys
     raise last_exc or RuntimeError("Gemini failed")
 
 
-async def _run_openai_compatible(db, user_tg_id: int, history: list, user_message: str, system_prompt: str, provider: str, business_mode: bool = False):
+async def _run_openai_compatible(db, user_tg_id: int, history: list, user_message: str, system_prompt: str, provider: str, business_mode: bool = False, on_text=None):
     keys = resolve_provider_keys(db, provider)
     if not keys:
         raise RuntimeError(f"{provider} API key تنظیم نشده")
@@ -1552,7 +1633,10 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
         try:
             ui_action = None
             for _ in range(_MAX_TOOL_ROUNDS):
-                data = await _openai_chat(provider, api_key, model, messages, _tools_for(business_mode))
+                if on_text is None:
+                    data = await _openai_chat(provider, api_key, model, messages, _tools_for(business_mode))
+                else:
+                    data = await _openai_chat_stream(provider, api_key, model, messages, _tools_for(business_mode), on_text)
                 choice = (data.get("choices") or [{}])[0]
                 msg = choice.get("message") or {}
                 tool_calls = msg.get("tool_calls") or []
@@ -1630,7 +1714,7 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
     raise last_exc or RuntimeError(f"{provider} failed")
 
 
-async def get_reply(db, user_tg_id: int, history: list, user_message: str, business_mode: bool = False) -> dict:
+async def get_reply(db, user_tg_id: int, history: list, user_message: str, business_mode: bool = False, on_text=None) -> dict:
     """Agent چند-Provider: Gemini، Groq و OpenRouter با چرخش کلید و fallback."""
     if not is_configured(db):
         return {"reply": "دستیار هوشمند در حال حاضر تنظیم نشده. پیامت مستقیم برای پشتیبانی ارسال می‌شود.", "escalate": True}
@@ -1647,9 +1731,9 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str, busin
     for provider in providers:
         try:
             if provider == "gemini":
-                result = await _run_gemini(db, user_tg_id, history, user_message, system_prompt, business_mode)
+                result = await _run_gemini(db, user_tg_id, history, user_message, system_prompt, business_mode, on_text)
             else:
-                result = await _run_openai_compatible(db, user_tg_id, history, user_message, system_prompt, provider, business_mode)
+                result = await _run_openai_compatible(db, user_tg_id, history, user_message, system_prompt, provider, business_mode, on_text)
             if result.get("reply"):
                 # لاگِ آنالیتیکسِ سبک (بدون نیاز به تغییر اسکیمای دیتابیس):
                 # هر تِرن موفق دستیار، یک خط ساختاریافته در لاگ می‌نویسد -
