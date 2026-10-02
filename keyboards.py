@@ -3304,6 +3304,7 @@ def discount_codes_kb(codes=None, db=None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr("📋 نمایش همه کدهای تخفیف"), callback_data="adm_disc_list:0")],
         [InlineKeyboardButton(text=tr("🗑 حذف همه کدهای تخفیف"), callback_data="adm_disc_delete_all_confirm")],
         [InlineKeyboardButton(text=tr("🗂 حذف کدهای تخفیف بر اساس دسته‌بندی"), callback_data="adm_disc_delete_category")],
+        [InlineKeyboardButton(text=tr("🧩 حذف کدهای تخفیف بر اساس نوع تولید"), callback_data="adm_disc_delete_source")],
         [InlineKeyboardButton(text=tr("➕ ساخت کد تخفیف جدید"), callback_data="adm_disc_add")],
         [InlineKeyboardButton(text=tr("🎯 کد تخفیف گروهی (بر اساس فیلتر)"), callback_data="adm_bulk_disc")],
         [InlineKeyboardButton(text=tr("🎁 گیفت‌کدهای شارژ کیف پول"), callback_data="adm_gift_menu")],
@@ -3367,6 +3368,40 @@ def discount_delete_category_kb(categories) -> InlineKeyboardMarkup:
     )])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_discounts_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+DISCOUNT_SOURCE_LABELS = {
+    "admin": "✍️ ساخته‌شده دستی توسط ادمین",
+    "wheel": "🎡 تولیدشده توسط گردونه شانس",
+    "lottery": "🪙 تولیدشده توسط قرعه‌کشی شبانه",
+    "bulk_admin": "👥 تولیدشده به‌صورت گروهی توسط ادمین",
+    "renewal_reminder": "🔄 تولیدشده برای یادآوری تمدید سرویس",
+    "volume_reminder": "📦 تولیدشده برای یادآوری اتمام حجم",
+    "churn_offer": "↩️ تولیدشده برای پیشنهاد بازگشت کاربر",
+}
+
+
+def discount_delete_source_kb(sources) -> InlineKeyboardMarkup:
+    rows = []
+    for row in sources:
+        source = row["source"] if "source" in row.keys() else "admin"
+        count = int(row["count"] or 0)
+        label = DISCOUNT_SOURCE_LABELS.get(source, f"🧩 {source}")
+        rows.append([InlineKeyboardButton(
+            text=tr(f"{label} ({count} کد)"),
+            callback_data=f"adm_disc_delete_source_confirm:{source}",
+        )])
+    if not rows:
+        rows.append([InlineKeyboardButton(text=tr("هیچ کد تخفیفی وجود ندارد."), callback_data="noop")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_discounts_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_delete_source_confirm_kb(source: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("⚠️ بله، حذف شود"), callback_data=f"adm_disc_delete_source:{source}")],
+        [InlineKeyboardButton(text=tr("⬅️ انصراف"), callback_data="adm_disc_delete_source")],
+    ])
 
 
 def discount_delete_confirm_kb(action: str, value: str = "") -> InlineKeyboardMarkup:

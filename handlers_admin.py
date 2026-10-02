@@ -4225,6 +4225,57 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         )
         await call.answer()
 
+    @router.callback_query(F.data == "adm_disc_delete_source")
+    async def cb_admin_disc_delete_source(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        sources = await asyncio.to_thread(db.list_discount_code_sources)
+        await replace_admin_view(
+            call,
+            tr("🧩 حذف کدهای تخفیف بر اساس نوع تولید\n\nنوع تولید موردنظر را انتخاب کنید:"),
+            reply_markup=kb.discount_delete_source_kb(sources),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_disc_delete_source_confirm:"))
+    async def cb_admin_disc_delete_source_confirm(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        source = call.data.split(":", 1)[1]
+        labels = getattr(kb, "DISCOUNT_SOURCE_LABELS", {})
+        label = labels.get(source, source)
+        sources = await asyncio.to_thread(db.list_discount_code_sources)
+        row = next((r for r in sources if (r["source"] or "admin") == source), None)
+        count = int(row["count"] or 0) if row else 0
+        if count == 0:
+            await call.answer(tr("کدی از این نوع وجود ندارد."), show_alert=True)
+            return
+        await replace_admin_view(
+            call,
+            tr(f"⚠️ حذف کدهای نوع «{label}»\n\nتعداد: {count} کد\n\nفقط همین نوع حذف خواهد شد.\nآیا مطمئن هستید؟"),
+            reply_markup=kb.discount_delete_source_confirm_kb(source),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_disc_delete_source:"))
+    async def cb_admin_disc_delete_source_run(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        source = call.data.split(":", 1)[1]
+        count = await asyncio.to_thread(db.delete_discount_codes_by_source, source)
+        labels = getattr(kb, "DISCOUNT_SOURCE_LABELS", {})
+        label = labels.get(source, source)
+        await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "discount_delete_source",
+            f"حذف کدهای نوع {source} ({count})"
+        )
+        await replace_admin_view(
+            call,
+            tr(f"🎟 مدیریت کدهای تخفیف\n\n✅ {count} کد از نوع «{label}» حذف شد."),
+            reply_markup=kb.discount_codes_kb(),
+        )
+        await call.answer(tr("کدها حذف شدند."))
+
     @router.callback_query(F.data.startswith("adm_disc_delete_category_confirm:"))
     async def cb_admin_disc_delete_category_confirm(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
