@@ -1728,7 +1728,6 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "anthropic_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                 ]},
                 {"title": "🧾 ایجنت‌های اضافی تشخیص رسید", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
-                    {"key": "github_models_api_key", "label": "GitHub Models - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "mistral_api_key", "label": "Mistral - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "cohere_api_key", "label": "Cohere - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "cloudflare_api_token", "label": "Cloudflare Workers AI - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
@@ -2168,7 +2167,6 @@ class AiSupportSettingsBody(BaseModel):
     openrouter_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
-    github_models_api_key: str = ""
     mistral_api_key: str = ""
     cohere_api_key: str = ""
     cloudflare_api_token: str = ""
@@ -2194,7 +2192,6 @@ def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
         "openrouter_api_key": _mask_key_lines(db.get_setting("openrouter_api_key", "")),
         "openai_api_key": _mask_key_lines(db.get_setting("openai_api_key", "")),
         "anthropic_api_key": _mask_key_lines(db.get_setting("anthropic_api_key", "")),
-        "github_models_api_key": _mask_key_lines(db.get_setting("github_models_api_key", "")),
         "mistral_api_key": _mask_key_lines(db.get_setting("mistral_api_key", "")),
         "cohere_api_key": _mask_key_lines(db.get_setting("cohere_api_key", "")),
         "cloudflare_api_token": _mask_key_lines(db.get_setting("cloudflare_api_token", "")),
@@ -2228,7 +2225,6 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         ("openrouter_api_key", "openrouter_api_key"),
         ("openai_api_key", "openai_api_key"),
         ("anthropic_api_key", "anthropic_api_key"),
-        ("github_models_api_key", "github_models_api_key"),
         ("mistral_api_key", "mistral_api_key"),
         ("cohere_api_key", "cohere_api_key"),
         ("cloudflare_api_token", "cloudflare_api_token"),
