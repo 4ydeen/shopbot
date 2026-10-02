@@ -923,7 +923,7 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
         ai_support.resolve_groq_keys(db) or ai_support.resolve_openrouter_keys(db)
         or any(ai_support.resolve_provider_model(db, p) and ai_support.resolve_provider_keys(db, p) for p in ("openai", "anthropic"))
         or any(r["model"] and r["keys"] for r in ai_support.custom_providers(db))
-        or ai_support.resolve_github_keys(db) or ai_support.resolve_mistral_keys(db)
+        or ai_support.resolve_mistral_keys(db)
         or ai_support.resolve_cohere_keys(db)
         or (ai_support.resolve_cloudflare_keys(db) and ai_support.resolve_cloudflare_account_id(db))
     )

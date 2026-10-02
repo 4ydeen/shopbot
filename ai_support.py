@@ -155,11 +155,6 @@ def resolve_openrouter_keys(db) -> list:
     return keys or _split_keys(getattr(config, "OPENROUTER_API_KEY", ""))
 
 
-def resolve_github_keys(db) -> list:
-    keys = _split_keys(_setting(db, "github_models_api_key"))
-    return keys or _split_keys(getattr(config, "GITHUB_MODELS_API_KEY", ""))
-
-
 def resolve_mistral_keys(db) -> list:
     keys = _split_keys(_setting(db, "mistral_api_key"))
     return keys or _split_keys(getattr(config, "MISTRAL_API_KEY", ""))
@@ -180,7 +175,6 @@ def resolve_cloudflare_account_id(db) -> str:
 
 
 RECEIPT_AGENT_FIELDS = (
-    ("gh", "GitHub Models", "github_models_api_key", "GITHUB_MODELS_API_KEY", "https://github.com/settings/personal-access-tokens", True),
     ("mi", "Mistral", "mistral_api_key", "MISTRAL_API_KEY", "https://console.mistral.ai/api-keys", True),
     ("co", "Cohere", "cohere_api_key", "COHERE_API_KEY", "https://dashboard.cohere.com/api-keys", True),
     ("cft", "Cloudflare Workers AI - توکن", "cloudflare_api_token", "CLOUDFLARE_API_TOKEN", "https://dash.cloudflare.com/profile/api-tokens", True),
