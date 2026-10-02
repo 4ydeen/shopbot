@@ -2108,6 +2108,7 @@ class AiSupportSettingsBody(BaseModel):
     # با مقدار پیش‌فرض غیر-None، ذخیره‌ی مثلاً کارت Gemini به‌غلط enabled/provider
     # را به پیش‌فرض برمی‌گرداند.
     enabled: Optional[bool] = None
+    stream_enabled: Optional[bool] = None
     provider: Optional[str] = None
     gemini_model: str = ""
     groq_model: str = ""
@@ -2126,6 +2127,7 @@ class AiSupportSettingsBody(BaseModel):
 def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
     return {
         "enabled": db.get_setting("ai_support_enabled", "1") == "1",
+        "stream_enabled": db.get_setting("ai_stream_enabled", "1") == "1",
         "provider": ai_support.resolve_provider_mode(db),
         "gemini_model": ai_support.resolve_gemini_model(db),
         "groq_model": ai_support.resolve_groq_model(db),
@@ -2150,6 +2152,8 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         raise HTTPException(400, tr("مسیر انتخاب مدل نامعتبر است."))
     if body.enabled is not None:
         db.set_setting("ai_support_enabled", "1" if body.enabled else "0")
+    if body.stream_enabled is not None:
+        db.set_setting("ai_stream_enabled", "1" if body.stream_enabled else "0")
     if body.provider is not None:
         db.set_setting("ai_provider", body.provider)
     if body.gemini_model:
@@ -6176,6 +6180,42 @@ def api_set_renewal_settings(body: RenewalSettingsBody, admin=Depends(require_pe
     db.set_setting("renewal_discount_percent", str(body.discount_percent))
     db.set_setting("renewal_discount_expiry_hours", str(body.discount_expiry_hours))
     db.log_admin_action(admin["id"], "setting_change", "renewal settings updated (پنل وب)", "setting", "renewal")
+    return {"ok": True}
+
+
+class ChurnSettingsBody(BaseModel):
+    enabled: bool
+    ai_enabled: bool = True
+    max_discount_percent: int = 25
+    min_score: int
+    discount_percent: int
+    discount_expiry_hours: int
+    cooldown_days: int
+    max_per_run: int
+
+
+@app.get("/api/settings/churn")
+def api_get_churn_settings(admin=Depends(require_permission("settings"))):
+    return db.get_churn_settings()
+
+
+@app.post("/api/settings/churn")
+def api_set_churn_settings(body: ChurnSettingsBody, admin=Depends(require_permission("settings"))):
+    if not (1 <= body.min_score <= 100):
+        raise HTTPException(400, tr("حداقل امتیاز ریزش باید بین ۱ تا ۱۰۰ باشد."))
+    if not (0 <= body.discount_percent <= 100) or not (0 <= body.max_discount_percent <= 100):
+        raise HTTPException(400, tr("درصد تخفیف باید بین ۰ تا ۱۰۰ باشد."))
+    if body.discount_expiry_hours <= 0 or body.cooldown_days <= 0 or body.max_per_run <= 0:
+        raise HTTPException(400, tr("مقادیر ساعت/روز/تعداد باید بزرگ‌تر از صفر باشند."))
+    db.set_setting("churn_offer_enabled", "1" if body.enabled else "0")
+    db.set_setting("churn_offer_ai_enabled", "1" if body.ai_enabled else "0")
+    db.set_setting("churn_offer_max_discount_percent", str(body.max_discount_percent))
+    db.set_setting("churn_offer_min_score", str(body.min_score))
+    db.set_setting("churn_offer_discount_percent", str(body.discount_percent))
+    db.set_setting("churn_offer_expiry_hours", str(body.discount_expiry_hours))
+    db.set_setting("churn_offer_cooldown_days", str(body.cooldown_days))
+    db.set_setting("churn_offer_max_per_run", str(body.max_per_run))
+    db.log_admin_action(admin["id"], "setting_change", "churn offer settings updated (پنل وب)", "setting", "churn_offer")
     return {"ok": True}
 
 
