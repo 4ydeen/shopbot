@@ -1334,7 +1334,7 @@ def ai_provider_choice_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
+def ai_model_choice_kb(db, gemini_rows=None) -> InlineKeyboardMarkup:
     import ai_support
     current = {
         "gemini": ai_support.resolve_gemini_model(db),
@@ -1343,7 +1343,11 @@ def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
     }
     rows = []
     last_provider = None
-    for provider, model_id, label in ai_support.MODEL_CHOICES:
+    choices = list(ai_support.MODEL_CHOICES)
+    if gemini_rows:
+        picks = [(m, lbl) for m, lbl in gemini_rows if len(f"adm_ai_model_pick:gemini:{m}".encode()) <= 64][:40]
+        choices = [("gemini", m, lbl) for m, lbl in picks] + [c for c in choices if c[0] != "gemini"]
+    for provider, model_id, label in choices:
         if provider != last_provider:
             title = {"gemini":"🔷 Gemini", "groq":"🚀 Groq", "openrouter":"🌐 OpenRouter"}[provider]
             rows.append([InlineKeyboardButton(text=title, callback_data="noop")])

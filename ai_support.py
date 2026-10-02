@@ -97,6 +97,62 @@ def resolve_gemini_model(db) -> str:
     return _DEPRECATED_GEMINI_MODELS.get(model, model)
 
 
+_GEMINI_LIST_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+_GEMINI_LIST_TTL = 600
+_GEMINI_LIST_SKIP = ("embedding", "tts", "image", "live", "audio", "robotics", "computer-use", "aqa", "imagen", "veo", "lyria", "omni")
+_gemini_list_cache = {"ts": 0.0, "key": "", "rows": []}
+
+
+def _fetch_gemini_models(api_key: str) -> list:
+    import urllib.request
+    rows, token = [], ""
+    for _ in range(5):
+        url = f"{_GEMINI_LIST_URL}?pageSize=1000" + (f"&pageToken={token}" if token else "")
+        req = urllib.request.Request(url, headers={"x-goog-api-key": api_key})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for m in data.get("models") or []:
+            name = str(m.get("name") or "")
+            mid = name[len("models/"):] if name.startswith("models/") else name
+            if not mid.startswith("gemini-") or "generateContent" not in (m.get("supportedGenerationMethods") or []):
+                continue
+            if any(x in mid for x in _GEMINI_LIST_SKIP):
+                continue
+            rows.append((mid, str(m.get("displayName") or mid)))
+        token = data.get("nextPageToken") or ""
+        if not token:
+            break
+    return sorted(set(rows))
+
+
+def live_gemini_models(db, force: bool = False) -> list:
+    """Cached generateContent-capable Gemini models as [(id, label)]; empty list on any failure."""
+    import time
+    keys = resolve_gemini_keys(db)
+    if not keys:
+        return []
+    cache = _gemini_list_cache
+    if not force and cache["key"] == keys[0] and cache["rows"] and time.time() - cache["ts"] < _GEMINI_LIST_TTL:
+        return cache["rows"]
+    try:
+        rows = _fetch_gemini_models(keys[0])
+    except Exception as exc:
+        _log.warning("gemini model list fetch failed: %s", exc)
+        return cache["rows"] if cache["key"] == keys[0] else []
+    if rows:
+        cache.update(ts=time.time(), key=keys[0], rows=rows)
+    return rows
+
+
+def gemini_model_options(db) -> list:
+    """[(id, label)] for pickers: live list if available, else the static choices; current model always included."""
+    rows = live_gemini_models(db) or [(m, label) for p, m, label in MODEL_CHOICES if p == "gemini"]
+    current = resolve_gemini_model(db)
+    if current and current not in {m for m, _ in rows}:
+        rows = [(current, current)] + list(rows)
+    return list(rows)
+
+
 def resolve_groq_model(db) -> str:
     return _setting(db, "groq_model", "openai/gpt-oss-20b")
 

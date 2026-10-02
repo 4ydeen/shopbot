@@ -11503,7 +11503,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_ai_set_model(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        await replace_admin_view(call, tr("🧠 انتخاب مدل\n\nبرای ۵۰۰ پیام روزانه، مدل‌های سریع را انتخاب کن. در حالت خودکار اگر Provider فعلی 429/5xx بدهد، Agent به Provider بعدی می‌رود. توضیح هر مدل کنار دکمه آمده است."), reply_markup=kb.ai_model_choice_kb(db))
+        await replace_admin_view(call, tr("🧠 انتخاب مدل\n\nبرای ۵۰۰ پیام روزانه، مدل‌های سریع را انتخاب کن. در حالت خودکار اگر Provider فعلی 429/5xx بدهد، Agent به Provider بعدی می‌رود. توضیح هر مدل کنار دکمه آمده است."), reply_markup=kb.ai_model_choice_kb(db, await asyncio.to_thread(ai_support.gemini_model_options, db)))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_ai_model_pick:"))
@@ -11515,12 +11515,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
         provider, model = parts[1], parts[2]
         valid = {(p, m) for p, m, _ in ai_support.MODEL_CHOICES}
+        gemini_rows = await asyncio.to_thread(ai_support.gemini_model_options, db)
+        if provider == "gemini":
+            valid |= {("gemini", m) for m, _ in gemini_rows}
         if (provider, model) not in valid:
             return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
         key = {"gemini":"gemini_model", "groq":"groq_model", "openrouter":"openrouter_model"}[provider]
         await asyncio.to_thread(db.set_setting, key, model)
         await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_model_change", f"{provider}: {model}")
-        await replace_admin_view(call, tr(f"✅ مدل {provider} روی «{model}» تنظیم شد."), reply_markup=kb.ai_model_choice_kb(db))
+        await replace_admin_view(call, tr(f"✅ مدل {provider} روی «{model}» تنظیم شد."), reply_markup=kb.ai_model_choice_kb(db, gemini_rows))
         await call.answer(db.get_text('handlers_admin.auto_0479b78b', '✅ ذخیره شد'))
 
     async def _show_ai_key_prompt(call, state, provider, state_cls, setting_key, title, source_env):
