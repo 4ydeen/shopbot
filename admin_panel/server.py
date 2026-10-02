@@ -1695,8 +1695,10 @@ def api_app_config(admin=Depends(get_current_admin)):
                 {"title": "عمومی", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
                     {"key": "enabled", "label": "فعال بودن دستیار هوشمند", "type": "bool"},
                     {"key": "provider", "label": "مسیر انتخاب مدل", "type": "select", "options": [
-                        ["auto", "خودکار (Gemini → Groq → OpenRouter)"], ["gemini", "فقط Gemini"],
+                        ["auto", "خودکار (همه ارائه‌دهنده‌های تنظیم‌شده)"], ["gemini", "فقط Gemini"],
                         ["groq", "فقط Groq"], ["openrouter", "فقط OpenRouter"],
+                        ["openai", "فقط OpenAI"], ["anthropic", "فقط Claude (Anthropic)"],
+                        ["custom", "فقط ارائه‌دهنده‌های سفارشی"],
                     ]},
                 ]},
                 {"title": "🔷 Gemini", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
@@ -1717,6 +1719,14 @@ def api_app_config(admin=Depends(get_current_admin)):
                     ]},
                     {"key": "openrouter_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                 ]},
+                {"title": "🟢 OpenAI", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
+                    {"key": "openai_model", "label": "نام مدل (دقیقاً مطابق مستندات OpenAI)", "type": "text"},
+                    {"key": "openai_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                ]},
+                {"title": "🟠 Claude (Anthropic)", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
+                    {"key": "anthropic_model", "label": "نام مدل (دقیقاً مطابق مستندات Anthropic)", "type": "text"},
+                    {"key": "anthropic_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
+                ]},
                 {"title": "🧾 ایجنت‌های اضافی تشخیص رسید", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
                     {"key": "github_models_api_key", "label": "GitHub Models - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "mistral_api_key", "label": "Mistral - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
@@ -1725,6 +1735,44 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "cloudflare_account_id", "label": "Cloudflare Workers AI - Account ID", "type": "text"},
                 ]},
             ],
+        })
+        tabs.append({
+            "id": "aiproviders", "title": "ارائه‌دهنده‌های AI سفارشی", "icon": "dns", "screen": "list",
+            "section": "تنظیمات و سیستم",
+            "source": "/api/ai-providers", "item_id_field": "id",
+            "fields": [
+                {"key": "name", "label": "نام", "type": "title"},
+                {"key": "base_url", "label": "آدرس API", "type": "text"},
+                {"key": "model", "label": "مدل", "type": "text"},
+            ],
+            "actions": [
+                {"id": "test", "label": "تست اتصال", "method": "POST",
+                 "endpoint": "/api/ai-providers/{id}/test", "style": "default", "confirm": True},
+                {"id": "delete", "label": "حذف", "method": "DELETE",
+                 "endpoint": "/api/ai-providers/{id}", "style": "danger", "confirm": True},
+            ],
+            "create_form": {
+                "title": "افزودن ارائه‌دهنده سفارشی (سازگار با OpenAI)",
+                "submit_url": "/api/ai-providers",
+                "method": "POST",
+                "fields": [
+                    {"key": "name", "label": "نام", "type": "text"},
+                    {"key": "base_url", "label": "آدرس پایه API (مثلاً https://example.com/v1)", "type": "text"},
+                    {"key": "model", "label": "نام مدل", "type": "text"},
+                    {"key": "api_key", "label": "کلید(های) API (هر خط یک کلید)", "type": "textarea"},
+                ],
+            },
+            "edit_form": {
+                "title": "ویرایش ارائه‌دهنده سفارشی",
+                "submit_url": "/api/ai-providers/{id}",
+                "method": "PUT",
+                "fields": [
+                    {"key": "name", "label": "نام", "type": "text"},
+                    {"key": "base_url", "label": "آدرس پایه API", "type": "text"},
+                    {"key": "model", "label": "نام مدل", "type": "text"},
+                    {"key": "api_key", "label": "کلید(های) API (خالی=بدون تغییر)", "type": "textarea"},
+                ],
+            },
         })
         tabs.append({
             "id": "aifaq", "title": "سوالات متداول دستیار", "icon": "chat", "screen": "list",
@@ -2113,9 +2161,13 @@ class AiSupportSettingsBody(BaseModel):
     gemini_model: str = ""
     groq_model: str = ""
     openrouter_model: str = ""
+    openai_model: str = ""
+    anthropic_model: str = ""
     gemini_api_key: str = ""
     groq_api_key: str = ""
     openrouter_api_key: str = ""
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
     github_models_api_key: str = ""
     mistral_api_key: str = ""
     cohere_api_key: str = ""
@@ -2132,12 +2184,16 @@ def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
         "gemini_model": ai_support.resolve_gemini_model(db),
         "groq_model": ai_support.resolve_groq_model(db),
         "openrouter_model": ai_support.resolve_openrouter_model(db),
+        "openai_model": ai_support.resolve_openai_model(db),
+        "anthropic_model": ai_support.resolve_anthropic_model(db),
         # کلیدها هیچ‌وقت خام برنمی‌گردند، فقط ماسک‌شده - برای این‌که فرم نشان
         # بدهد کلیدی تنظیم شده یا نه. اگر ادمین این متن ماسک‌شده را دست‌نخورده
         # بگذارد، ذخیره تغییری در کلید نمی‌دهد.
         "gemini_api_key": _mask_key_lines(db.get_setting("gemini_api_key", "")),
         "groq_api_key": _mask_key_lines(db.get_setting("groq_api_key", "")),
         "openrouter_api_key": _mask_key_lines(db.get_setting("openrouter_api_key", "")),
+        "openai_api_key": _mask_key_lines(db.get_setting("openai_api_key", "")),
+        "anthropic_api_key": _mask_key_lines(db.get_setting("anthropic_api_key", "")),
         "github_models_api_key": _mask_key_lines(db.get_setting("github_models_api_key", "")),
         "mistral_api_key": _mask_key_lines(db.get_setting("mistral_api_key", "")),
         "cohere_api_key": _mask_key_lines(db.get_setting("cohere_api_key", "")),
@@ -2162,10 +2218,16 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         db.set_setting("groq_model", body.groq_model)
     if body.openrouter_model:
         db.set_setting("openrouter_model", body.openrouter_model)
+    if body.openai_model.strip():
+        db.set_setting("openai_model", body.openai_model.strip())
+    if body.anthropic_model.strip():
+        db.set_setting("anthropic_model", body.anthropic_model.strip())
     for field, setting_key in (
         ("gemini_api_key", "gemini_api_key"),
         ("groq_api_key", "groq_api_key"),
         ("openrouter_api_key", "openrouter_api_key"),
+        ("openai_api_key", "openai_api_key"),
+        ("anthropic_api_key", "anthropic_api_key"),
         ("github_models_api_key", "github_models_api_key"),
         ("mistral_api_key", "mistral_api_key"),
         ("cohere_api_key", "cohere_api_key"),
@@ -2180,6 +2242,97 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         db.set_setting("cloudflare_account_id", body.cloudflare_account_id.strip())
     db.log_admin_action(admin["id"], "ai_support_settings_change", f"تنظیمات دستیار هوشمند تغییر کرد (پنل وب - {admin['username']}).")
     return {"ok": True}
+
+
+class AiCustomProviderBody(BaseModel):
+    name: str = ""
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+
+
+def _custom_provider_view(row: dict) -> dict:
+    return {
+        "id": row["id"], "name": row["name"], "base_url": row["base_url"],
+        "model": row["model"], "api_key": _mask_key_lines(row["api_key"]),
+    }
+
+
+@app.get("/api/ai-providers")
+def api_list_ai_providers(admin=Depends(require_permission("settings"))):
+    return [_custom_provider_view(r) for r in ai_support.custom_providers(db)]
+
+
+@app.post("/api/ai-providers")
+def api_add_ai_provider(body: AiCustomProviderBody, admin=Depends(require_permission("settings"))):
+    name, model = body.name.strip(), body.model.strip()
+    if not name or not model or not body.api_key.strip():
+        raise HTTPException(400, tr("نام، مدل و کلید API الزامی هستند."))
+    if not ai_support.normalize_chat_url(body.base_url):
+        raise HTTPException(400, tr("آدرس API باید با http:// یا https:// شروع شود."))
+    rows = ai_support.custom_providers(db)
+    if len(rows) >= 10:
+        raise HTTPException(400, tr("حداکثر ۱۰ ارائه‌دهنده سفارشی مجاز است."))
+    slug = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-")[:24] or "provider"
+    taken = {r["id"] for r in rows}
+    pid, n = slug, 2
+    while pid in taken:
+        pid = f"{slug}-{n}"
+        n += 1
+    rows.append({
+        "id": pid, "name": name, "base_url": body.base_url.strip(), "model": model,
+        "api_key": "\n".join(ai_support._split_keys(body.api_key)),
+    })
+    ai_support.save_custom_providers(db, rows)
+    db.log_admin_action(admin["id"], "ai_provider_add", f"ارائه‌دهنده هوش مصنوعی سفارشی اضافه شد: {name} (پنل وب - {admin['username']}).")
+    return {"ok": True, "id": pid}
+
+
+@app.put("/api/ai-providers/{provider_id}")
+def api_update_ai_provider(provider_id: str, body: AiCustomProviderBody, admin=Depends(require_permission("settings"))):
+    rows = ai_support.custom_providers(db)
+    row = next((r for r in rows if r["id"] == provider_id), None)
+    if not row:
+        raise HTTPException(404, tr("یافت نشد."))
+    if body.name.strip():
+        row["name"] = body.name.strip()
+    if body.base_url.strip():
+        if not ai_support.normalize_chat_url(body.base_url):
+            raise HTTPException(400, tr("آدرس API باید با http:// یا https:// شروع شود."))
+        row["base_url"] = body.base_url.strip()
+    if body.model.strip():
+        row["model"] = body.model.strip()
+    if body.api_key.strip() and body.api_key.strip() != _mask_key_lines(row["api_key"]).strip():
+        row["api_key"] = "\n".join(ai_support._split_keys(body.api_key))
+    ai_support.save_custom_providers(db, rows)
+    db.log_admin_action(admin["id"], "ai_provider_edit", f"ارائه‌دهنده هوش مصنوعی سفارشی ویرایش شد: {row['name']} (پنل وب - {admin['username']}).")
+    return {"ok": True}
+
+
+@app.delete("/api/ai-providers/{provider_id}")
+def api_delete_ai_provider(provider_id: str, admin=Depends(require_permission("settings"))):
+    rows = ai_support.custom_providers(db)
+    if not any(r["id"] == provider_id for r in rows):
+        raise HTTPException(404, tr("یافت نشد."))
+    ai_support.save_custom_providers(db, [r for r in rows if r["id"] != provider_id])
+    db.log_admin_action(admin["id"], "ai_provider_delete", f"ارائه‌دهنده هوش مصنوعی سفارشی حذف شد: {provider_id} (پنل وب - {admin['username']}).")
+    return {"ok": True}
+
+
+@app.post("/api/ai-providers/{provider_id}/test")
+async def api_test_ai_provider(provider_id: str, admin=Depends(require_permission("settings"))):
+    provider = ai_support.CUSTOM_PREFIX + provider_id
+    keys = ai_support.resolve_provider_keys(db, provider)
+    url = ai_support.resolve_provider_url(db, provider)
+    model = ai_support.resolve_provider_model(db, provider)
+    if not keys or not url or not model:
+        raise HTTPException(404, tr("یافت نشد."))
+    try:
+        data = await ai_support._openai_chat(provider, keys[0], model, [{"role": "user", "content": "ping"}], [], url)
+    except Exception as exc:
+        raise HTTPException(502, str(exc)[:300])
+    reply = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    return {"ok": True, "reply": reply[:200]}
 
 
 class AiFaqItemBody(BaseModel):
