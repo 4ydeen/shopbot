@@ -264,7 +264,6 @@ DEFAULT_SETTINGS = {
     "gemini_api_key": "",  # کلید API دستیار هوشمند (Gemini)؛ از داخل بات (دستیار هوشمند → تنظیم کلید API) قابل تنظیم است
     "groq_api_key": "",
     "openrouter_api_key": "",
-    "github_models_api_key": "",
     "mistral_api_key": "",
     "cohere_api_key": "",
     "cloudflare_api_token": "",
