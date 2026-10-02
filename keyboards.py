@@ -955,26 +955,18 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(text=tr(ai_multi_toggle_text), callback_data="adm_receipt_ai_multi_toggle")])
         else:
             rows.append([InlineKeyboardButton(
-                text=tr("ℹ️ برای بررسی چندمدلی، حداقل یک ایجنت اضافی (Groq/OpenRouter در «دستیار هوشمند» یا ایجنت‌های زیر) را تنظیم کنید"),
+                text=tr("ℹ️ برای بررسی چندمدلی، حداقل یک ایجنت اضافی (Groq/OpenRouter/... در «ایجنت‌های هوش مصنوعی») را تنظیم کنید"),
                 callback_data="noop",
             )])
-        rows.append([InlineKeyboardButton(text=tr("🧾 ایجنت‌های اضافی تشخیص رسید"), callback_data="adm_receipt_agents")])
+        rows.append([InlineKeyboardButton(text=tr("🤖 تنظیم ایجنت‌های هوش مصنوعی (کلیدها)"), callback_data="adm_ai_agents")])
         rows.append([InlineKeyboardButton(text=tr("📊 آمار یادگیری تشخیص رسید"), callback_data="adm_receipt_ai_stats")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def receipt_agents_kb(db) -> InlineKeyboardMarkup:
-    """منوی کلیدهای ایجنت‌های اضافی تشخیص رسید (GitHub Models، Mistral، Cohere، Cloudflare)."""
-    import ai_support
-    rows = []
-    for agent_id, title, setting_key, env_name, _link, _secret in ai_support.RECEIPT_AGENT_FIELDS:
-        ok = ai_support.receipt_agent_configured(db, setting_key, env_name)
-        rows.append([InlineKeyboardButton(
-            text=tr(f"{'🟢' if ok else '⚪️'} {title}"), callback_data=f"adm_rcpt_agent:{agent_id}",
-        )])
-    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_set_card")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    """ایجنت‌های تشخیص رسید حالا در بخش «ایجنت‌های هوش مصنوعی» هستند."""
+    return ai_agents_hub_kb(db)
 
 
 def card_auto_settings_kb(db) -> InlineKeyboardMarkup:
@@ -1123,22 +1115,12 @@ def contact_menu_kb(db) -> InlineKeyboardMarkup:
 
 
 def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
-    """پنل کامل Agent چند-Provider برای ادمین."""
-    import ai_support
+    """منوی دستیار هوشمند پشتیبانی: فقط روشن/خاموش و سوالات متداول.
+    کلیدها، مدل‌ها و ارائه‌دهنده‌ها در بخش جدا «ایجنت‌های هوش مصنوعی» هستند."""
     ai_enabled = db.get_setting("ai_support_enabled", "1") == "1"
-    provider = ai_support.resolve_provider_mode(db)
     rows = [
-        [InlineKeyboardButton(text=tr(f"دستیار هوشمند: {'🟢 فعال' if ai_enabled else '🔴 غیرفعال'}"), callback_data="adm_ai_toggle")],
-        [InlineKeyboardButton(text=tr(f"🔀 مسیر مدل: {ai_support.PROVIDER_LABELS[provider]}"), callback_data="adm_ai_set_provider")],
-        [InlineKeyboardButton(text=tr("🔑 کلید Gemini"), callback_data="adm_ai_set_key")],
-        [InlineKeyboardButton(text=tr("🔑 کلید Groq"), callback_data="adm_ai_set_groq_key")],
-        [InlineKeyboardButton(text=tr("🔑 کلید OpenRouter"), callback_data="adm_ai_set_openrouter_key")],
-        [InlineKeyboardButton(text=tr("🔑 کلید OpenAI"), callback_data="adm_ai_set_openai_key"),
-         InlineKeyboardButton(text=tr("🧠 مدل OpenAI"), callback_data="adm_ai_set_modelname:openai")],
-        [InlineKeyboardButton(text=tr("🔑 کلید Claude"), callback_data="adm_ai_set_anthropic_key"),
-         InlineKeyboardButton(text=tr("🧠 مدل Claude"), callback_data="adm_ai_set_modelname:anthropic")],
-        [InlineKeyboardButton(text=tr("🔌 ارائه‌دهنده‌های سفارشی (API دلخواه)"), callback_data="adm_ai_custom")],
-        [InlineKeyboardButton(text=tr("🧠 انتخاب مدل"), callback_data="adm_ai_set_model")],
+        [InlineKeyboardButton(text=f"{tr('دستیار هوشمند')}: {tr('🟢 فعال') if ai_enabled else tr('🔴 غیرفعال')}", callback_data="adm_ai_toggle")],
+        [InlineKeyboardButton(text=tr("⚙️ تنظیم ایجنت‌های هوش مصنوعی (کلید و مدل)"), callback_data="adm_ai_agents")],
     ]
     for it in items:
         q = it["question"]
@@ -1273,6 +1255,60 @@ def tutorial_devices_user_kb(devices) -> InlineKeyboardMarkup:
 
 
 
+def ai_agents_hub_kb(db) -> InlineKeyboardMarkup:
+    """بخش جدا و یک‌جای «ایجنت‌های هوش مصنوعی»: مسیر/مدل، کلید ایجنت‌های چت،
+    ارائه‌دهنده‌های سفارشی و ایجنت‌های تشخیص رسید."""
+    import ai_support
+
+    def _dot(ok: bool) -> str:
+        return "🟢" if ok else "⚪️"
+
+    def _has(provider: str) -> bool:
+        try:
+            ok = bool(ai_support.resolve_provider_keys(db, provider))
+            if provider in ("openai", "anthropic"):
+                ok = ok and bool(ai_support.resolve_provider_model(db, provider))
+            return ok
+        except Exception:
+            return False
+
+    try:
+        provider_label = ai_support.PROVIDER_LABELS[ai_support.resolve_provider_mode(db)]
+    except Exception:
+        provider_label = ai_support.PROVIDER_LABELS.get("auto", "🤖 خودکار")
+    try:
+        custom_count = len([r for r in ai_support.custom_providers(db) if r["keys"] and r["model"]])
+    except Exception:
+        custom_count = 0
+
+    rows = [
+        [InlineKeyboardButton(text=f"{tr('🔀 مسیر مدل')}: {tr(provider_label)}", callback_data="adm_ai_set_provider")],
+        [InlineKeyboardButton(text=tr("🧠 انتخاب مدل (Gemini / Groq / OpenRouter)"), callback_data="adm_ai_set_model")],
+        [InlineKeyboardButton(text=tr("━━ ایجنت‌های چت، پشتیبانی و ابزارها ━━"), callback_data="noop")],
+        [InlineKeyboardButton(text=f"{_dot(_has('gemini'))} {tr('کلید Gemini')}", callback_data="adm_ai_set_key"),
+         InlineKeyboardButton(text=f"{_dot(_has('groq'))} {tr('کلید Groq')}", callback_data="adm_ai_set_groq_key")],
+        [InlineKeyboardButton(text=f"{_dot(_has('openrouter'))} {tr('کلید OpenRouter')}", callback_data="adm_ai_set_openrouter_key")],
+        [InlineKeyboardButton(text=f"{_dot(_has('openai'))} {tr('کلید OpenAI')}", callback_data="adm_ai_set_openai_key"),
+         InlineKeyboardButton(text=f"🧠 {tr('مدل OpenAI')}", callback_data="adm_ai_set_modelname:openai")],
+        [InlineKeyboardButton(text=f"{_dot(_has('anthropic'))} {tr('کلید Claude')}", callback_data="adm_ai_set_anthropic_key"),
+         InlineKeyboardButton(text=f"🧠 {tr('مدل Claude')}", callback_data="adm_ai_set_modelname:anthropic")],
+        [InlineKeyboardButton(text=f"{_dot(bool(custom_count))} {tr('ارائه‌دهنده‌های سفارشی (API دلخواه)')}: {custom_count}", callback_data="adm_ai_custom")],
+        [InlineKeyboardButton(text=tr("━━ ایجنت‌های تشخیص رسید ━━"), callback_data="noop")],
+    ]
+    pair = []
+    for agent_id, title, setting_key, env_name, _link, _secret in ai_support.RECEIPT_AGENT_FIELDS:
+        ok = ai_support.receipt_agent_configured(db, setting_key, env_name)
+        pair.append(InlineKeyboardButton(text=f"{_dot(ok)} {tr(title)}"[:60], callback_data=f"adm_rcpt_agent:{agent_id}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([InlineKeyboardButton(text=tr("🤖 دستیار هوشمند پشتیبانی (روشن/خاموش و سوالات متداول)"), callback_data="adm_ai_support_settings")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:access")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def ai_custom_providers_kb(db) -> InlineKeyboardMarkup:
     import ai_support
     rows = []
@@ -1283,7 +1319,7 @@ def ai_custom_providers_kb(db) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🗑", callback_data=f"adm_ai_cust_del:{row['id']}"),
         ])
     rows.append([InlineKeyboardButton(text=tr("➕ افزودن ارائه‌دهنده"), callback_data="adm_ai_cust_add")])
-    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_support_settings")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1293,8 +1329,8 @@ def ai_provider_choice_kb(db) -> InlineKeyboardMarkup:
     rows = []
     for provider, label in ai_support.PROVIDER_LABELS.items():
         mark = "✅ " if provider == current else ""
-        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_provider_pick:{provider}")])
-    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_support_settings")])
+        rows.append([InlineKeyboardButton(text=f"{mark}{tr(label)}", callback_data=f"adm_ai_provider_pick:{provider}")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1313,8 +1349,8 @@ def ai_model_choice_kb(db) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(text=title, callback_data="noop")])
             last_provider = provider
         mark = "✅ " if model_id == current[provider] else ""
-        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"adm_ai_model_pick:{provider}:{model_id}")])
-    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_support_settings")])
+        rows.append([InlineKeyboardButton(text=f"{mark}{tr(label)}", callback_data=f"adm_ai_model_pick:{provider}:{model_id}")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1516,6 +1552,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
     ("adm_set_support_contact", "📞 روش‌های ارتباط با پشتیبانی", "adm_set_support_contact"),
     ("adm_ai_support_settings", "🤖 دستیار هوشمند (سوالات متداول)", "adm_ai_support_settings"),
+    ("adm_ai_agents", "🧬 ایجنت‌های هوش مصنوعی", "adm_ai_agents"),
     ("adm_business_settings", "💼 تلگرام بیزنس", "adm_business_settings"),
     ("adm_translation_settings", "🌐 ترجمه خودکار", "adm_translation_settings"),
     ("adm_lang_settings", "🌐 زبان ادمین/کاربران", "adm_lang_settings"),
@@ -1613,6 +1650,7 @@ ADMIN_PANEL_CATEGORIES = [
     ("access", "👤 ادمین و دسترسی", [
         "adm_admins_menu",
         "adm_set_support_contact",
+        "adm_ai_agents",
         "adm_ai_support_settings",
         "adm_ai_admin_chat",
         "adm_business_settings",
