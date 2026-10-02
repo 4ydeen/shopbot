@@ -1520,6 +1520,23 @@ class OrdersMixin:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM discount_codes WHERE id=?", (code_id,))
 
+    def delete_all_discount_codes(self) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute("DELETE FROM discount_codes")
+            return cur.rowcount
+
+    def delete_discount_codes_by_category(self, category_id: int | None) -> int:
+        with self._get_conn() as conn:
+            if category_id is None:
+                cur = conn.execute(
+                    "DELETE FROM discount_codes WHERE category_id IS NULL OR category_id=0"
+                )
+            else:
+                cur = conn.execute(
+                    "DELETE FROM discount_codes WHERE category_id=?", (category_id,)
+                )
+            return cur.rowcount
+
 
     def increment_discount_usage(self, code_id: int):
         with self._get_conn() as conn:
