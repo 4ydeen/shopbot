@@ -7390,6 +7390,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             tr(f"✅ یادآوری روی {text} روز قبل از اتمام سرویس تنظیم شد."), reply_markup=kb.renewal_settings_kb(db)
         )
 
+    @router.callback_query(F.data == "adm_renewal_discount_toggle")
+    async def cb_admin_renewal_discount_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "renewal_send_discount_code", "1"))
+        await asyncio.to_thread(
+            db.set_setting, "renewal_send_discount_code", "0" if current == "1" else "1"
+        )
+        await safe_edit(call, tr("⏳ یادآوری تمدید:"), reply_markup=kb.renewal_settings_kb(db))
+        await call.answer("🎟 ارسال کد تخفیف " + ("روشن شد." if current != "1" else "خاموش شد."))
+
     @router.callback_query(F.data == "adm_renewal_edit_percent")
     async def cb_admin_renewal_edit_percent(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -7512,6 +7523,17 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await message.answer(
             tr(f"✅ آستانه‌ی یادآوری حجم روی {value} گیگ باقی‌مانده تنظیم شد."), reply_markup=kb.volume_reminder_settings_kb(db)
         )
+
+    @router.callback_query(F.data == "adm_volume_discount_toggle")
+    async def cb_admin_volume_discount_toggle(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, "volume_send_discount_code", "1"))
+        await asyncio.to_thread(
+            db.set_setting, "volume_send_discount_code", "0" if current == "1" else "1"
+        )
+        await safe_edit(call, tr("📉 یادآوری اتمام حجم:"), reply_markup=kb.volume_reminder_settings_kb(db))
+        await call.answer("🎟 ارسال کد تخفیف " + ("روشن شد." if current != "1" else "خاموش شد."))
 
     @router.callback_query(F.data == "adm_volume_edit_discount_percent")
     async def cb_admin_volume_edit_discount_percent(call: CallbackQuery, state: FSMContext):

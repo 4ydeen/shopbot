@@ -3569,6 +3569,7 @@ def renewal_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr(f"📅 چند روز قبل از اتمام سرویس: {s['days_before']} روز"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"🎟 درصد تخفیف کد تشویقی: {s['discount_percent']}٪"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"⏳ اعتبار کد تشویقی: {s['discount_expiry_hours']} ساعت"), callback_data="noop")],
+        [InlineKeyboardButton(text=tr(f"🎟 ارسال کد تخفیف: {'🟢 روشن' if s['send_discount_code'] else '🔴 خاموش'}"), callback_data="adm_renewal_discount_toggle")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_renewal_toggle")],
         [InlineKeyboardButton(text=tr("✏️ تغییر تعداد روز یادآوری"), callback_data="adm_renewal_edit_days")],
         [InlineKeyboardButton(text=tr("✏️ تغییر درصد تخفیف"), callback_data="adm_renewal_edit_percent")],
@@ -3599,6 +3600,7 @@ def volume_reminder_settings_kb(db) -> InlineKeyboardMarkup:
     rows += [
         [InlineKeyboardButton(text=tr(f"🎟 درصد تخفیف کد تشویقی: {s['discount_percent']}٪"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(f"⏳ اعتبار کد تشویقی: {s['discount_expiry_hours']} ساعت"), callback_data="noop")],
+        [InlineKeyboardButton(text=tr(f"🎟 ارسال کد تخفیف: {'🟢 روشن' if s['send_discount_code'] else '🔴 خاموش'}"), callback_data="adm_volume_discount_toggle")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_volume_toggle")],
         [InlineKeyboardButton(text=tr("✏️ تغییر درصد تخفیف"), callback_data="adm_volume_edit_discount_percent")],
         [InlineKeyboardButton(text=tr("✏️ تغییر اعتبار کد (ساعت)"), callback_data="adm_volume_edit_discount_hours")],
