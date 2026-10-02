@@ -3298,36 +3298,88 @@ def discount_code_constraints_line(c, db=None) -> str:
     return " | ".join(parts)
 
 
-def discount_codes_kb(codes, db=None) -> InlineKeyboardMarkup:
+def discount_codes_kb(codes=None, db=None) -> InlineKeyboardMarkup:
+    """منوی اصلی مدیریت کد تخفیف؛ لیست کدها فقط با «نمایش همه» باز می‌شود."""
+    rows = [
+        [InlineKeyboardButton(text=tr("📋 نمایش همه کدهای تخفیف"), callback_data="adm_disc_list:0")],
+        [InlineKeyboardButton(text=tr("🗑 حذف همه کدهای تخفیف"), callback_data="adm_disc_delete_all_confirm")],
+        [InlineKeyboardButton(text=tr("🗂 حذف کدهای تخفیف بر اساس دسته‌بندی"), callback_data="adm_disc_delete_category")],
+        [InlineKeyboardButton(text=tr("➕ ساخت کد تخفیف جدید"), callback_data="adm_disc_add")],
+        [InlineKeyboardButton(text=tr("🎯 کد تخفیف گروهی (بر اساس فیلتر)"), callback_data="adm_bulk_disc")],
+        [InlineKeyboardButton(text=tr("🎁 گیفت‌کدهای شارژ کیف پول"), callback_data="adm_gift_menu")],
+        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_codes_list_kb(codes, page: int = 0, per_page: int = 15) -> InlineKeyboardMarkup:
+    """نمایش صفحه‌ای کدهای تخفیف برای جلوگیری از شلوغ شدن منوی اصلی."""
     rows = []
-    for c in codes:
+    total = len(codes)
+    start = max(0, page) * per_page
+    chunk = codes[start:start + per_page]
+    for c in chunk:
         state_icon = "🟢" if c["is_active"] else "🔴"
         if c["percent"]:
             value_txt = f"{c['percent']}%"
         else:
             value_txt = f"{c['fixed_amount']:,}ت"
         usage_txt = f"{c['used_count']}/{c['max_uses'] if c['max_uses'] else '∞'}"
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=tr(f"{state_icon} {c['code']} | {value_txt} | استفاده: {usage_txt}"), callback_data="noop"
-                )
-            ]
-        )
-        constraints_txt = discount_code_constraints_line(c, db)
+        rows.append([InlineKeyboardButton(
+            text=tr(f"{state_icon} {c['code']} | {value_txt} | استفاده: {usage_txt}"),
+            callback_data="noop",
+        )])
+        constraints_txt = discount_code_constraints_line(c)
         if constraints_txt:
             rows.append([InlineKeyboardButton(text=f"ℹ️ {constraints_txt}", callback_data="noop")])
-        rows.append(
-            [
-                InlineKeyboardButton(text=tr("تغییر وضعیت"), callback_data=f"adm_disc_toggle:{c['id']}"),
-                InlineKeyboardButton(text=tr("🗑حذف"), callback_data=f"adm_disc_del:{c['id']}"),
-            ]
-        )
-    rows.append([InlineKeyboardButton(text=tr("➕ ساخت کد تخفیف جدید"), callback_data="adm_disc_add")])
-    rows.append([InlineKeyboardButton(text=tr("🎯 کد تخفیف گروهی (بر اساس فیلتر)"), callback_data="adm_bulk_disc")])
-    rows.append([InlineKeyboardButton(text=tr("🎁 گیفت‌کدهای شارژ کیف پول"), callback_data="adm_gift_menu")])
-    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")])
+        rows.append([
+            InlineKeyboardButton(text=tr("تغییر وضعیت"), callback_data=f"adm_disc_toggle:{c['id']}"),
+            InlineKeyboardButton(text=tr("🗑 حذف"), callback_data=f"adm_disc_del:{c['id']}"),
+        ])
+
+    if total == 0:
+        rows.append([InlineKeyboardButton(text=tr("هیچ کد تخفیفی وجود ندارد."), callback_data="noop")])
+    else:
+        page_count = (total + per_page - 1) // per_page
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text=tr("◀️ قبلی"), callback_data=f"adm_disc_list:{page-1}"))
+        nav.append(InlineKeyboardButton(text=tr(f"صفحه {page+1}/{page_count} | {total} کد"), callback_data="noop"))
+        if page + 1 < page_count:
+            nav.append(InlineKeyboardButton(text=tr("بعدی ▶️"), callback_data=f"adm_disc_list:{page+1}"))
+        rows.append(nav)
+
+    rows.append([InlineKeyboardButton(text=tr("🗑 حذف همه"), callback_data="adm_disc_delete_all_confirm")])
+    rows.append([InlineKeyboardButton(text=tr("🗂 حذف بر اساس دسته‌بندی"), callback_data="adm_disc_delete_category")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت به مدیریت کدها"), callback_data="adm_discounts_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_delete_category_kb(categories) -> InlineKeyboardMarkup:
+    rows = []
+    for c in categories:
+        name = c["name"] if "name" in c.keys() else str(c["id"])
+        rows.append([InlineKeyboardButton(
+            text=tr(f"🗂 {name}"), callback_data=f"adm_disc_delete_category_confirm:{c['id']}"
+        )])
+    rows.append([InlineKeyboardButton(
+        text=tr("📁 کدهای بدون دسته‌بندی"), callback_data="adm_disc_delete_category_confirm:0"
+    )])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_discounts_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def discount_delete_confirm_kb(action: str, value: str = "") -> InlineKeyboardMarkup:
+    if action == "all":
+        yes = "adm_disc_delete_all"
+        back = "adm_discounts_menu"
+    else:
+        yes = f"adm_disc_delete_category:{value}"
+        back = "adm_disc_delete_category"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("⚠️ بله، حذف شود"), callback_data=yes)],
+        [InlineKeyboardButton(text=tr("⬅️ انصراف"), callback_data=back)],
+    ])
 
 
 BULK_DISCOUNT_FILTER_OPTIONS = [

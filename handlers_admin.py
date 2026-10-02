@@ -4167,9 +4167,103 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_discounts_menu(call: CallbackQuery):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
-        await replace_admin_view(call, tr("🎟 مدیریت کدهای تخفیف:"), reply_markup=kb.discount_codes_kb(codes, db))
+        await replace_admin_view(call, tr("🎟 مدیریت کدهای تخفیف\n\nیک عملیات را انتخاب کنید:"), reply_markup=kb.discount_codes_kb())
         await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_disc_list:"))
+    async def cb_admin_disc_list(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            page = max(0, int(call.data.split(":", 1)[1]))
+        except Exception:
+            page = 0
+        codes = await asyncio.to_thread(db.list_discount_codes)
+        await replace_admin_view(
+            call,
+            tr(f"📋 همه کدهای تخفیف\n\nتعداد کل: {len(codes)}"),
+            reply_markup=kb.discount_codes_list_kb(codes, page),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_disc_delete_all_confirm")
+    async def cb_admin_disc_delete_all_confirm(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        codes = await asyncio.to_thread(db.list_discount_codes)
+        if not codes:
+            await call.answer(tr("هیچ کد تخفیفی برای حذف وجود ندارد."), show_alert=True)
+            return
+        await replace_admin_view(
+            call,
+            tr(f"⚠️ حذف همه کدهای تخفیف\n\nتعداد کدهای موجود: {len(codes)}\n\nآیا مطمئن هستید؟"),
+            reply_markup=kb.discount_delete_confirm_kb("all"),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_disc_delete_all")
+    async def cb_admin_disc_delete_all(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        count = await asyncio.to_thread(db.delete_all_discount_codes)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_delete_all", f"حذف همه کدهای تخفیف ({count})")
+        await replace_admin_view(
+            call, tr(f"🎟 مدیریت کدهای تخفیف\n\n✅ {count} کد تخفیف حذف شد."),
+            reply_markup=kb.discount_codes_kb(),
+        )
+        await call.answer(tr("کدها حذف شدند."))
+
+    @router.callback_query(F.data == "adm_disc_delete_category")
+    async def cb_admin_disc_delete_category(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        categories = await asyncio.to_thread(db.get_categories, active_only=False)
+        await replace_admin_view(
+            call,
+            tr("🗂 دسته‌بندی موردنظر برای حذف کدهای تخفیف را انتخاب کنید:"),
+            reply_markup=kb.discount_delete_category_kb(categories),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_disc_delete_category_confirm:"))
+    async def cb_admin_disc_delete_category_confirm(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        raw = call.data.split(":", 1)[1]
+        try:
+            category_id = int(raw)
+        except Exception:
+            await call.answer(tr("درخواست نامعتبر است."), show_alert=True)
+            return
+        category_label = "بدون دسته‌بندی"
+        if category_id:
+            categories = await asyncio.to_thread(db.get_categories, active_only=False)
+            row = next((c for c in categories if int(c["id"]) == category_id), None)
+            if row:
+                category_label = row["name"]
+        await replace_admin_view(
+            call,
+            tr(f"⚠️ حذف کدهای تخفیف دسته «{category_label}»\n\nتمام کدهای این دسته حذف خواهند شد.\nآیا مطمئن هستید؟"),
+            reply_markup=kb.discount_delete_confirm_kb("category", str(category_id)),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_disc_delete_category:"))
+    async def cb_admin_disc_delete_category_run(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            category_id = int(call.data.split(":", 1)[1])
+        except Exception:
+            await call.answer(tr("درخواست نامعتبر است."), show_alert=True)
+            return
+        count = await asyncio.to_thread(db.delete_discount_codes_by_category, None if category_id == 0 else category_id)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_delete_category", f"حذف کدهای دسته {category_id} ({count})")
+        await replace_admin_view(
+            call, tr(f"🎟 مدیریت کدهای تخفیف\n\n✅ {count} کد تخفیف حذف شد."),
+            reply_markup=kb.discount_codes_kb(),
+        )
+        await call.answer(tr("کدها حذف شدند."))
 
     @router.callback_query(F.data.startswith("adm_disc_toggle:"))
     async def cb_admin_disc_toggle(call: CallbackQuery):
@@ -4181,8 +4275,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         (await asyncio.to_thread(db.toggle_discount_code, code_id))
         (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_toggle", f"کد تخفیف #{code_id}"))
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
-        await safe_edit(call, db.get_text('handlers_admin.auto_e7be342a', '🎟 مدیریت کدهای تخفیف:'), reply_markup=kb.discount_codes_kb(codes, db))
+        await safe_edit(call, db.get_text('handlers_admin.auto_e7be342a', '🎟 مدیریت کدهای تخفیف:'), reply_markup=kb.discount_codes_kb())
         await call.answer(db.get_text('handlers_admin.auto_d5ebb39c', 'وضعیت تغییر کرد.'))
 
     @router.callback_query(F.data.startswith("adm_disc_del:"))
@@ -4195,8 +4288,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return
         (await asyncio.to_thread(db.delete_discount_code, code_id))
         (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_delete", f"کد تخفیف #{code_id}"))
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
-        await safe_edit(call, db.get_text('handlers_admin.auto_e7be342a', '🎟 مدیریت کدهای تخفیف:'), reply_markup=kb.discount_codes_kb(codes, db))
+        await safe_edit(call, db.get_text('handlers_admin.auto_e7be342a', '🎟 مدیریت کدهای تخفیف:'), reply_markup=kb.discount_codes_kb())
         await call.answer(db.get_text('handlers_admin.auto_dd808d7a', 'کد حذف شد.'))
 
     @router.callback_query(F.data == "adm_disc_add")
@@ -4440,8 +4532,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         ))
         (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "discount_add", f"کد «{data['disc_code']}»"))
         await state.clear()
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
-        await call.message.answer(tr(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد."), reply_markup=kb.discount_codes_kb(codes, db))
+        await call.message.answer(tr(f"✅ کد تخفیف «{data['disc_code']}» ساخته شد."), reply_markup=kb.discount_codes_kb())
         await call.answer()
 
     # -------------------------------------------------------------------
@@ -4571,7 +4662,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await state.clear()
             await message.answer(
                 tr("⚠️ هیچ کاربری با این فیلتر(ها) پیدا نشد؛ کدی ساخته نشد."),
-                reply_markup=kb.discount_codes_kb((await asyncio.to_thread(db.list_discount_codes, "bulk_admin")), db),
+                reply_markup=kb.discount_codes_kb(),
             )
             return
         await state.update_data(bulk_disc_expires_at=expires_at, bulk_disc_user_ids=user_ids)
@@ -4634,17 +4725,15 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             db.log_admin_action, call.from_user.id, "bulk_discount",
             f"کد تخفیف گروهی ({filters_label}) برای {len(pairs)} کاربر ساخته شد | تخفیف: {value_txt} | ارسال موفق: {success} | ناموفق: {failed}",
         ))
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
         await call.message.answer(
             tr(f"✅ {len(pairs)} کد تخفیف ساخته شد.\n📤 ارسال موفق: {success}\n❌ ارسال ناموفق: {failed}"),
-            reply_markup=kb.discount_codes_kb(codes, db),
+            reply_markup=kb.discount_codes_kb(),
         )
 
     @router.callback_query(F.data == "adm_bulk_disc_cancel")
     async def cb_admin_bulk_disc_cancel(call: CallbackQuery, state: FSMContext):
         await state.clear()
-        codes = (await asyncio.to_thread(db.list_discount_codes, "bulk_admin"))
-        await replace_admin_view(call, tr("🎟 مدیریت کدهای تخفیف:"), reply_markup=kb.discount_codes_kb(codes, db))
+        await replace_admin_view(call, tr("🎟 مدیریت کدهای تخفیف:"), reply_markup=kb.discount_codes_kb())
         await call.answer()
 
     @router.callback_query(F.data == "adm_gift_menu")
