@@ -1,6 +1,7 @@
 """Image and voice understanding for the AI assistants (Gemini multimodal)."""
 
 import asyncio
+import base64
 import logging
 
 import ai_support
@@ -64,6 +65,53 @@ async def _gemini_media_text(db, data: bytes, mime_type: str, prompt: str) -> st
     raise last_exc or MediaError("gemini_failed")
 
 
+_CHAT_VISION_PROVIDERS = ("openai", "anthropic")
+
+
+async def _chat_image_text(db, data: bytes, mime_type: str, prompt: str) -> str:
+    providers = [p for p in ai_support.configured_providers(db)
+                 if p in _CHAT_VISION_PROVIDERS or p.startswith(ai_support.CUSTOM_PREFIX)]
+    if not providers:
+        raise MediaError("no_gemini_key")
+    data_url = f"data:{mime_type};base64,{base64.b64encode(data).decode()}"
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]}]
+    last_exc = None
+    for provider in providers:
+        url = ai_support.resolve_provider_url(db, provider)
+        model = ai_support.resolve_provider_model(db, provider)
+        for api_key in ai_support.resolve_provider_keys(db, provider):
+            try:
+                resp = await ai_support._openai_chat(provider, api_key, model, messages, [], url)
+                content = (((resp.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+                if isinstance(content, list):
+                    content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+                if content.strip():
+                    return content.strip()
+            except Exception as exc:
+                last_exc = exc
+                _log.warning("ai_media: %s image analysis failed: %s", provider, exc)
+    raise last_exc or MediaError("unreadable")
+
+
+async def _image_text(db, data: bytes, mime_type: str, prompt: str) -> str:
+    gemini_exc = None
+    if ai_support.resolve_gemini_keys(db):
+        try:
+            return await _gemini_media_text(db, data, mime_type, prompt)
+        except Exception as exc:
+            gemini_exc = exc
+            _log.warning("ai_media: Gemini image analysis failed, trying other providers: %s", exc)
+    try:
+        return await _chat_image_text(db, data, mime_type, prompt)
+    except MediaError:
+        if gemini_exc is not None:
+            raise gemini_exc
+        raise
+
+
 def has_media(message) -> bool:
     if message.voice or message.audio or message.photo:
         return True
@@ -97,7 +145,7 @@ async def message_to_text(bot, db, message) -> str:
         if (media.file_size or 0) > MAX_IMAGE_BYTES:
             raise MediaError("too_large")
         data = await _download(bot, media.file_id)
-        desc = await _gemini_media_text(db, data, mime, _IMAGE_PROMPT)
+        desc = await _image_text(db, data, mime, _IMAGE_PROMPT)
         if not desc:
             raise MediaError("unreadable")
         caption = (message.caption or "").strip()

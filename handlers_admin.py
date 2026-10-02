@@ -118,6 +118,10 @@ from states import (
     AdminSetGeminiKey,
     AdminSetGroqKey,
     AdminSetOpenRouterKey,
+    AdminSetOpenAIKey,
+    AdminSetAnthropicKey,
+    AdminSetAIModelName,
+    AdminAICustomProviderAdd,
     AdminSetReceiptAgentKey,
     AdminSetTranslationGeminiKey,
     AdminSetTranslationOpenRouterKey,
@@ -11393,12 +11397,24 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except Exception:
             provider_label = "🤖 خودکار"
         statuses = []
-        for name, label in (("gemini", "Gemini"), ("groq", "Groq"), ("openrouter", "OpenRouter")):
+        for name, label in (("gemini", "Gemini"), ("groq", "Groq"), ("openrouter", "OpenRouter"), ("openai", "OpenAI"), ("anthropic", "Claude")):
             try:
                 configured = bool(ai_support.resolve_provider_keys(db, name))
+                if name in ("openai", "anthropic"):
+                    configured = configured and bool(ai_support.resolve_provider_model(db, name))
             except Exception:
                 configured = False
             statuses.append(f"{'🟢' if configured else '⚪️'} {label}")
+        try:
+            custom_count = len([r for r in ai_support.custom_providers(db) if r["keys"] and r["model"]])
+        except Exception:
+            custom_count = 0
+        statuses.append(f"{'🟢' if custom_count else '⚪️'} {tr('سفارشی')}: {custom_count}")
+        try:
+            openai_model = ai_support.resolve_openai_model(db) or "—"
+            anthropic_model = ai_support.resolve_anthropic_model(db) or "—"
+        except Exception:
+            openai_model = anthropic_model = "—"
         try:
             gemini_model = ai_support.resolve_gemini_model(db)
         except Exception:
@@ -11417,7 +11433,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"{' | '.join(statuses)}\n\n"
             f"🧠 Gemini: {gemini_model}\n"
             f"🚀 Groq: {groq_model}\n"
-            f"🌐 OpenRouter: {openrouter_model}\n\n"
+            f"🌐 OpenRouter: {openrouter_model}\n"
+            f"🟢 OpenAI: {openai_model}\n"
+            f"🟠 Claude: {anthropic_model}\n\n"
             "📖 راهنمای مدیر\n"
             "🔷 Gemini: https://aistudio.google.com/ — ورود و ساخت API Key\n"
             "🚀 Groq: https://console.groq.com/ — ورود و ساخت API Key\n"
@@ -11450,7 +11468,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_ai_set_provider(call: CallbackQuery):
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
-        await replace_admin_view(call, tr("🔀 مسیر انتخاب مدل\n\n«خودکار» بهترین حالت است: به‌ترتیب Gemini → Groq → OpenRouter را امتحان می‌کند و با خطای سهمیه/اختلال به بعدی می‌رود."), reply_markup=kb.ai_provider_choice_kb(db))
+        await replace_admin_view(call, tr("🔀 مسیر انتخاب مدل\n\n«خودکار» بهترین حالت است: همه ارائه‌دهنده‌های تنظیم‌شده را به‌ترتیب امتحان می‌کند و با خطای سهمیه/اختلال به بعدی می‌رود."), reply_markup=kb.ai_provider_choice_kb(db))
         await call.answer()
 
     @router.callback_query(F.data.startswith("adm_ai_provider_pick:"))
@@ -11497,6 +11515,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "GEMINI_API_KEY": "https://aistudio.google.com/",
             "GROQ_API_KEY": "https://console.groq.com/",
             "OPENROUTER_API_KEY": "https://openrouter.ai/",
+            "OPENAI_API_KEY": "https://platform.openai.com/api-keys",
+            "ANTHROPIC_API_KEY": "https://console.anthropic.com/",
         }
         link = links.get(source_env, "")
         guide = f"\n🔗 راهنما/ثبت‌نام: {link}" if link else ""
@@ -11522,6 +11542,155 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_ai_set_openrouter_key(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id): return await deny_support(call)
         await _show_ai_key_prompt(call, state, "openrouter", AdminSetOpenRouterKey, "openrouter_api_key", "🔑 کلیدهای OpenRouter", "OPENROUTER_API_KEY")
+
+    @router.callback_query(F.data == "adm_ai_set_openai_key")
+    async def cb_admin_ai_set_openai_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_key_prompt(call, state, "openai", AdminSetOpenAIKey, "openai_api_key", "🔑 کلیدهای OpenAI", "OPENAI_API_KEY")
+
+    @router.callback_query(F.data == "adm_ai_set_anthropic_key")
+    async def cb_admin_ai_set_anthropic_key(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_key_prompt(call, state, "anthropic", AdminSetAnthropicKey, "anthropic_api_key", "🔑 کلیدهای Claude", "ANTHROPIC_API_KEY")
+
+    @router.callback_query(F.data.startswith("adm_ai_set_modelname:"))
+    async def cb_admin_ai_set_modelname(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        provider = call.data.split(":", 1)[1]
+        if provider not in ("openai", "anthropic"):
+            return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
+        current = ai_support.resolve_provider_model(db, provider) or "—"
+        await state.set_state(AdminSetAIModelName.waiting_model)
+        await state.update_data(ai_model_provider=provider)
+        label = "OpenAI" if provider == "openai" else "Claude"
+        await replace_admin_view(
+            call,
+            tr(f"🧠 نام مدل {label}\n\nنام دقیق مدل را مطابق مستندات رسمی بفرست.\n\nمدل فعلی: {current}"),
+            reply_markup=kb.admin_back_kb("adm_ai_support_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminSetAIModelName.waiting_model)
+    async def process_set_ai_model_name(message: Message, state: FSMContext):
+        data = await state.get_data()
+        provider = data.get("ai_model_provider")
+        model = (message.text or "").strip()
+        if provider not in ("openai", "anthropic") or not model or len(model) > 120 or any(ch.isspace() for ch in model):
+            await message.answer(tr("⚠️ نام مدل نامعتبر است؛ دوباره بفرست."))
+            return
+        await state.clear()
+        await asyncio.to_thread(db.set_setting, f"{provider}_model", model)
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "ai_model_change", f"{provider}: {model}")
+        await message.answer(tr(f"✅ مدل روی «{model}» تنظیم شد."), reply_markup=kb.ai_faq_admin_kb(db, await asyncio.to_thread(db.get_ai_faq_items)))
+
+    async def _show_ai_custom_menu(call: CallbackQuery):
+        rows = ai_support.custom_providers(db)
+        text = (
+            "🔌 ارائه‌دهنده‌های سفارشی\n\n"
+            "هر سرویسی که API سازگار با OpenAI دارد (نمایندگی‌های فروش API، گیت‌وی‌ها، سرور شخصی) را می‌توانی با آدرس پایه، مدل و کلید اضافه کنی. "
+            "این ارائه‌دهنده‌ها در همه‌ی بخش‌های هوش مصنوعی ربات استفاده می‌شوند.\n\n"
+            "🧪 تست اتصال | 🗑 حذف"
+        )
+        if not rows:
+            text += "\n\nهنوز موردی اضافه نشده."
+        await replace_admin_view(call, tr(text), reply_markup=kb.ai_custom_providers_kb(db))
+
+    @router.callback_query(F.data == "adm_ai_custom")
+    async def cb_admin_ai_custom(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await _show_ai_custom_menu(call)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_cust_add")
+    async def cb_admin_ai_cust_add(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        if len(ai_support.custom_providers(db)) >= 10:
+            return await call.answer(tr("حداکثر ۱۰ ارائه‌دهنده مجاز است."), show_alert=True)
+        await state.set_state(AdminAICustomProviderAdd.waiting_name)
+        await replace_admin_view(call, tr("🔌 نام ارائه‌دهنده را بفرست (مثلاً My Gateway):"), reply_markup=kb.admin_back_kb("adm_ai_custom"))
+        await call.answer()
+
+    @router.message(AdminAICustomProviderAdd.waiting_name)
+    async def process_ai_cust_name(message: Message, state: FSMContext):
+        name = (message.text or "").strip()
+        if not name or len(name) > 40:
+            await message.answer(tr("⚠️ نام باید بین ۱ تا ۴۰ کاراکتر باشد."))
+            return
+        await state.update_data(cust_name=name)
+        await state.set_state(AdminAICustomProviderAdd.waiting_url)
+        await message.answer(tr("🔗 آدرس پایه API را بفرست (مثلاً https://api.example.com/v1):"))
+
+    @router.message(AdminAICustomProviderAdd.waiting_url)
+    async def process_ai_cust_url(message: Message, state: FSMContext):
+        url = (message.text or "").strip()
+        if not ai_support.normalize_chat_url(url):
+            await message.answer(tr("⚠️ آدرس باید با http:// یا https:// شروع شود."))
+            return
+        await state.update_data(cust_url=url)
+        await state.set_state(AdminAICustomProviderAdd.waiting_model)
+        await message.answer(tr("🧠 نام مدل را دقیقاً مطابق مستندات آن سرویس بفرست:"))
+
+    @router.message(AdminAICustomProviderAdd.waiting_model)
+    async def process_ai_cust_model(message: Message, state: FSMContext):
+        model = (message.text or "").strip()
+        if not model or len(model) > 120 or any(ch.isspace() for ch in model):
+            await message.answer(tr("⚠️ نام مدل نامعتبر است؛ دوباره بفرست."))
+            return
+        await state.update_data(cust_model=model)
+        await state.set_state(AdminAICustomProviderAdd.waiting_key)
+        await message.answer(tr("🔑 کلید API را بفرست (برای چند کلید، هر کدام در یک خط). پیام بعد از ذخیره پاک می‌شود:"))
+
+    @router.message(AdminAICustomProviderAdd.waiting_key)
+    async def process_ai_cust_key(message: Message, state: FSMContext):
+        keys = ai_support._split_keys(message.text or "")
+        if not keys:
+            await message.answer(tr("⚠️ کلید نامعتبر است؛ دوباره بفرست."))
+            return
+        data = await state.get_data()
+        await state.clear()
+        rows = ai_support.custom_providers(db)
+        name = data["cust_name"]
+        slug = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-")[:24] or "provider"
+        taken = {r["id"] for r in rows}
+        pid, n = slug, 2
+        while pid in taken:
+            pid = f"{slug}-{n}"
+            n += 1
+        rows.append({"id": pid, "name": name, "base_url": data["cust_url"], "model": data["cust_model"], "api_key": "\n".join(keys)})
+        await asyncio.to_thread(ai_support.save_custom_providers, db, rows)
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "ai_provider_add", f"ارائه‌دهنده سفارشی: {name}")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(tr(f"✅ «{name}» اضافه شد. با دکمه‌ی 🧪 اتصالش را تست کن."), reply_markup=kb.ai_custom_providers_kb(db))
+
+    @router.callback_query(F.data.startswith("adm_ai_cust_del:"))
+    async def cb_admin_ai_cust_del(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        pid = call.data.split(":", 1)[1]
+        rows = ai_support.custom_providers(db)
+        await asyncio.to_thread(ai_support.save_custom_providers, db, [r for r in rows if r["id"] != pid])
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_provider_delete", pid)
+        await _show_ai_custom_menu(call)
+        await call.answer(db.get_text('handlers_admin.auto_0479b78b', '✅ ذخیره شد'))
+
+    @router.callback_query(F.data.startswith("adm_ai_cust_test:"))
+    async def cb_admin_ai_cust_test(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        provider = ai_support.CUSTOM_PREFIX + call.data.split(":", 1)[1]
+        keys = ai_support.resolve_provider_keys(db, provider)
+        url = ai_support.resolve_provider_url(db, provider)
+        model = ai_support.resolve_provider_model(db, provider)
+        if not keys or not url or not model:
+            return await call.answer(tr("❌ ارائه‌دهنده پیدا نشد."), show_alert=True)
+        await call.answer(tr("⏳ در حال تست..."))
+        try:
+            resp = await ai_support._openai_chat(provider, keys[0], model, [{"role": "user", "content": "ping"}], [], url)
+            reply = (((resp.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+            await call.message.answer(tr(f"✅ اتصال موفق بود.\nپاسخ: {reply[:200] or '(خالی)'}"))
+        except Exception as exc:
+            await call.message.answer(tr(f"❌ تست ناموفق: {str(exc)[:300]}"))
 
     @router.callback_query(F.data == "adm_translation_settings")
     async def cb_admin_translation_settings(call: CallbackQuery):
@@ -11780,6 +11949,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     @router.message(AdminSetOpenRouterKey.waiting_key)
     async def process_set_openrouter_key(message: Message, state: FSMContext):
         await _save_ai_key(message, state, "openrouter_api_key", "openrouter_key_change")
+
+    @router.message(AdminSetOpenAIKey.waiting_key)
+    async def process_set_openai_key(message: Message, state: FSMContext):
+        await _save_ai_key(message, state, "openai_api_key", "openai_key_change")
+
+    @router.message(AdminSetAnthropicKey.waiting_key)
+    async def process_set_anthropic_key(message: Message, state: FSMContext):
+        await _save_ai_key(message, state, "anthropic_api_key", "anthropic_key_change")
 
     @router.callback_query(F.data == "adm_ai_faq_add")
     async def cb_admin_ai_faq_add(call: CallbackQuery, state: FSMContext):

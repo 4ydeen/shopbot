@@ -921,6 +921,8 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
     import ai_support
     extra_providers_configured = bool(
         ai_support.resolve_groq_keys(db) or ai_support.resolve_openrouter_keys(db)
+        or any(ai_support.resolve_provider_model(db, p) and ai_support.resolve_provider_keys(db, p) for p in ("openai", "anthropic"))
+        or any(r["model"] and r["keys"] for r in ai_support.custom_providers(db))
         or ai_support.resolve_github_keys(db) or ai_support.resolve_mistral_keys(db)
         or ai_support.resolve_cohere_keys(db)
         or (ai_support.resolve_cloudflare_keys(db) and ai_support.resolve_cloudflare_account_id(db))
@@ -1131,6 +1133,11 @@ def ai_faq_admin_kb(db, items) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr("🔑 کلید Gemini"), callback_data="adm_ai_set_key")],
         [InlineKeyboardButton(text=tr("🔑 کلید Groq"), callback_data="adm_ai_set_groq_key")],
         [InlineKeyboardButton(text=tr("🔑 کلید OpenRouter"), callback_data="adm_ai_set_openrouter_key")],
+        [InlineKeyboardButton(text=tr("🔑 کلید OpenAI"), callback_data="adm_ai_set_openai_key"),
+         InlineKeyboardButton(text=tr("🧠 مدل OpenAI"), callback_data="adm_ai_set_modelname:openai")],
+        [InlineKeyboardButton(text=tr("🔑 کلید Claude"), callback_data="adm_ai_set_anthropic_key"),
+         InlineKeyboardButton(text=tr("🧠 مدل Claude"), callback_data="adm_ai_set_modelname:anthropic")],
+        [InlineKeyboardButton(text=tr("🔌 ارائه‌دهنده‌های سفارشی (API دلخواه)"), callback_data="adm_ai_custom")],
         [InlineKeyboardButton(text=tr("🧠 انتخاب مدل"), callback_data="adm_ai_set_model")],
     ]
     for it in items:
@@ -1264,6 +1271,20 @@ def tutorial_devices_user_kb(devices) -> InlineKeyboardMarkup:
 
 
 
+
+
+def ai_custom_providers_kb(db) -> InlineKeyboardMarkup:
+    import ai_support
+    rows = []
+    for row in ai_support.custom_providers(db):
+        rows.append([
+            InlineKeyboardButton(text=f"🔌 {row['name']} ({row['model']})"[:60], callback_data="noop"),
+            InlineKeyboardButton(text="🧪", callback_data=f"adm_ai_cust_test:{row['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"adm_ai_cust_del:{row['id']}"),
+        ])
+    rows.append([InlineKeyboardButton(text=tr("➕ افزودن ارائه‌دهنده"), callback_data="adm_ai_cust_add")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_support_settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def ai_provider_choice_kb(db) -> InlineKeyboardMarkup:

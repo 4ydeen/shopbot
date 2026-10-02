@@ -99,6 +99,25 @@ class AdminSetOpenRouterKey(StatesGroup):
     waiting_key = State()
 
 
+class AdminSetOpenAIKey(StatesGroup):
+    waiting_key = State()
+
+
+class AdminSetAnthropicKey(StatesGroup):
+    waiting_key = State()
+
+
+class AdminSetAIModelName(StatesGroup):
+    waiting_model = State()
+
+
+class AdminAICustomProviderAdd(StatesGroup):
+    waiting_name = State()
+    waiting_url = State()
+    waiting_model = State()
+    waiting_key = State()
+
+
 class AdminSetReceiptAgentKey(StatesGroup):
     waiting_key = State()
 

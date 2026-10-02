@@ -29,6 +29,7 @@
 import asyncio
 import logging
 import json
+import re
 from datetime import datetime, timezone
 
 import aiohttp
@@ -63,10 +64,13 @@ MODEL_CHOICES = [
 ]
 
 PROVIDER_LABELS = {
-    "auto": "🤖 خودکار (Gemini → Groq → OpenRouter)",
+    "auto": "🤖 خودکار (همه ارائه‌دهنده‌های تنظیم‌شده)",
     "gemini": "🔷 فقط Gemini",
     "groq": "🚀 فقط Groq",
     "openrouter": "🌐 فقط OpenRouter",
+    "openai": "🟢 فقط OpenAI",
+    "anthropic": "🟠 فقط Claude (Anthropic)",
+    "custom": "🔌 فقط ارائه‌دهنده‌های سفارشی",
 }
 
 
@@ -99,6 +103,28 @@ def resolve_groq_model(db) -> str:
 
 def resolve_openrouter_model(db) -> str:
     return _setting(db, "openrouter_model", "openrouter/free")
+
+
+def resolve_openai_model(db) -> str:
+    return _setting(db, "openai_model")
+
+
+def resolve_anthropic_model(db) -> str:
+    return _setting(db, "anthropic_model")
+
+
+CUSTOM_PREFIX = "custom:"
+_CUSTOM_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+_OPENAI_COMPAT_URLS = {
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "anthropic": "https://api.anthropic.com/v1/chat/completions",
+}
+_PROVIDER_NAMES = {
+    "gemini": "Gemini", "groq": "Groq", "openrouter": "OpenRouter",
+    "openai": "OpenAI", "anthropic": "Claude",
+}
 
 
 def _split_keys(raw: str) -> list:
@@ -179,23 +205,119 @@ def resolve_gemini_key_source(db) -> str:
     return "none"
 
 
+def resolve_openai_keys(db) -> list:
+    keys = _split_keys(_setting(db, "openai_api_key"))
+    return keys or _split_keys(getattr(config, "OPENAI_API_KEY", ""))
+
+
+def resolve_anthropic_keys(db) -> list:
+    keys = _split_keys(_setting(db, "anthropic_api_key"))
+    return keys or _split_keys(getattr(config, "ANTHROPIC_API_KEY", ""))
+
+
+def normalize_chat_url(base_url) -> str:
+    url = str(base_url or "").strip().rstrip("/")
+    if not url.lower().startswith(("http://", "https://")):
+        return ""
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    return url
+
+
+def custom_providers(db) -> list:
+    try:
+        rows = json.loads(_setting(db, "ai_custom_providers", "[]") or "[]")
+    except json.JSONDecodeError:
+        return []
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id") or "")
+        url = normalize_chat_url(row.get("base_url"))
+        if not _CUSTOM_ID_RE.match(pid) or not url:
+            continue
+        out.append({
+            "id": pid,
+            "name": str(row.get("name") or pid)[:40],
+            "base_url": str(row.get("base_url") or "").strip(),
+            "url": url,
+            "api_key": str(row.get("api_key") or ""),
+            "keys": _split_keys(str(row.get("api_key") or "")),
+            "model": str(row.get("model") or "").strip(),
+        })
+    return out
+
+
+def save_custom_providers(db, rows: list) -> None:
+    keep = ("id", "name", "base_url", "api_key", "model")
+    db.set_setting("ai_custom_providers", json.dumps([{k: r.get(k, "") for k in keep} for r in rows], ensure_ascii=False))
+
+
+def _custom_entry(db, provider: str):
+    pid = provider[len(CUSTOM_PREFIX):]
+    return next((r for r in custom_providers(db) if r["id"] == pid), None)
+
+
 def resolve_provider_keys(db, provider: str) -> list:
+    if provider.startswith(CUSTOM_PREFIX):
+        entry = _custom_entry(db, provider)
+        return entry["keys"] if entry else []
     return {
         "gemini": resolve_gemini_keys,
         "groq": resolve_groq_keys,
         "openrouter": resolve_openrouter_keys,
+        "openai": resolve_openai_keys,
+        "anthropic": resolve_anthropic_keys,
     }.get(provider, lambda _db: [])(db)
 
 
+def resolve_provider_url(db, provider: str) -> str:
+    if provider.startswith(CUSTOM_PREFIX):
+        entry = _custom_entry(db, provider)
+        return entry["url"] if entry else ""
+    return _OPENAI_COMPAT_URLS.get(provider, "")
+
+
+def resolve_provider_model(db, provider: str) -> str:
+    if provider.startswith(CUSTOM_PREFIX):
+        entry = _custom_entry(db, provider)
+        return entry["model"] if entry else ""
+    return {
+        "gemini": resolve_gemini_model,
+        "groq": resolve_groq_model,
+        "openrouter": resolve_openrouter_model,
+        "openai": resolve_openai_model,
+        "anthropic": resolve_anthropic_model,
+    }.get(provider, lambda _db: "")(db)
+
+
+def provider_display_name(db, provider: str) -> str:
+    if provider.startswith(CUSTOM_PREFIX):
+        entry = _custom_entry(db, provider)
+        return entry["name"] if entry else provider
+    return _PROVIDER_NAMES.get(provider, provider)
+
+
 def configured_providers(db) -> list:
-    return [p for p in ("gemini", "groq", "openrouter") if resolve_provider_keys(db, p)]
+    pool = [p for p in ("gemini", "groq", "openrouter") if resolve_provider_keys(db, p)]
+    pool += [p for p in ("openai", "anthropic") if resolve_provider_keys(db, p) and resolve_provider_model(db, p)]
+    pool += [CUSTOM_PREFIX + r["id"] for r in custom_providers(db) if r["keys"] and r["model"]]
+    return pool
+
+
+def active_providers(db) -> list:
+    mode = resolve_provider_mode(db)
+    pool = configured_providers(db)
+    if mode == "auto":
+        return pool
+    if mode == "custom":
+        return [p for p in pool if p.startswith(CUSTOM_PREFIX)]
+    return [mode] if mode in pool else []
 
 
 def is_configured(db) -> bool:
-    mode = resolve_provider_mode(db)
-    if mode == "auto":
-        return bool(configured_providers(db))
-    return bool(resolve_provider_keys(db, mode))
+    return bool(active_providers(db))
 
 _SYSTEM_PROMPT_TEMPLATE = """تو دستیار پشتیبانی فارسی‌زبان یک فروشگاه فروش اشتراک VPN (V2Ray/کانفیگ) هستی.
 
@@ -1421,8 +1543,10 @@ def _history_to_openai(history, user_message: str, system_prompt: str):
     return messages
 
 
-async def _openai_chat(provider: str, api_key: str, model: str, messages: list, tools=None):
-    url = "https://api.groq.com/openai/v1/chat/completions" if provider == "groq" else "https://openrouter.ai/api/v1/chat/completions"
+async def _openai_chat(provider: str, api_key: str, model: str, messages: list, tools=None, url=None):
+    url = url or _OPENAI_COMPAT_URLS.get(provider, "")
+    if not url:
+        raise RuntimeError(f"{provider} آدرس API تنظیم نشده")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if provider == "openrouter":
         headers["HTTP-Referer"] = "https://telegram.org/"
@@ -1434,6 +1558,8 @@ async def _openai_chat(provider: str, api_key: str, model: str, messages: list, 
         "tool_choice": "auto",
         "temperature": 0.2,
     }
+    if not payload["tools"]:
+        del payload["tools"], payload["tool_choice"]
     # قبلاً ۷۵ ثانیه بود؛ یعنی اگر یک کلید/پروایدر کند یا گیر کرده بود، کاربر
     # تا ۷۵ ثانیه معطل یک تلاش می‌ماند قبل از رفتن سراغ کلید/پروایدر بعدی.
     # ۳۰ ثانیه برای این مدل‌های سریع (Groq/OpenRouter) به‌اندازه‌ی کافی زیاد
@@ -1478,9 +1604,11 @@ async def _gemini_round(client, model_name, contents, gen_config, on_text=None):
     return types.Content(role="model", parts=parts), parts
 
 
-async def _openai_chat_stream(provider: str, api_key: str, model: str, messages: list, tools=None, on_text=None):
+async def _openai_chat_stream(provider: str, api_key: str, model: str, messages: list, tools=None, on_text=None, url=None):
     """مثل _openai_chat ولی با stream؛ همان شکل خروجی را برمی‌گرداند. اگر پاسخ SSE قابل پردازش نبود به حالت عادی برمی‌گردد."""
-    url = "https://api.groq.com/openai/v1/chat/completions" if provider == "groq" else "https://openrouter.ai/api/v1/chat/completions"
+    url = url or _OPENAI_COMPAT_URLS.get(provider, "")
+    if not url:
+        raise RuntimeError(f"{provider} آدرس API تنظیم نشده")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if provider == "openrouter":
         headers["HTTP-Referer"] = "https://telegram.org/"
@@ -1526,7 +1654,7 @@ async def _openai_chat_stream(provider: str, api_key: str, model: str, messages:
                             slot["function"]["arguments"] += fn["arguments"]
     except (json.JSONDecodeError, KeyError, AttributeError, TypeError, ValueError):
         _log.warning("%s stream parse failed; falling back to non-stream call.", provider)
-        return await _openai_chat(provider, api_key, model, messages, tools)
+        return await _openai_chat(provider, api_key, model, messages, tools, url)
     message = {"content": content}
     if calls:
         message["tool_calls"] = [calls[i] for i in sorted(calls)]
@@ -1623,7 +1751,10 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
     keys = resolve_provider_keys(db, provider)
     if not keys:
         raise RuntimeError(f"{provider} API key تنظیم نشده")
-    model = resolve_groq_model(db) if provider == "groq" else resolve_openrouter_model(db)
+    model = resolve_provider_model(db, provider)
+    url = resolve_provider_url(db, provider)
+    if not model or not url:
+        raise RuntimeError(f"{provider} مدل یا آدرس API تنظیم نشده")
     base_messages = _history_to_openai(history, user_message, system_prompt)
     last_exc = None
     for api_key in keys:
@@ -1634,9 +1765,9 @@ async def _run_openai_compatible(db, user_tg_id: int, history: list, user_messag
             ui_action = None
             for _ in range(_MAX_TOOL_ROUNDS):
                 if on_text is None:
-                    data = await _openai_chat(provider, api_key, model, messages, _tools_for(business_mode))
+                    data = await _openai_chat(provider, api_key, model, messages, _tools_for(business_mode), url)
                 else:
-                    data = await _openai_chat_stream(provider, api_key, model, messages, _tools_for(business_mode), on_text)
+                    data = await _openai_chat_stream(provider, api_key, model, messages, _tools_for(business_mode), on_text, url)
                 choice = (data.get("choices") or [{}])[0]
                 msg = choice.get("message") or {}
                 tool_calls = msg.get("tool_calls") or []
@@ -1724,8 +1855,7 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str, busin
         system_prompt += _BUSINESS_PROMPT_SUFFIX
         if business_mode == BUSINESS_SALES:
             system_prompt += _BUSINESS_SALES_PROMPT_ADDON
-    mode = resolve_provider_mode(db)
-    providers = configured_providers(db) if mode == "auto" else [mode]
+    providers = active_providers(db)
     last_exc = None
     turn_started = asyncio.get_event_loop().time()
     for provider in providers:

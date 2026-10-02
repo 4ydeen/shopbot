@@ -263,7 +263,10 @@ async def _run_openai_compatible(db, history: list, text: str, system_prompt: st
     keys = ai_support.resolve_provider_keys(db, provider)
     if not keys:
         raise RuntimeError(f"{provider} API key تنظیم نشده")
-    model = ai_support.resolve_groq_model(db) if provider == "groq" else ai_support.resolve_openrouter_model(db)
+    model = ai_support.resolve_provider_model(db, provider)
+    url = ai_support.resolve_provider_url(db, provider)
+    if not model or not url:
+        raise RuntimeError(f"{provider} مدل یا آدرس API تنظیم نشده")
     base = [{"role": "system", "content": system_prompt}]
     base += [{"role": "assistant" if role == "model" else "user", "content": msg} for role, msg in history]
     base.append({"role": "user", "content": text})
@@ -272,7 +275,7 @@ async def _run_openai_compatible(db, history: list, text: str, system_prompt: st
         messages = list(base)
         try:
             for _ in range(_MAX_ROUNDS):
-                data = await ai_support._openai_chat(provider, api_key, model, messages, _TOOLS)
+                data = await ai_support._openai_chat(provider, api_key, model, messages, _TOOLS, url)
                 msg = ((data.get("choices") or [{}])[0]).get("message") or {}
                 tool_calls = msg.get("tool_calls") or []
                 content = msg.get("content") or ""
@@ -307,8 +310,7 @@ async def get_reply(db, admin_id: int, text: str) -> str:
         return "دستیار هوشمند تنظیم نشده؛ ابتدا کلید API را از بخش دستیار هوشمند وارد کن."
     system_prompt = _SYSTEM_PROMPT.format(today=_tehran_now().strftime("%Y-%m-%d"))
     history = _get_history(admin_id)
-    mode = ai_support.resolve_provider_mode(db)
-    providers = ai_support.configured_providers(db) if mode == "auto" else [mode]
+    providers = ai_support.active_providers(db)
     for provider in providers:
         try:
             if provider == "gemini":

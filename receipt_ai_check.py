@@ -1728,6 +1728,13 @@ def _extra_vision_specs(db) -> list:
         {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
     add("Mistral", "mistral", ai_support.resolve_mistral_keys(db), _MISTRAL_VISION_MODEL, _MISTRAL_URL)
     add("Cohere", "cohere", ai_support.resolve_cohere_keys(db), _COHERE_VISION_MODEL, _COHERE_URL)
+    for pid in ("openai", "anthropic"):
+        if ai_support.resolve_provider_model(db, pid):
+            add(ai_support.provider_display_name(db, pid), pid, ai_support.resolve_provider_keys(db, pid),
+                ai_support.resolve_provider_model(db, pid), ai_support.resolve_provider_url(db, pid))
+    for row in ai_support.custom_providers(db):
+        if row["model"]:
+            add("Custom: " + row["name"], ai_support.CUSTOM_PREFIX + row["id"], row["keys"], row["model"], row["url"])
     account_id = ai_support.resolve_cloudflare_account_id(db)
     if account_id:
         add("Cloudflare", "cloudflare", ai_support.resolve_cloudflare_keys(db), _CLOUDFLARE_VISION_MODEL,

@@ -55,12 +55,10 @@ async def _openai_compatible(db, provider: str, system_prompt: str, user_text: s
     keys = ai_support.resolve_provider_keys(db, provider)
     if not keys:
         raise RuntimeError(f"{provider} API key تنظیم نشده")
-    if provider == "groq":
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        model = ai_support.resolve_groq_model(db)
-    else:
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        model = ai_support.resolve_openrouter_model(db)
+    url = ai_support.resolve_provider_url(db, provider)
+    model = ai_support.resolve_provider_model(db, provider)
+    if not url or not model:
+        raise RuntimeError(f"{provider} مدل یا آدرس API تنظیم نشده")
     last_exc = None
     for api_key in keys:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -92,8 +90,7 @@ async def generate_json(db, system_prompt: str, user_text: str) -> dict:
     """از Provider های فعال به‌ترتیب تلاش می‌کند و اولین JSON معتبر را برمی‌گرداند."""
     if not ai_support.is_configured(db):
         raise RuntimeError("AI not configured")
-    mode = ai_support.resolve_provider_mode(db)
-    providers = ai_support.configured_providers(db) if mode == "auto" else [mode]
+    providers = ai_support.active_providers(db)
     last_exc = None
     for provider in providers:
         try:
