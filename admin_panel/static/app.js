@@ -293,6 +293,19 @@ const apiPost = (p, body) => api(p, { method: 'POST', body: body || {} });
 const apiPut = (p, body) => api(p, { method: 'PUT', body: body || {} });
 const apiDelete = p => api(p, { method: 'DELETE' });
 
+async function apiMultipart(path, formData) {
+  const res = await fetch('/api' + path, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  const isAuthEndpoint = path === '/login' || path === '/setup';
+  if (res.status === 401 && !isAuthEndpoint) { showLogin(); throw new Error('unauthorized'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { const err = new Error(formatApiError(data.detail)); err.status = res.status; throw err; }
+  return data;
+}
+
 /* ============================================================ toast === */
 function toast(msg, isError = false) {
   const root = $('#toast-root');
@@ -4244,13 +4257,71 @@ function discountConstraintsLine(c, categories, products) {
   if (c.expires_at) parts.push(`انقضا: ${String(c.expires_at).slice(0, 10)}`);
   return parts.join(' · ');
 }
+let discountCategoryFilter = 'all';
+
+function discountFilterCodes(codes) {
+  if (discountCategoryFilter === 'all') return codes;
+  if (discountCategoryFilter === '__none__') {
+    return codes.filter(c => !c.category_id);
+  }
+  const id = Number(discountCategoryFilter);
+  return codes.filter(c => Number(c.category_id) === id);
+}
+
+function discountManageBar(categories) {
+  const opts = [
+    `<option value="all">همه دسته‌بندی‌ها</option>`,
+    `<option value="__none__">بدون دسته‌بندی</option>`,
+    ...categories.map(c => `<option value="${c.id}">${esc(c.name || c.title || `دسته #${c.id}`)}</option>`),
+  ].join('');
+  return `
+    <div class="toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select class="input" id="discount-filter" style="min-width:190px">${opts}</select>
+      <button class="btn btn-danger btn-sm" id="discount-delete-category">حذف کدهای این دسته</button>
+      <button class="btn btn-danger btn-sm" id="discount-delete-all">حذف همه کدها</button>
+    </div>`;
+}
+
+function bindDiscountManageBar(categories) {
+  const select = $('#discount-filter', content());
+  if (!select) return;
+  select.value = discountCategoryFilter;
+  select.addEventListener('change', () => {
+    discountCategoryFilter = select.value;
+    renderDiscounts();
+  });
+
+  $('#discount-delete-all', content()).addEventListener('click', async () => {
+    if (!confirm('همه کدهای تخفیف حذف شوند؟ این عملیات قابل بازگشت نیست.')) return;
+    try {
+      const res = await apiPost('/discounts/delete-all');
+      toast(`${fmt(res.deleted)} کد حذف شد.`);
+      discountCategoryFilter = 'all';
+      renderDiscounts();
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#discount-delete-category', content()).addEventListener('click', async () => {
+    if (discountCategoryFilter === 'all') return toast('اول یک دسته‌بندی را انتخاب کن.', true);
+    const categoryId = discountCategoryFilter === '__none__' ? null : Number(discountCategoryFilter);
+    if (!confirm('کدهای تخفیف این دسته حذف شوند؟ این عملیات قابل بازگشت نیست.')) return;
+    try {
+      const res = await apiPost('/discounts/delete-category', { category_id: categoryId });
+      toast(`${fmt(res.deleted)} کد حذف شد.`);
+      renderDiscounts();
+    } catch (e) { handleErr(e); }
+  });
+}
+
 async function renderDiscounts() {
-  const [codes, categories, products] = await Promise.all([
+  const [allCodes, categories, products] = await Promise.all([
     apiGet('/discounts'), apiGet('/categories'), apiGet('/products'),
   ]);
+  const codes = discountFilterCodes(allCodes);
   if (loadTheme().theme === 'brutalist') return renderDiscountsBrutalist(codes, categories, products);
   if (loadTheme().theme === 'bento') return renderDiscountsBento(codes, categories, products);
   setContent(`
+    ${discountManageBar(categories)}
     <div class="toolbar"><button class="btn btn-primary btn-sm" id="add-code">+ کد تخفیف جدید</button></div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>کد</th><th>تخفیف</th><th>محدودیت‌ها</th><th>سقف استفاده</th><th>مصرف‌شده</th><th>وضعیت</th><th>عملیات</th></tr></thead>
@@ -4266,6 +4337,7 @@ async function renderDiscounts() {
       </tr>`).join('') || '<tr><td colspan="7" class="empty-state">کدی ثبت نشده</td></tr>'}</tbody>
     </table></div></div>
   `);
+  bindDiscountManageBar(categories);
   $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
     <div class="form-grid">
       <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
@@ -4309,6 +4381,7 @@ function renderDiscountsBento(codes, categories, products) {
       <div><h2>کدهای تخفیف</h2><p>${fmt(codes.length)} کد ثبت‌شده</p></div>
       <button class="bn-btn bn-btn-ok" id="add-code">+ کد جدید</button>
     </div>
+    ${discountManageBar(categories)}
     <div class="bn-card-grid">
       ${codes.map((c, i) => `
         <div class="bn-card bn-card-anim" style="animation-delay:${Math.min(i * 30, 260)}ms">
@@ -4327,6 +4400,7 @@ function renderDiscountsBento(codes, categories, products) {
       `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>کدی ثبت نشده</div>`}
     </div>
   `);
+  bindDiscountManageBar(categories);
   $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
     <div class="form-grid">
       <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
@@ -4387,6 +4461,7 @@ function renderDiscountsBrutalist(codes, categories, products) {
       <button class="bru-stamp bru-stamp-ok" id="add-code" style="--r:-3deg">+ کد جدید</button>
     </div>
 
+    ${discountManageBar(categories)}
     <div class="bru-coupon-grid">
       ${codes.map((c, i) => `
         <div class="bru-coupon bru-card-anim ${c.is_active ? '' : 'bru-coupon-off'}" style="animation-delay:${Math.min(i * 40, 320)}ms">
@@ -4407,6 +4482,7 @@ function renderDiscountsBrutalist(codes, categories, products) {
       `).join('') || `<div class="empty-state" style="grid-column:1/-1"><div class="icon">${svg('empty')}</div>کدی ثبت نشده</div>`}
     </div>
   `);
+  bindDiscountManageBar(categories);
   $('#add-code').addEventListener('click', () => openModal('کد تخفیف جدید', `
     <div class="form-grid">
       <input class="input" id="code-value" placeholder="کد (مثلا SUMMER20)">
@@ -4778,6 +4854,14 @@ function renderBroadcastBento() {
     <div class="bn-hero"><div><h2>پیام همگانی</h2><p>ارسال متنی به همه‌ی کاربران غیرمسدود ربات</p></div></div>
     <div class="bn-card" style="max-width:680px">
       <textarea class="bn-search" id="bc-text" rows="7" maxlength="4000" style="width:100%;border-radius:18px;resize:vertical" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <select class="input" id="bc-media-type">
+          <option value="">فقط متن</option>
+          <option value="photo">عکس</option>
+          <option value="voice">ویس</option>
+        </select>
+        <input class="input" id="bc-file" type="file" style="flex:1;min-width:220px" accept="image/*,audio/*">
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
         <span class="mono" id="bc-count" style="font-size:12px;color:var(--text-muted)">۰ / ۴۰۰۰</span>
         <button class="bn-btn bn-btn-ok" id="bc-send" style="padding:10px 22px">ارسال به همه</button>
@@ -4790,7 +4874,12 @@ function renderBroadcastBento() {
 
   $('#bc-send', content()).addEventListener('click', () => {
     const text = ta.value.trim();
-    if (!text) return toast('متن پیام خالی است.', true);
+    const mediaType = $('#bc-media-type', content()).value;
+    const file = $('#bc-file', content()).files[0];
+    if (!text && !file) return toast('متن یا فایل پیام خالی است.', true);
+    if (file && !mediaType) return toast('نوع فایل را انتخاب کن.', true);
+    if (mediaType === 'photo' && file && !file.type.startsWith('image/')) return toast('فایل انتخاب‌شده عکس نیست.', true);
+    if (mediaType === 'voice' && file && !file.type.startsWith('audio/')) return toast('فایل انتخاب‌شده ویس/صوتی نیست.', true);
     openModal('تایید ارسال همگانی', `
       <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
       <div style="border-radius:14px;background:var(--surface-2);padding:10px 12px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
@@ -4802,7 +4891,13 @@ function renderBroadcastBento() {
         const btn = $('#bc-confirm', body);
         btn.disabled = true; btn.textContent = 'در حال ارسال...';
         try {
-          const res = await apiPost('/broadcast', { message: text });
+          const form = new FormData();
+          form.append('message', text);
+          if (file) {
+            form.append('media_type', mediaType);
+            form.append('file', file);
+          }
+          const res = await apiMultipart('/broadcast', form);
           close();
           $('#bc-result', content()).innerHTML = `
             <div class="bento-grid" style="grid-auto-rows:minmax(84px,auto)">
@@ -4810,7 +4905,10 @@ function renderBroadcastBento() {
               <div class="bw w-green"><span class="bw-label">موفق</span><span class="bw-value mono">${fmt(res.success)}</span></div>
               <div class="bw w-pink"><span class="bw-label">ناموفق</span><span class="bw-value mono">${fmt(res.failed)}</span></div>
             </div>`;
-          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          ta.value = '';
+          $('#bc-media-type', content()).value = '';
+          $('#bc-file', content()).value = '';
+          $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
           toast('پیام همگانی ارسال شد.');
         } catch (e) { close(); handleErr(e); }
       });
@@ -4837,6 +4935,14 @@ async function renderBroadcast() {
       <h3 style="margin:0 0 4px">ارسال پیام همگانی</h3>
       <p class="card-sub" style="margin:0 0 14px">این پیام برای همه‌ی کاربران ربات (غیرمسدود) به‌صورت متنی ارسال می‌شود.</p>
       <textarea class="input" id="bc-text" rows="6" maxlength="4000" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <select class="input" id="bc-media-type">
+          <option value="">فقط متن</option>
+          <option value="photo">عکس</option>
+          <option value="voice">ویس</option>
+        </select>
+        <input class="input" id="bc-file" type="file" style="flex:1;min-width:220px" accept="image/*,audio/*">
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
         <span class="card-sub" id="bc-count">۰ / ۴۰۰۰</span>
         <button class="btn btn-primary" id="bc-send">ارسال به همه</button>
@@ -4849,7 +4955,12 @@ async function renderBroadcast() {
 
   $('#bc-send', content()).addEventListener('click', () => {
     const text = ta.value.trim();
-    if (!text) return toast('متن پیام خالی است.', true);
+    const mediaType = $('#bc-media-type', content()).value;
+    const file = $('#bc-file', content()).files[0];
+    if (!text && !file) return toast('متن یا فایل پیام خالی است.', true);
+    if (file && !mediaType) return toast('نوع فایل را انتخاب کن.', true);
+    if (mediaType === 'photo' && file && !file.type.startsWith('image/')) return toast('فایل انتخاب‌شده عکس نیست.', true);
+    if (mediaType === 'voice' && file && !file.type.startsWith('audio/')) return toast('فایل انتخاب‌شده ویس/صوتی نیست.', true);
     openModal('تایید ارسال همگانی', `
       <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
       <div style="background:var(--panel-2);padding:10px 12px;border-radius:9px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
@@ -4861,7 +4972,13 @@ async function renderBroadcast() {
         const btn = $('#bc-confirm', body);
         btn.disabled = true; btn.textContent = 'در حال ارسال...';
         try {
-          const res = await apiPost('/broadcast', { message: text });
+          const form = new FormData();
+          form.append('message', text);
+          if (file) {
+            form.append('media_type', mediaType);
+            form.append('file', file);
+          }
+          const res = await apiMultipart('/broadcast', form);
           close();
           $('#bc-result', content()).innerHTML = `
             <div class="card" style="background:var(--panel-2)">
@@ -4869,7 +4986,10 @@ async function renderBroadcast() {
               موفق: <strong style="color:var(--ok, #3ddc84)">${res.success}</strong> ·
               ناموفق: <strong style="color:var(--danger, #ff6b52)">${res.failed}</strong>
             </div>`;
-          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          ta.value = '';
+          $('#bc-media-type', content()).value = '';
+          $('#bc-file', content()).value = '';
+          $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
           toast('پیام همگانی ارسال شد.');
         } catch (e) { close(); handleErr(e); }
       });
@@ -4889,6 +5009,14 @@ function renderBroadcastBrutalist() {
     <div class="bru-panel" style="max-width:680px">
       <div class="bru-panel-head">متن پیام</div>
       <textarea class="bru-search-input" id="bc-text" rows="7" maxlength="4000" style="width:100%;resize:vertical" placeholder="متن پیام را بنویس..."></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <select class="input" id="bc-media-type">
+          <option value="">فقط متن</option>
+          <option value="photo">عکس</option>
+          <option value="voice">ویس</option>
+        </select>
+        <input class="input" id="bc-file" type="file" style="flex:1;min-width:220px" accept="image/*,audio/*">
+      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
         <span class="mono" id="bc-count" style="font-weight:800;font-size:12px">۰ / ۴۰۰۰</span>
         <button class="bru-stamp bru-stamp-ok" id="bc-send" style="--r:-3deg">ارسال به همه</button>
@@ -4901,7 +5029,12 @@ function renderBroadcastBrutalist() {
 
   $('#bc-send', content()).addEventListener('click', () => {
     const text = ta.value.trim();
-    if (!text) return toast('متن پیام خالی است.', true);
+    const mediaType = $('#bc-media-type', content()).value;
+    const file = $('#bc-file', content()).files[0];
+    if (!text && !file) return toast('متن یا فایل پیام خالی است.', true);
+    if (file && !mediaType) return toast('نوع فایل را انتخاب کن.', true);
+    if (mediaType === 'photo' && file && !file.type.startsWith('image/')) return toast('فایل انتخاب‌شده عکس نیست.', true);
+    if (mediaType === 'voice' && file && !file.type.startsWith('audio/')) return toast('فایل انتخاب‌شده ویس/صوتی نیست.', true);
     openModal('تایید ارسال همگانی', `
       <p style="font-size:13px;line-height:1.9">این پیام برای <strong>همه‌ی کاربران</strong> ربات ارسال می‌شود و قابل بازگشت نیست. مطمئنی؟</p>
       <div style="border:2.5px solid #000;background:var(--surface-2);padding:10px 12px;font-size:13px;white-space:pre-wrap;max-height:160px;overflow-y:auto">${esc(text)}</div>
@@ -4913,7 +5046,13 @@ function renderBroadcastBrutalist() {
         const btn = $('#bc-confirm', body);
         btn.disabled = true; btn.textContent = 'در حال ارسال...';
         try {
-          const res = await apiPost('/broadcast', { message: text });
+          const form = new FormData();
+          form.append('message', text);
+          if (file) {
+            form.append('media_type', mediaType);
+            form.append('file', file);
+          }
+          const res = await apiMultipart('/broadcast', form);
           close();
           $('#bc-result', content()).innerHTML = `
             <div class="bru-grid-4" style="grid-template-columns:repeat(3,1fr)">
@@ -4921,7 +5060,10 @@ function renderBroadcastBrutalist() {
               <div class="bru-block bru-yellow"><span class="bru-block-label">موفق</span><span class="bru-block-val mono">${fmt(res.success)}</span></div>
               <div class="bru-block bru-black"><span class="bru-block-label">ناموفق</span><span class="bru-block-val mono">${fmt(res.failed)}</span></div>
             </div>`;
-          ta.value = ''; $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
+          ta.value = '';
+          $('#bc-media-type', content()).value = '';
+          $('#bc-file', content()).value = '';
+          $('#bc-count', content()).textContent = '۰ / ۴۰۰۰';
           toast('پیام همگانی ارسال شد.');
         } catch (e) { close(); handleErr(e); }
       });
