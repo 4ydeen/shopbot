@@ -114,7 +114,7 @@ class AdminSetAIModelName(StatesGroup):
 class AdminAICustomProviderAdd(StatesGroup):
     waiting_name = State()
     waiting_url = State()
-    waiting_model = State()
+    waiting_model = State()  # fallback: discovery failed, enter model manually
     waiting_key = State()
 
 

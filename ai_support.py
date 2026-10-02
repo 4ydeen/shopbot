@@ -265,13 +265,113 @@ def resolve_anthropic_keys(db) -> list:
     return keys or _split_keys(getattr(config, "ANTHROPIC_API_KEY", ""))
 
 
-def normalize_chat_url(base_url) -> str:
+def normalize_base_url(base_url) -> str:
+    """Normalize an OpenAI-compatible API base URL without forcing an endpoint."""
     url = str(base_url or "").strip().rstrip("/")
     if not url.lower().startswith(("http://", "https://")):
         return ""
-    if not url.endswith("/chat/completions"):
-        url += "/chat/completions"
+    for suffix in ("/chat/completions", "/models"):
+        if url.lower().endswith(suffix):
+            url = url[:-len(suffix)].rstrip("/")
+            break
     return url
+
+
+def normalize_chat_url(base_url) -> str:
+    base = normalize_base_url(base_url)
+    return f"{base}/chat/completions" if base else ""
+
+
+_MODEL_DISCOVERY_TTL = 300
+_model_discovery_cache = {}
+
+
+def _model_rows_from_payload(data: dict) -> list:
+    rows = []
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        items = data.get("models") if isinstance(data, dict) else None
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        mid = str(item.get("id") or item.get("name") or "").strip()
+        if mid.startswith("models/"):
+            mid = mid[7:]
+        if not mid:
+            continue
+        low = mid.lower()
+        if any(x in low for x in ("embedding", "moderation", "tts", "whisper", "image-generation", "image_embedding")):
+            continue
+        label = str(item.get("display_name") or item.get("displayName") or mid).strip()
+        rows.append((mid, label[:100]))
+    seen = set()
+    return [(m, l) for m, l in rows if not (m in seen or seen.add(m))]
+
+
+async def discover_openai_compatible_models(base_url: str, api_key: str, force: bool = False) -> list:
+    """Discover models from an OpenAI-compatible GET /models endpoint."""
+    base = normalize_base_url(base_url)
+    key = (base, api_key)
+    import time
+    cached = _model_discovery_cache.get(key)
+    if not force and cached and time.time() - cached[0] < _MODEL_DISCOVERY_TTL:
+        return cached[1]
+    if not base or not api_key:
+        return []
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    url = f"{base}/models"
+    timeout = aiohttp.ClientTimeout(total=12)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status >= 400:
+                    return []
+                data = await resp.json(content_type=None)
+        rows = _model_rows_from_payload(data)
+    except Exception as exc:
+        _log.warning("model discovery failed for %s: %s", base, exc)
+        return cached[1] if cached else []
+    _model_discovery_cache[key] = (time.time(), rows)
+    return rows
+
+
+async def discover_provider_models(db, provider: str, base_url: str = "", api_key: str = "", force: bool = False) -> list:
+    """Return [(model_id, label)] for built-in or custom Agent providers."""
+    if provider == "gemini":
+        return await asyncio.to_thread(live_gemini_models, db, force)
+    if provider.startswith(CUSTOM_PREFIX):
+        entry = _custom_entry(db, provider)
+        base_url = base_url or (entry.get("base_url") if entry else "")
+        api_key = api_key or (entry.get("keys", [""])[0] if entry and entry.get("keys") else "")
+    elif not base_url:
+        base_url = resolve_provider_url(db, provider)
+        keys = resolve_provider_keys(db, provider)
+        api_key = api_key or (keys[0] if keys else "")
+    if provider == "anthropic":
+        base = normalize_base_url(base_url)
+        if base.endswith("/chat/completions"):
+            base = base[:-len("/chat/completions")].rstrip("/")
+        if not base or not api_key:
+            return []
+        import time
+        cache_key = ("anthropic", base, api_key)
+        cached = _model_discovery_cache.get(cache_key)
+        if not force and cached and time.time() - cached[0] < _MODEL_DISCOVERY_TTL:
+            return cached[1]
+        try:
+            headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Accept": "application/json"}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                async with session.get(f"{base}/models", headers=headers) as resp:
+                    if resp.status >= 400:
+                        return []
+                    data = await resp.json(content_type=None)
+            rows = _model_rows_from_payload(data)
+            _model_discovery_cache[cache_key] = (time.time(), rows)
+            return rows
+        except Exception as exc:
+            _log.warning("Anthropic model discovery failed: %s", exc)
+            return cached[1] if cached else []
+    return await discover_openai_compatible_models(base_url, api_key, force)
 
 
 def custom_providers(db) -> list:

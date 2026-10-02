@@ -1309,6 +1309,16 @@ def ai_agents_hub_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def ai_custom_model_pick_kb(models) -> InlineKeyboardMarkup:
+    """Temporary model picker used after Custom Provider model discovery."""
+    rows = []
+    for idx, (model_id, label) in enumerate(models[:40]):
+        rows.append([InlineKeyboardButton(text=f"🧠 {label}"[:60], callback_data=f"adm_ai_cust_pick:{idx}")])
+    rows.append([InlineKeyboardButton(text=tr("✍️ ورود دستی مدل"), callback_data="adm_ai_cust_manual")])
+    rows.append([InlineKeyboardButton(text=tr("❌ لغو"), callback_data="adm_ai_custom")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def ai_custom_providers_kb(db) -> InlineKeyboardMarkup:
     import ai_support
     rows = []
@@ -1334,7 +1344,7 @@ def ai_provider_choice_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def ai_model_choice_kb(db, gemini_rows=None) -> InlineKeyboardMarkup:
+def ai_model_choice_kb(db, model_rows=None) -> InlineKeyboardMarkup:
     import ai_support
     current = {
         "gemini": ai_support.resolve_gemini_model(db),
@@ -1344,9 +1354,14 @@ def ai_model_choice_kb(db, gemini_rows=None) -> InlineKeyboardMarkup:
     rows = []
     last_provider = None
     choices = list(ai_support.MODEL_CHOICES)
-    if gemini_rows:
-        picks = [(m, lbl) for m, lbl in gemini_rows if len(f"adm_ai_model_pick:gemini:{m}".encode()) <= 64][:40]
-        choices = [("gemini", m, lbl) for m, lbl in picks] + [c for c in choices if c[0] != "gemini"]
+    model_rows = model_rows or {}
+    for provider, live in model_rows.items():
+        if provider not in current or not live:
+            continue
+        picks = [(m, lbl) for m, lbl in live if len(f"adm_ai_model_pick:{provider}:{m}".encode()) <= 64][:40]
+        choices = [c for c in choices if c[0] != provider] + [(provider, m, lbl) for m, lbl in picks]
+    order = {"gemini": 0, "groq": 1, "openrouter": 2}
+    choices.sort(key=lambda x: order.get(x[0], 99))
     for provider, model_id, label in choices:
         if provider != last_provider:
             title = {"gemini":"🔷 Gemini", "groq":"🚀 Groq", "openrouter":"🌐 OpenRouter"}[provider]
@@ -1354,6 +1369,17 @@ def ai_model_choice_kb(db, gemini_rows=None) -> InlineKeyboardMarkup:
             last_provider = provider
         mark = "✅ " if model_id == current[provider] else ""
         rows.append([InlineKeyboardButton(text=f"{mark}{tr(label)}", callback_data=f"adm_ai_model_pick:{provider}:{model_id}")])
+    rows.append([InlineKeyboardButton(text=tr("🔄 دریافت مدل‌های آنلاین"), callback_data="adm_ai_discover_models:all")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_single_provider_models_kb(provider, models, current="") -> InlineKeyboardMarkup:
+    rows = []
+    for idx, (model_id, label) in enumerate(models[:40]):
+        mark = "✅ " if model_id == current else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}🧠 {label}"[:60], callback_data=f"adm_ai_single_model_pick:{provider}:{idx}")])
+    rows.append([InlineKeyboardButton(text=tr("✍️ ورود دستی مدل"), callback_data=f"adm_ai_manual_model:{provider}")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
