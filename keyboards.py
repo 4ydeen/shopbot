@@ -2231,6 +2231,7 @@ def admin_cfg_transfer_confirm_kb(tg_id: int, cc_id: int, target_id: int) -> Inl
 def deeplink_tools_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=tr("🔗 ساخت دیپ‌لینک تبلیغاتی"), callback_data="adm_dl_build")],
+        [InlineKeyboardButton(text=tr("🤖 ساخت پست کانال با AI"), callback_data="adm_camp_start")],
         [InlineKeyboardButton(text=tr("🖼 افزودن دکمه به پست کانال"), callback_data="adm_dl_addbtn")],
         [InlineKeyboardButton(text=tr("📋 پارامترهای اصلی منوی کاربر"), callback_data="adm_dl_params_list")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],

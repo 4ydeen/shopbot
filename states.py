@@ -256,6 +256,14 @@ class AdminChannelButton(StatesGroup):
     waiting_custom_param = State()
 
 
+class AdminCampaign(StatesGroup):
+    waiting_goal = State()
+    choosing = State()
+    waiting_photo = State()
+    waiting_channel = State()
+    confirming = State()
+
+
 class AdminAddAdmin(StatesGroup):
     waiting_id = State()
 
