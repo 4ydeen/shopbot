@@ -48,6 +48,7 @@ import noapay_payment
 import extra_gateway_admin
 import ai_support
 import ai_admin
+import admin_help
 import ai_media
 import admin_tools
 import admin_campaign
@@ -342,6 +343,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     async def safe_edit(call: CallbackQuery, text: str, reply_markup=None, parse_mode=None) -> bool:
         """ویرایش امن پیام؛ خطای message is not modified نباید کل callback را خراب کند."""
+        reply_markup = admin_help.attach_button(call.from_user.id, reply_markup)
         try:
             kwargs = {"reply_markup": reply_markup}
             if parse_mode is not None:
@@ -368,6 +370,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if call.message is None:
             return False
 
+        reply_markup = admin_help.attach_button(call.from_user.id, reply_markup)
         kwargs = {"reply_markup": reply_markup}
         if parse_mode is not None:
             kwargs["parse_mode"] = parse_mode
@@ -393,6 +396,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         except Exception:
             return False
         return True
+
+    async def _track_admin_section(handler, event: CallbackQuery, data: dict):
+        if admin_only(event.from_user.id):
+            admin_help.track(event.from_user.id, event.data)
+        return await handler(event, data)
+
+    router.callback_query.outer_middleware(_track_admin_section)
 
     def callback_id(data: str, prefix: str):
         """استخراج امن ID از callback_data و بررسی پیشوند."""
@@ -14017,6 +14027,41 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         ai_admin.reset(call.from_user.id)
         await state.set_state(AdminAIChat.chatting)
         await call.message.answer(_AI_ADMIN_INTRO, reply_markup=_ai_admin_end_kb())
+        await call.answer()
+
+    @router.callback_query(F.data == admin_help.HELP_CB)
+    async def cb_admin_help(call: CallbackQuery, state: FSMContext):
+        if not admin_only(call.from_user.id):
+            return await call.answer()
+        section = admin_help.current(call.from_user.id)
+        if not section:
+            await call.answer("برای دیدن راهنما اول وارد یکی از بخش‌های پنل شو.", show_alert=True)
+            return
+        await state.clear()
+        can_ask = senior_admin_only(call.from_user.id) and ai_support.is_configured(db)
+        text = admin_help.guide_text(section, db, is_main_bot)
+        await replace_admin_view(call, text, reply_markup=admin_help.guide_kb(section, can_ask))
+        await call.answer()
+
+    @router.callback_query(F.data == admin_help.HELP_ASK_CB)
+    async def cb_admin_help_ask(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            await call.answer("این بخش فقط برای مالک و مدیر کامل است.", show_alert=True)
+            return
+        section = admin_help.current(call.from_user.id)
+        if not section:
+            await call.answer()
+            return
+        if not ai_support.is_configured(db):
+            await call.answer(_AI_ADMIN_NOT_CONFIGURED, show_alert=True)
+            return
+        ai_admin.reset(call.from_user.id)
+        ai_admin.set_context(call.from_user.id, admin_help.assistant_context(section, db, is_main_bot))
+        await state.set_state(AdminAIChat.chatting)
+        await call.message.answer(
+            "🧠 درباره‌ی همین بخش هر سؤالی داری بپرس (متن یا ویس). فقط می‌خواند و هیچ تغییری نمی‌دهد.",
+            reply_markup=_ai_admin_end_kb(),
+        )
         await call.answer()
 
     @router.callback_query(F.data == "adm_ai_end")

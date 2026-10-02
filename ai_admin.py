@@ -15,6 +15,7 @@ _MAX_ROUNDS = 4
 _HISTORY_LIMIT = 8
 _HISTORY_TTL = 1800
 _history: dict = {}
+_context: dict = {}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SENSITIVE_KEYS = ("password", "token", "secret", "api_key")
 
@@ -204,6 +205,12 @@ async def _run_tool(db, name: str, args: dict) -> dict:
 
 def reset(admin_id: int) -> None:
     _history.pop(admin_id, None)
+    _context.pop(admin_id, None)
+
+
+def set_context(admin_id: int, guide: str) -> None:
+    """Attach the help guide of the section the admin is asking about."""
+    _context[admin_id] = guide
 
 
 def _get_history(admin_id: int) -> list:
@@ -309,6 +316,18 @@ async def get_reply(db, admin_id: int, text: str) -> str:
     if not ai_support.is_configured(db):
         return "دستیار هوشمند تنظیم نشده؛ ابتدا کلید API را از بخش دستیار هوشمند وارد کن."
     system_prompt = _SYSTEM_PROMPT.format(today=_tehran_now().strftime("%Y-%m-%d"))
+    guide = _context.get(admin_id)
+    if guide:
+        system_prompt += (
+            "\n\nادمین الان در این بخش از پنل مدیریت است و درباره‌ی همین بخش سؤال می‌پرسد. "
+            "قانون ۱ بالا فقط برای عدد و آمار است؛ برای توضیح دکمه‌ها و روش کار پنل، مرجع زیر منبع اصلی توست. "
+            "اسم دکمه، مسیر و رفتار هر بخش را فقط از همین مرجع بگو و چیزی درباره‌ی دکمه‌ها یا قابلیت‌ها نساز. "
+            "اگر سؤال درباره‌ی دکمه‌ی دیگری از همین مرجع است، از همان بخش جواب بده. "
+            "اگر جواب در مرجع نیست، صادقانه بگو که در راهنمای این بخش نیست و نزدیک‌ترین دکمه‌ی مرتبط را نشان بده. "
+            "اگر سؤال به وضعیت فعلی داده‌ها مربوط است (مثلاً چند سفارش در انتظار است)، از ابزارها استفاده کن. "
+            "مقدار فعلی تنظیمات را خودت حدس نزن؛ بگو ادمین همان صفحه‌ی بخش را ببیند.\n\n"
+            "مرجع این بخش:\n" + guide
+        )
     history = _get_history(admin_id)
     providers = ai_support.active_providers(db)
     for provider in providers:
