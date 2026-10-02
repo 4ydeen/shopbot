@@ -1703,7 +1703,7 @@ def api_app_config(admin=Depends(get_current_admin)):
                 ]},
                 {"title": "🔷 Gemini", "load_url": "/api/settings/ai-support", "submit_url": "/api/settings/ai-support", "fields": [
                     {"key": "gemini_model", "label": "مدل", "type": "select", "options": [
-                        [m, label] for prov, m, label in ai_support.MODEL_CHOICES if prov == "gemini"
+                        [m, label] for m, label in ai_support.gemini_model_options(db)
                     ]},
                     {"key": "gemini_api_key", "label": "کلید(های) API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                 ]},
