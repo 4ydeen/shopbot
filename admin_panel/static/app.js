@@ -4992,9 +4992,9 @@ function _referralFraudFlagsRows(items) {
 }
 
 async function renderSalesSettings() {
-  const [referral, wheel, renewal, volumeReminder, connectAlert, earlyRenewal, testConfig, testPlans, panelServers, forceJoin, stockAlert, products, referralFraud, fraudFlags] = await Promise.all([
+  const [referral, wheel, renewal, churn, volumeReminder, connectAlert, earlyRenewal, testConfig, testPlans, panelServers, forceJoin, stockAlert, products, referralFraud, fraudFlags] = await Promise.all([
     apiGet('/settings/referral'), apiGet('/settings/wheel'),
-    apiGet('/settings/renewal'), apiGet('/settings/volume-reminder'), apiGet('/settings/connect-alert'),
+    apiGet('/settings/renewal'), apiGet('/settings/churn'), apiGet('/settings/volume-reminder'), apiGet('/settings/connect-alert'),
     apiGet('/settings/early-renewal-discount'), apiGet('/settings/test-config'),
     apiGet('/test-config/plans'), apiGet('/test-config/panel-servers-lite'),
     apiGet('/settings/force-join'), apiGet('/settings/stock-alert'), apiGet('/products'),
@@ -5051,6 +5051,20 @@ async function renderSalesSettings() {
       <label class="field"><span>درصد تخفیف کد پیشنهادی</span><input class="input" data-fkey="renewal_discount_percent" type="number" value="${renewal.discount_percent}"></label>
       <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="renewal_discount_expiry_hours" type="number" value="${renewal.discount_expiry_hours}"></label>
       <button class="btn btn-primary btn-sm" id="save-renewal">ذخیره</button>
+    </div>
+
+    <div class="card">
+      <h3>🔮 پیش‌بینی ریزش و پیشنهاد تمدید شخصی</h3>
+      <div class="card-sub" style="margin-bottom:8px">کاربرانی که از فاصله‌ی معمول خریدشان عقب افتاده‌اند و سرویس فعال ندارند شناسایی می‌شوند. با AI فعال، AI بر اساس سابقه‌ی خرید و مصرف، خطر ریزش را می‌سنجد و تصمیم می‌گیرد تخفیف لازم است یا نه و متن شخصی می‌نویسد. بدون AI، قواعد ثابت و تخفیف بالا استفاده می‌شود.</div>
+      <label class="field field-row"><span>فعال</span>${_swSpan('churn_enabled', churn.enabled)}</label>
+      <label class="field field-row"><span>تصمیم و متن پیشنهاد با AI</span>${_swSpan('churn_ai_enabled', churn.ai_enabled)}</label>
+      <label class="field"><span>سقف تخفیف قابل پیشنهاد توسط AI (٪)</span><input class="input" data-fkey="churn_max_discount_percent" type="number" value="${churn.max_discount_percent}"></label>
+      <label class="field"><span>حداقل خطر ریزش برای ارسال (۱ تا ۱۰۰)</span><input class="input" data-fkey="churn_min_score" type="number" value="${churn.min_score}"></label>
+      <label class="field"><span>درصد تخفیف پیش‌فرض (بدون AI)</span><input class="input" data-fkey="churn_discount_percent" type="number" value="${churn.discount_percent}"></label>
+      <label class="field"><span>اعتبار کد (ساعت)</span><input class="input" data-fkey="churn_discount_expiry_hours" type="number" value="${churn.discount_expiry_hours}"></label>
+      <label class="field"><span>حداقل فاصله بین دو پیشنهاد به یک کاربر (روز)</span><input class="input" data-fkey="churn_cooldown_days" type="number" value="${churn.cooldown_days}"></label>
+      <label class="field"><span>حداکثر پیشنهاد در هر دور بررسی</span><input class="input" data-fkey="churn_max_per_run" type="number" value="${churn.max_per_run}"></label>
+      <button class="btn btn-primary btn-sm" id="save-churn">ذخیره</button>
     </div>
 
     <div class="card">
@@ -5186,6 +5200,18 @@ async function renderSalesSettings() {
         discount_percent: _num(root, 'renewal_discount_percent'), discount_expiry_hours: _num(root, 'renewal_discount_expiry_hours'),
       });
       toast('تنظیمات یادآوری تمدید ذخیره شد.');
+    } catch (e) { handleErr(e); }
+  });
+
+  $('#save-churn').addEventListener('click', async () => {
+    try {
+      await apiPost('/settings/churn', {
+        enabled: _swOn(root, 'churn_enabled'), ai_enabled: _swOn(root, 'churn_ai_enabled'),
+        max_discount_percent: _num(root, 'churn_max_discount_percent'), min_score: _num(root, 'churn_min_score'),
+        discount_percent: _num(root, 'churn_discount_percent'), discount_expiry_hours: _num(root, 'churn_discount_expiry_hours'),
+        cooldown_days: _num(root, 'churn_cooldown_days'), max_per_run: _num(root, 'churn_max_per_run'),
+      });
+      toast('تنظیمات پیش‌بینی ریزش ذخیره شد.');
     } catch (e) { handleErr(e); }
   });
 
