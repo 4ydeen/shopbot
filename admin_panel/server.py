@@ -46,6 +46,7 @@ from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLI
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 import button_registry
 import extra_gateway_registry
+import extra_settings_schema
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
 from admin_panel import mobile_auth
 from asset_versioning import file_digest, static_version, ApiNoStoreMiddleware
@@ -5883,6 +5884,31 @@ def api_set_setting(body: SettingBody, admin=Depends(require_permission("setting
     return {"ok": True}
 
 
+class ExtraSettingsBody(BaseModel):
+    values: Dict[str, Any]
+
+
+@app.get("/api/settings/extra")
+def api_get_extra_settings(admin=Depends(require_permission("settings"))):
+    return {
+        "groups": extra_settings_schema.groups_for("web"),
+        "values": extra_settings_schema.load_values(db, "web"),
+    }
+
+
+@app.post("/api/settings/extra")
+def api_set_extra_settings(body: ExtraSettingsBody, admin=Depends(require_permission("settings"))):
+    try:
+        changed = extra_settings_schema.save_values(db, "web", body.values)
+    except extra_settings_schema.SettingsValidationError as e:
+        raise HTTPException(400, detail=str(e))
+    # فقط نام کلیدها لاگ می‌شود؛ مقدار (مخصوصاً رمزها/کلیدها) هرگز.
+    db.log_admin_action(admin["id"], "setting_change",
+                        f"extra settings: {', '.join(changed)} (پنل وب - {admin['username']})",
+                        "setting", "extra")
+    return {"ok": True, "changed": changed}
+
+
 # قابلیت ۵۰: «متن‌های ربات» - رجیستری کامل (کاربر + ادمین) که با اسکن خودکار
 # کد ساخته می‌شود (نگاه کن: text_scanner.py، Database.list_text_registry).
 @app.get("/api/texts")
@@ -6733,15 +6759,16 @@ class StockAlertSettingsBody(BaseModel):
 
 @app.get("/api/settings/stock-alert")
 def api_get_stock_alert_settings(admin=Depends(require_permission("settings"))):
-    return {"threshold": int(db.get_setting("stock_alert_threshold", "5") or 5)}
+    # کلید واقعی‌ای که بات می‌خواند low_stock_threshold است (قبلاً اشتباهاً stock_alert_threshold ذخیره می‌شد و هیچ اثری نداشت)
+    return {"threshold": int(db.get_setting("low_stock_threshold", "3") or 3)}
 
 
 @app.post("/api/settings/stock-alert")
 def api_set_stock_alert_settings(body: StockAlertSettingsBody, admin=Depends(require_permission("settings"))):
     if body.threshold < 0:
         raise HTTPException(400, tr("آستانه نمی‌تواند منفی باشد."))
-    db.set_setting("stock_alert_threshold", str(body.threshold))
-    db.log_admin_action(admin["id"], "setting_change", f"stock_alert_threshold={body.threshold} (پنل وب - {admin['username']})", "setting", "stock_alert")
+    db.set_setting("low_stock_threshold", str(body.threshold))
+    db.log_admin_action(admin["id"], "setting_change", f"low_stock_threshold={body.threshold} (پنل وب - {admin['username']})", "setting", "stock_alert")
     return {"ok": True}
 
 
