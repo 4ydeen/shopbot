@@ -5590,6 +5590,30 @@ class CardSettingsUpdate(BaseModel):
     card_holder: str
 
 
+class ExtraSettingsUpdate(BaseModel):
+    values: Dict[str, Any] = {}
+
+
+@app.get("/api/admin/settings/extra")
+def api_admin_get_extra_settings(auth=Depends(require_main_admin)):
+    from extra_settings_schema import groups_for, load_values
+    _, db, _ = auth
+    return {"groups": groups_for("mini"), "values": load_values(db, "mini")}
+
+
+@app.post("/api/admin/settings/extra")
+def api_admin_set_extra_settings(body: ExtraSettingsUpdate, auth=Depends(require_main_admin)):
+    from extra_settings_schema import save_values, SettingsValidationError
+    _, db, _ = auth
+    try:
+        changed = save_values(db, "mini", body.values or {})
+    except SettingsValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if changed:
+        db.log_admin_action(auth[0], "setting_change", "extra settings updated (میناپ): " + ", ".join(changed), "setting", "extra")
+    return {"ok": True, "changed": changed}
+
+
 @app.get("/api/admin/settings/referral")
 def api_admin_get_referral_settings(auth=Depends(require_senior_admin)):
     _, db, _ = auth
