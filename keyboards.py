@@ -936,6 +936,7 @@ def card_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr(f"👤 به نام: {card_holder}"), callback_data="noop")],
         [InlineKeyboardButton(text=toggle_text, callback_data="adm_card_toggle")],
         [InlineKeyboardButton(text=tr("✏️ تغییر شماره کارت / صاحب حساب"), callback_data="adm_set_card_edit")],
+        [InlineKeyboardButton(text=tr("🔒 شرط نمایش شماره کارت"), callback_data="adm_cardgate")],
         [InlineKeyboardButton(text=tr(f"🤖 بررسی هوشمند رسید (AI): {'🟢 روشن' if ai_check_enabled else '🔴 خاموش'}"), callback_data="noop")],
         [InlineKeyboardButton(text=tr(ai_toggle_text), callback_data="adm_receipt_ai_toggle")],
     ]
@@ -3878,7 +3879,6 @@ def min_amount_settings_kb(db) -> InlineKeyboardMarkup:
             text=tr(f"{label}: {int(value or 0):,} تومان"),
             callback_data=f"adm_minamt_edit:{key}",
         )])
-    rows.append([InlineKeyboardButton(text=tr("🔒 شرط نمایش شماره کارت"), callback_data="adm_cardgate")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3895,7 +3895,7 @@ def card_gate_kb(db) -> InlineKeyboardMarkup:
             text=tr(f"📅 حداقل روز از استارت بات: {min_days if min_days else 'خاموش'}"),
             callback_data="adm_cardgate_edit:card_gate_min_days",
         )],
-        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_min_amount_settings")],
+        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_set_card")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
