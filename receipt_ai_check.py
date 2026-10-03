@@ -1808,7 +1808,7 @@ def _reuse_finding(dup: dict, subject: str, verb: str, hard_suffix: str):
 
 
 async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: str, ref_id: int,
-                         amount_toman=None, card_number=None, card_holder=None, message=None) -> dict:
+                         amount_toman=None, card_number=None, card_holder=None, message=None, image_bytes: bytes = None) -> dict:
     """بررسی کامل یک رسید تازه‌ارسال‌شده.
 
     ref_kind/ref_id: نوع و شناسه‌ی رکوردی که این رسید برایش ارسال شده - مثلاً
@@ -1828,7 +1828,8 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
     available = True
 
     try:
-        image_bytes = await _download(bot, file_id)
+        if image_bytes is None:
+            image_bytes = await _download(bot, file_id)
     except Exception as exc:
         _log.warning("receipt_ai_check: دانلود فایل رسید ناموفق بود: %s", exc)
         return {"note": None, "available": False, "reject": False, "reject_reason": None}
