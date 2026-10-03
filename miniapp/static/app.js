@@ -1785,13 +1785,14 @@ async function loadSubInfo(orderId, link) {
 // کش ساده برای لیست درگاه‌های سفارشی فعال، به‌ازای هر ترکیب amount/product_id
 // (چون این‌ها لیست را فیلتر می‌کنند، نباید بین سفارش‌های مختلف به اشتراک بگذارد)
 const _customGatewaysCache = {};
-async function fetchCustomGateways(amount, productId, customConfig = false) {
-  const cacheKey = `${amount ?? ""}:${productId ?? ""}:${customConfig ? "cc" : ""}`;
+async function fetchCustomGateways(amount, productId, customConfig = false, walletTopup = false) {
+  const cacheKey = `${amount ?? ""}:${productId ?? ""}:${customConfig ? "cc" : ""}:${walletTopup ? "wt" : ""}`;
   if (_customGatewaysCache[cacheKey]) return _customGatewaysCache[cacheKey];
   const params = new URLSearchParams();
   if (amount != null) params.set("amount", amount);
   if (productId != null) params.set("product_id", productId);
   if (customConfig) params.set("custom_config", "true");
+  if (walletTopup) params.set("wallet_topup", "true");
   const qs = params.toString() ? `?${params.toString()}` : "";
   try {
     _customGatewaysCache[cacheKey] = await api(`/api/gateways${qs}`);
@@ -2806,7 +2807,7 @@ async function renderWallet() {
 
 async function renderTopupPaymentStep(topupId, amount, cardNumber, cardHolder, cryptoEnabled, cardToCardEnabled, cardAutoEnabled, noapayEnabled, abangatewayEnabled, blupalEnabled, extraGateways) {
   const box = document.getElementById("topup-card");
-  const customGateways = await fetchCustomGateways(amount, null);
+  const customGateways = await fetchCustomGateways(amount, null, false, true);
   renderReceiptCard(box, {
     amount, cardNumber, cardHolder, cardToCardEnabled,
     successText: "رسید ارسال شد. پس از تایید ادمین، کیف پول شما شارژ می‌شود.",
