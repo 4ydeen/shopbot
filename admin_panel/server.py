@@ -1739,6 +1739,9 @@ def api_app_config(admin=Depends(get_current_admin)):
                     {"key": "cohere_api_key", "label": "Cohere - کلید API (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "cloudflare_api_token", "label": "Cloudflare Workers AI - توکن (هر خط یک کلید؛ خالی=بدون تغییر)", "type": "textarea"},
                     {"key": "cloudflare_account_id", "label": "Cloudflare Workers AI - Account ID", "type": "text"},
+                    {"key": "cloudflare_model", "label": "Cloudflare Workers AI - مدل بینایی‌دار (🆓 رایگان، 💳 نیازمند پلن پولی)", "type": "select", "options": [
+                        [m, label] for m, label in ai_support.cloudflare_model_options(db)
+                    ]},
                 ]},
             ],
         })
@@ -2182,6 +2185,7 @@ class AiSupportSettingsBody(BaseModel):
     cohere_api_key: str = ""
     cloudflare_api_token: str = ""
     cloudflare_account_id: Optional[str] = None
+    cloudflare_model: Optional[str] = None
 
 
 @app.get("/api/settings/ai-support")
@@ -2207,6 +2211,7 @@ def api_get_ai_support_settings(admin=Depends(require_permission("settings"))):
         "cohere_api_key": _mask_key_lines(db.get_setting("cohere_api_key", "")),
         "cloudflare_api_token": _mask_key_lines(db.get_setting("cloudflare_api_token", "")),
         "cloudflare_account_id": db.get_setting("cloudflare_account_id", ""),
+        "cloudflare_model": ai_support.resolve_cloudflare_model(db),
     }
 
 
@@ -2247,6 +2252,11 @@ def api_set_ai_support_settings(body: AiSupportSettingsBody, admin=Depends(requi
         db.set_setting(setting_key, "\n".join(ai_support._split_keys(raw)))
     if body.cloudflare_account_id is not None:
         db.set_setting("cloudflare_account_id", body.cloudflare_account_id.strip())
+    if body.cloudflare_model is not None and body.cloudflare_model.strip():
+        cf_model = body.cloudflare_model.strip()
+        if len(cf_model) > 120 or any(ch.isspace() for ch in cf_model) or not cf_model.startswith(("@cf/", "@hf/")):
+            raise HTTPException(400, tr("نام مدل Workers AI نامعتبر است."))
+        db.set_setting("cloudflare_model", cf_model)
     db.log_admin_action(admin["id"], "ai_support_settings_change", f"تنظیمات دستیار هوشمند تغییر کرد (پنل وب - {admin['username']}).")
     return {"ok": True}
 
