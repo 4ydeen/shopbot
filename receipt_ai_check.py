@@ -204,7 +204,7 @@ _log = logging.getLogger("receipt_ai_check")
 
 # مدل بینایی‌دار ثابت برای هر پروایدر - مستقل از تنظیم مدل چتِ «دستیار
 # هوشمند» (که ممکن است اصلاً بینایی/تصویر پشتیبانی نکند).
-_GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+_GROQ_VISION_MODEL = "qwen/qwen3.8-27b"
 _OPENROUTER_VISION_MODEL = "openrouter/free"
 _MISTRAL_VISION_MODEL = "mistral-small-latest"
 _COHERE_VISION_MODEL = "command-a-vision-07-2025"
