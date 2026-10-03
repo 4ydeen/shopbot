@@ -6874,6 +6874,18 @@ const SETTINGS_GROUPS = [
     { key: 'card_number', label: 'شماره کارت', type: 'text' },
     { key: 'card_holder', label: 'نام صاحب کارت', type: 'text' },
   ]},
+  { tab: 'payment', title: '🏦 استعلام بانکی رسید (کارت↔شبا، نام صاحب کارت)', fields: [
+    { key: 'bank_inquiry_enabled', label: 'فعال بودن استعلام بانکی (پیش‌فرض خاموش؛ چک محلی کد بانک شبا همیشه فعال است)', type: 'bool' },
+    { key: 'bank_inquiry_url', label: 'آدرس API سرویس استعلام (می‌تواند {card} داشته باشد)', type: 'text' },
+    { key: 'bank_inquiry_method', label: 'متد: GET یا POST', type: 'text' },
+    { key: 'bank_inquiry_headers_json', label: 'هدرها (JSON، مثلاً {"Authorization":"Bearer ..."})', type: 'password' },
+    { key: 'bank_inquiry_body_json', label: 'بدنه‌ی JSON برای POST (مثلاً {"card":"{card}"})', type: 'textarea' },
+    { key: 'bank_inquiry_iban_path', label: 'مسیر شبا در پاسخ (مثلاً data.iban)', type: 'text' },
+    { key: 'bank_inquiry_owner_path', label: 'مسیر نام صاحب کارت؛ چند مسیر با ویرگول (مثلاً data.first_name,data.last_name)', type: 'text' },
+    { key: 'bank_inquiry_timeout', label: 'مهلت پاسخ (ثانیه)', type: 'number' },
+    { key: 'bank_inquiry_cache_hours', label: 'مدت کش نتیجه (ساعت)', type: 'number' },
+    { key: 'bank_inquiry_auto_reject', label: 'رد خودکار رسید وقتی مقصد طبق استعلام قطعاً اشتباه است (پیش‌فرض خاموش = فقط هشدار)', type: 'bool' },
+  ]},
   { tab: 'payment', title: 'نرخ ارز پشتیبان (عمومی فروشگاه)', fields: [
     { key: 'manual_usd_rate_toman', label: 'نرخ دلار دستی — فقط وقتی همه‌ی منابع زنده شکست بخورند استفاده می‌شود', type: 'number' },
   ]},
