@@ -198,6 +198,7 @@ except Exception:
 import aiohttp
 
 import ai_support
+import bank_inquiry
 import jalali
 
 _log = logging.getLogger("receipt_ai_check")
@@ -245,6 +246,7 @@ _OCR_PROMPT = """تو یک موتور OCR دقیق برای رسیدهای با�
 - receipt_datetime: تاریخ و ساعت تراکنش که روی خودِ رسید چاپ شده، با قالب YYYY/MM/DD HH:MM (اگر ثانیه دارد HH:MM:SS). تاریخ را همان‌طور که چاپ شده بنویس (شمسی یا میلادی). اگر ساعت ندارد فقط YYYY/MM/DD.
 - status_bar_time: ساعت نوار وضعیت (status bar) بالای صفحه‌ی گوشی، با قالب ۲۴ ساعته HH:MM؛ فقط اگر رسید اسکرین‌شات موبایل است و ساعت خوانا است.
 - dest_holder_name: نام صاحب کارت/حساب مقصد که داخل رسید چاپ شده.
+- source_holder_name: نام فرستنده/پرداخت‌کننده (صاحب کارت مبدأ) اگر روی رسید چاپ شده؛ در غیر این صورت رشته‌ی خالی.
 - app_bank_name: نام بانکی که از روی لوگو، رنگ یا برند بالای رسید تشخیص می‌دهی؛ فقط اسم بانک به فارسی. اگر برندینگی نیست رشته‌ی خالی.
 
 فقط یک JSON خام، بدون توضیح و بدون Markdown، با دقیقاً همین کلیدها برگردان."""
@@ -284,7 +286,8 @@ _VERDICT_PROMPT = """تو کارشناس فورنزیک تصویر برای تش
 _OCR_SCHEMA_FIELDS = {
     "card_number_digits": "string", "source_card_digits": "string", "reference_number": "string",
     "amount_digits": "string", "amount_unit": "string", "amount_words": "string", "receipt_datetime": "string",
-    "status_bar_time": "string", "dest_holder_name": "string", "app_bank_name": "string",
+    "status_bar_time": "string", "dest_holder_name": "string", "source_holder_name": "string",
+    "app_bank_name": "string",
 }
 
 _VERDICT_SCHEMA_FIELDS = {
@@ -1162,6 +1165,7 @@ _CONSENSUS_NORMALIZERS = {
     "receipt_datetime": _n_datetime,
     "status_bar_time": _n_time,
     "dest_holder_name": _normalize_name,
+    "source_holder_name": _normalize_name,
     "app_bank_name": _normalize_bank_name,
 }
 
@@ -1995,6 +1999,14 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
                 val["card_number_digits"], card_number, previous_cards) else (card_holder or "")
             datetime_note, datetime_impossible = _check_receipt_datetime(val["receipt_datetime"], message, order_created)
             words_note, words_mismatch = _check_amount_words(val["amount_words"], amount_digits)
+            try:
+                inquiry = await bank_inquiry.run_checks(
+                    db, dest_raw=val["card_number_digits"], expected_card=card_number,
+                    source_raw=val["source_card_digits"], source_holder_raw=val.get("source_holder_name") or "",
+                    bin_bank_of_card=_bank_from_card)
+            except Exception as exc:
+                _log.warning("receipt_ai_check: bank_inquiry خطا داد: %s", exc)
+                inquiry = {"notes": [], "hard_notes": [], "infos": [], "inquiry_ran": False, "inquiry_error": ""}
 
             soft_notes = [
                 _check_status_bar_time(_n_time(val["status_bar_time"]), message),
@@ -2068,6 +2080,18 @@ async def check_receipt(bot, db, *, file_id: str, receipt_type: str, ref_kind: s
             for note in [n for n, _ in hard_checks] + soft_notes:
                 if note and note not in reasons:
                     reasons.append(note)
+
+            # استعلام بانکی (bank_inquiry.py): هشدارها همیشه به ادمین می‌رسد؛ رد خودکار فقط
+            # برای مغایرت قطعیِ مقصد و فقط وقتی bank_inquiry_auto_reject روشن باشد.
+            for note in inquiry["hard_notes"] + inquiry["notes"] + inquiry["infos"]:
+                if note and note not in reasons:
+                    reasons.append(note)
+            if inquiry["inquiry_error"] and not inquiry["inquiry_ran"]:
+                reasons.append(f"ℹ️ استعلام بانکی انجام نشد ({inquiry['inquiry_error']}) - این رسید با استعلام تایید نشده است.")
+            if inquiry["hard_notes"] and auto_reject_enabled:
+                inquiry_reject = (await asyncio.to_thread(db.get_setting, "bank_inquiry_auto_reject", "0")) == "1"
+                if inquiry_reject:
+                    reject_reasons.extend(inquiry["hard_notes"])
 
             if reference_number:
                 try:
