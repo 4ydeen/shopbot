@@ -1041,7 +1041,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             text += db.get_text(
                 "handlers_user.product.discount_total_after_line", "💵 مبلغ پس از تخفیف: {total} تومان\n"
             ).format(total=f"{total_price - discount_amount:,}")
-        if wallet_credit > 0:
+        _pm_allowed = db.get_product_payment_methods(product["id"])
+        if wallet_credit > 0 and _pm_allowed is not None and "wallet" not in _pm_allowed:
+            text += db.get_text(
+                "handlers_user.product.wallet_not_allowed_line",
+                "\n👛 موجودی کیف پول شما: {amount} تومان (⛔️ پرداخت با کیف پول برای این محصول غیرفعال است)\n",
+            ).format(amount=f"{wallet_credit:,}")
+        elif wallet_credit > 0:
             text += db.get_text(
                 "handlers_user.product.wallet_credit_line",
                 "\n👛 موجودی کیف پول شما: {amount} تومان (به‌صورت خودکار در پرداخت اعمال می‌شود)\n",
@@ -1299,7 +1305,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return ""
         card_holder = (await asyncio.to_thread(db.get_setting, "card_holder")) or ""
         holder_line = f"👤 به نام: {escape_html(card_holder)}\n" if card_holder else ""
-        return f"💳 شماره کارت واریزی: `{card_number}`\n{holder_line}"
+        return f"💳 شماره کارت واریزی: <code>{escape_html(card_number)}</code>\n{holder_line}"
 
     def _ai_note_line(ai_note: str = None, ai_available: bool = True) -> str:
         """قابلیت تشخیص رسید جعلی: خط هشدار AI (یا اعلام عدم انجام بررسی) که
@@ -6036,10 +6042,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         (await asyncio.to_thread(db.set_topup_receipt_ai_note, topup_id, ai_result["note"]))
 
         user_row = (await asyncio.to_thread(db.get_user, message.from_user.id))
+        topup_user_info = await _user_purchase_info_line(user_row)
         caption = (
             f"👛 درخواست شارژ کیف پول #{topup_id}\n"
-            f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
+            f"👤 کاربر: {escape_html(user_row['first_name'] or '')} (@{escape_html(user_row['username'] or '') or '---'})\n"
             f"🆔 آیدی عددی: {message.from_user.id}\n"
+            f"{topup_user_info}"
             f"💰 مبلغ: {amount:,} تومان"
         )
 
@@ -6814,8 +6822,17 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if order:
             try:
                 (await asyncio.to_thread(db.set_order_receipt, order["id"], file_id, receipt_type))
+                fb_ai = await _check_order_receipt_with_ai(bot, order["id"], order, file_id, receipt_type, message)
+                if fb_ai.get("reject") and (await _reject_order_by_ai(bot, order["id"], order, file_id, receipt_type, fb_ai)):
+                    await message.answer(
+                        db.get_text('handlers_user.auto_receipt_ai_rejected', '❌ متاسفانه رسید ارسالی شما رد شد. در صورت اشتباه لطفاً با پشتیبانی در ارتباط باشید.'),
+                        reply_markup=kb.menu_for_user(db, message.from_user.id, is_main_bot),
+                    )
+                    await _send_inline_main_menu(message, message.from_user.id)
+                    return
                 await _notify_admins_of_order(
-                    bot, order["id"], receipt_file_id=file_id, receipt_type=receipt_type
+                    bot, order["id"], receipt_file_id=file_id, receipt_type=receipt_type,
+                    ai_note=fb_ai["note"], ai_available=fb_ai["available"],
                 )
             except Exception:
                 log.exception(
@@ -6849,14 +6866,30 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if topup:
             try:
                 (await asyncio.to_thread(db.set_topup_receipt, topup["id"], file_id, receipt_type))
+                try:
+                    fb_ai = await receipt_ai_check.check_receipt(
+                        bot, db,
+                        file_id=file_id, receipt_type=receipt_type,
+                        ref_kind="topup", ref_id=topup["id"],
+                        amount_toman=topup["amount"],
+                        card_number=(await asyncio.to_thread(db.get_setting, "card_number")),
+                        card_holder=(await asyncio.to_thread(db.get_setting, "card_holder")),
+                        message=message,
+                    )
+                except Exception as exc:
+                    log.warning("receipt_ai_check برای شارژ #%s (fallback) خطا داد: %s", topup["id"], exc)
+                    fb_ai = {"note": None, "available": False, "reject": False, "reject_reason": None}
+                (await asyncio.to_thread(db.set_topup_receipt_ai_note, topup["id"], fb_ai["note"]))
                 user_row = (await asyncio.to_thread(db.get_user, message.from_user.id))
                 caption = (
                     f"👛 درخواست شارژ کیف پول #{topup['id']}\n"
-                    f"👤 کاربر: {user_row['first_name'] or ''} (@{user_row['username'] or '---'})\n"
+                    f"👤 کاربر: {escape_html(user_row['first_name'] or '')} (@{escape_html(user_row['username'] or '') or '---'})\n"
                     f"🆔 آیدی عددی: {message.from_user.id}\n"
+                    f"{await _user_purchase_info_line(user_row)}"
                     f"💰 مبلغ: {topup['amount']:,} تومان"
                 )
                 caption += "\n\n" + (await _admin_card_hint_line())
+                caption += _ai_note_line(fb_ai["note"], fb_ai["available"])
                 if not await _report_topup_to_group(bot, topup["id"], file_id, receipt_type, caption, kb.topup_review_kb(topup["id"])):
                     for admin_id in (await asyncio.to_thread(db.list_admins)):
                         factory = lambda aid=admin_id: _send_receipt_to_admin(
