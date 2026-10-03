@@ -208,7 +208,7 @@ _GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 _OPENROUTER_VISION_MODEL = "openrouter/free"
 _MISTRAL_VISION_MODEL = "mistral-small-latest"
 _COHERE_VISION_MODEL = "command-a-vision-07-2025"
-_CLOUDFLARE_VISION_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+_CLOUDFLARE_VISION_MODEL = ai_support.CLOUDFLARE_DEFAULT_VISION_MODEL  # پیش‌فرض؛ مدل واقعی از تنظیم cloudflare_model می‌آید
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -1733,7 +1733,7 @@ def _extra_vision_specs(db) -> list:
             add("Custom: " + row["name"], ai_support.CUSTOM_PREFIX + row["id"], row["keys"], row["model"], row["url"])
     account_id = ai_support.resolve_cloudflare_account_id(db)
     if account_id:
-        add("Cloudflare", "cloudflare", ai_support.resolve_cloudflare_keys(db), _CLOUDFLARE_VISION_MODEL,
+        add("Cloudflare", "cloudflare", ai_support.resolve_cloudflare_keys(db), ai_support.resolve_cloudflare_model(db),
             _CLOUDFLARE_URL.format(account_id=account_id))
     return specs
 

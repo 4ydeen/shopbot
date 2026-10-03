@@ -1352,8 +1352,8 @@ def ai_providers_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"{_dot(ok['anthropic'])} Claude", callback_data="adm_ai_set_anthropic_key"), model_btn("adm_ai_set_modelname:anthropic")],
         [InlineKeyboardButton(text=f"{_dot(ok['mistral'])} Mistral", callback_data="adm_rcpt_agent:mi"),
          InlineKeyboardButton(text=f"{_dot(ok['cohere'])} Cohere", callback_data="adm_rcpt_agent:co")],
-        [InlineKeyboardButton(text=f"{_dot(_field_ok('cft'))} Cloudflare", callback_data="adm_rcpt_agent:cft"),
-         InlineKeyboardButton(text=f"{_dot(_field_ok('cfa'))} Cloudflare Account ID", callback_data="adm_rcpt_agent:cfa")],
+        [InlineKeyboardButton(text=f"{_dot(_field_ok('cft'))} Cloudflare", callback_data="adm_rcpt_agent:cft"), model_btn("adm_ai_cf_model")],
+        [InlineKeyboardButton(text=f"{_dot(_field_ok('cfa'))} Cloudflare Account ID", callback_data="adm_rcpt_agent:cfa")],
         [InlineKeyboardButton(text=f"{_dot(ok['custom'])} {tr('سفارشی (API دلخواه)')}: {custom_count}", callback_data="adm_ai_custom")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")],
     ]
@@ -1422,6 +1422,22 @@ def ai_model_choice_kb(db, model_rows=None) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=f"{mark}{tr(label)}", callback_data=f"adm_ai_model_pick:{provider}:{model_id}")])
     rows.append([InlineKeyboardButton(text=tr("🔄 دریافت مدل‌های آنلاین"), callback_data="adm_ai_discover_models:all")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_agents")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_cloudflare_models_kb(db) -> InlineKeyboardMarkup:
+    """انتخاب مدل بینایی‌دار Cloudflare برای تشخیص رسید. 🆓 = رایگان، 💳 = نیازمند پلن پولی.
+
+    callback_data با اندیس ساخته می‌شود چون نام مدل‌ها از حد ۶۴ بایتی تلگرام بلندتر است."""
+    import ai_support
+    current = ai_support.resolve_cloudflare_model(db)
+    rows = []
+    for idx, (model_id, label) in enumerate(ai_support.cloudflare_model_options(db)):
+        mark = "✅ " if model_id == current else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}{label}"[:60], callback_data=f"adm_ai_cf_model_pick:{idx}")])
+    rows.append([InlineKeyboardButton(text=tr("✍️ ورود دستی مدل"), callback_data="adm_ai_cf_model_manual")])
+    rows.append([InlineKeyboardButton(text=tr("↩️ بازگشت به مدل پیش‌فرض"), callback_data="adm_ai_cf_model_reset")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_ai_providers")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -11614,7 +11614,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             f"🚀 Groq: {_model(ai_support.resolve_groq_model)}\n"
             f"🌐 OpenRouter: {_model(ai_support.resolve_openrouter_model)}\n"
             f"🟢 OpenAI: {_model(ai_support.resolve_openai_model)}\n"
-            f"🟠 Claude: {_model(ai_support.resolve_anthropic_model)}\n\n"
+            f"🟠 Claude: {_model(ai_support.resolve_anthropic_model)}\n"
+            f"☁️ Cloudflare ({tr('رسید')}): {_model(ai_support.resolve_cloudflare_model)}\n\n"
             f"{tr('📖 دریافت کلید')}\n"
             "🔷 Gemini: https://aistudio.google.com/\n"
             "🚀 Groq: https://console.groq.com/\n"
@@ -11807,6 +11808,58 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id): return await deny_support(call)
         await _show_ai_key_prompt(call, state, "anthropic", AdminSetAnthropicKey, "anthropic_api_key", "🔑 کلیدهای Claude", "ANTHROPIC_API_KEY")
 
+    def _cf_models_text() -> str:
+        return tr(
+            "☁️ مدل Cloudflare (تشخیص رسید)\n\n"
+            "🆓 = با سهمیه‌ی روزانه‌ی رایگان (۱۰٬۰۰۰ نورون) کار می‌کند\n"
+            "💳 = فقط با پلن پولی Workers یا اعتبار AI Gateway\n\n"
+            "فقط مدل‌های بینایی‌دار (قابل خواندن تصویر) فهرست شده‌اند. مدل دیگری می‌خواهی؟ «ورود دستی» را بزن.\n\n"
+            f"مدل فعلی: {ai_support.resolve_cloudflare_model(db)}"
+        )
+
+    @router.callback_query(F.data == "adm_ai_cf_model")
+    async def cb_admin_ai_cf_model(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await state.clear()
+        await replace_admin_view(call, _cf_models_text(), reply_markup=kb.ai_cloudflare_models_kb(db))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_ai_cf_model_pick:"))
+    async def cb_admin_ai_cf_model_pick(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        try:
+            idx = int(call.data.split(":", 1)[1])
+        except ValueError:
+            idx = -1
+        options = ai_support.cloudflare_model_options(db)
+        if idx < 0 or idx >= len(options):
+            return await call.answer(tr("❌ مدل نامعتبر است."), show_alert=True)
+        model = options[idx][0]
+        await asyncio.to_thread(db.set_setting, "cloudflare_model", model)
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_model_change", f"cloudflare: {model}")
+        await replace_admin_view(call, _cf_models_text(), reply_markup=kb.ai_cloudflare_models_kb(db))
+        await call.answer(tr("✅ ذخیره شد"))
+
+    @router.callback_query(F.data == "adm_ai_cf_model_reset")
+    async def cb_admin_ai_cf_model_reset(call: CallbackQuery):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await asyncio.to_thread(db.set_setting, "cloudflare_model", "")
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_model_change", "cloudflare: پیش‌فرض")
+        await replace_admin_view(call, _cf_models_text(), reply_markup=kb.ai_cloudflare_models_kb(db))
+        await call.answer(tr("✅ به پیش‌فرض برگشت"))
+
+    @router.callback_query(F.data == "adm_ai_cf_model_manual")
+    async def cb_admin_ai_cf_model_manual(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id): return await deny_support(call)
+        await state.set_state(AdminSetAIModelName.waiting_model)
+        await state.update_data(ai_model_provider="cloudflare")
+        await replace_admin_view(
+            call,
+            tr(f"✍️ نام دقیق مدل Workers AI را بفرست (مثلاً @cf/meta/llama-4-scout-17b-16e-instruct).\n\nمدل باید ورودی تصویر را پشتیبانی کند.\n\nمدل فعلی: {ai_support.resolve_cloudflare_model(db)}"),
+            reply_markup=kb.admin_back_kb("adm_ai_cf_model"),
+        )
+        await call.answer()
+
     @router.callback_query(F.data.startswith("adm_ai_set_modelname:"))
     async def cb_admin_ai_set_modelname(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id): return await deny_support(call)
@@ -11829,8 +11882,11 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         provider = data.get("ai_model_provider")
         model = (message.text or "").strip()
-        if provider not in ("openai", "anthropic") or not model or len(model) > 120 or any(ch.isspace() for ch in model):
+        if provider not in ("openai", "anthropic", "cloudflare") or not model or len(model) > 120 or any(ch.isspace() for ch in model):
             await message.answer(tr("⚠️ نام مدل نامعتبر است؛ دوباره بفرست."))
+            return
+        if provider == "cloudflare" and not model.startswith(("@cf/", "@hf/")):
+            await message.answer(tr("⚠️ نام مدل Workers AI باید با @cf/ شروع شود؛ دوباره بفرست."))
             return
         await state.clear()
         await asyncio.to_thread(db.set_setting, f"{provider}_model", model)

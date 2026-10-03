@@ -230,6 +230,56 @@ def resolve_cloudflare_account_id(db) -> str:
     return _setting(db, "cloudflare_account_id") or getattr(config, "CLOUDFLARE_ACCOUNT_ID", "").strip()
 
 
+# مدل‌های بینایی‌دار Workers AI برای خواندن رسید (فقط مدل‌هایی که تصویر می‌پذیرند).
+# Cloudflare API فیلدی برای «رایگان/پولی» برنمی‌گرداند، ولی صفحه‌ی قیمت‌گذاری
+# فهرست مدل‌هایی را که پلن پولی/اعتبار AI Gateway می‌خواهند اعلام کرده؛ همان
+# فهرست را در CLOUDFLARE_PAID_ONLY_MODELS نگه می‌داریم (آخرین بررسی: اکتبر ۲۰۲۶).
+# هر مدل دیگر با سهمیه‌ی روزانه‌ی رایگان (۱۰٬۰۰۰ نورون) قابل استفاده است.
+CLOUDFLARE_DEFAULT_VISION_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+CLOUDFLARE_VISION_MODELS = (
+    ("@cf/meta/llama-4-scout-17b-16e-instruct", "Llama 4 Scout 17B"),
+    ("@cf/google/gemma-4-26b-a4b-it", "Gemma 4 26B"),
+    ("@cf/meta/llama-3.2-11b-vision-instruct", "Llama 3.2 11B Vision"),
+    ("@cf/mistralai/mistral-small-3.1-24b-instruct", "Mistral Small 3.1 24B"),
+    ("@cf/moonshotai/kimi-k2.6", "Kimi K2.6"),
+)
+CLOUDFLARE_PAID_ONLY_MODELS = frozenset({
+    "@cf/moonshotai/kimi-k2.6",
+    "@cf/moonshotai/kimi-k2.7-code",
+    "@cf/zai-org/glm-5.2",
+    "@cf/zai-org/glm-5.3",
+    "@cf/zai-org/glm-5.3-flash",
+    "@cf/deepseek-ai/deepseek-v4-flash-0731",
+    "@cf/deepseek-ai/deepseek-v4-pro-0813",
+})
+
+
+def cloudflare_model_is_free(model_id: str) -> bool:
+    return model_id not in CLOUDFLARE_PAID_ONLY_MODELS
+
+
+def cloudflare_model_label(model_id: str, label: str = "") -> str:
+    """برچسب نمایشی: 🆓 = با سهمیه‌ی روزانه‌ی رایگان قابل استفاده، 💳 = نیازمند پلن پولی."""
+    return f"{'🆓' if cloudflare_model_is_free(model_id) else '💳'} {label or model_id}"
+
+
+def resolve_cloudflare_model(db) -> str:
+    model = (_setting(db, "cloudflare_model") or "").strip()
+    return model or CLOUDFLARE_DEFAULT_VISION_MODEL
+
+
+def cloudflare_model_options(db) -> list:
+    """[(id, label)] برای انتخاب مدل: رایگان‌ها اول؛ مدل فعلی (حتی دستی) همیشه در لیست است."""
+    rows = sorted(CLOUDFLARE_VISION_MODELS, key=lambda r: not cloudflare_model_is_free(r[0]))
+    out = [(m, cloudflare_model_label(m, l)) for m, l in rows]
+    current = resolve_cloudflare_model(db)
+    if current not in {m for m, _ in rows}:
+        # مدل دستی: رایگان/پولی بودنش را نمی‌دانیم، پس برچسب 🆓 نمی‌زنیم (مگر در فهرست پولی‌ها باشد).
+        label = cloudflare_model_label(current) if current in CLOUDFLARE_PAID_ONLY_MODELS else f"✏️ {current}"
+        out.insert(0, (current, label))
+    return out
+
+
 RECEIPT_AGENT_FIELDS = (
     ("mi", "Mistral", "mistral_api_key", "MISTRAL_API_KEY", "https://console.mistral.ai/api-keys", True),
     ("co", "Cohere", "cohere_api_key", "COHERE_API_KEY", "https://dashboard.cohere.com/api-keys", True),
