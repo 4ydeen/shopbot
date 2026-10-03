@@ -11705,7 +11705,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         provider = call.data.split(":", 1)[1]
-        if provider not in ("openai", "anthropic"):
+        if provider not in ("openai", "anthropic", "mistral", "cohere"):
             return await call.answer(tr("❌ Provider نامعتبر است."), show_alert=True)
         rows = await ai_support.discover_provider_models(db, provider, force=True)
         if not rows:
@@ -11723,7 +11723,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             return await call.answer(tr("❌ مدل نامعتبر است."), show_alert=True)
         provider, idx = parts[1], int(parts[2])
         rows = await ai_support.discover_provider_models(db, provider)
-        if provider not in ("openai", "anthropic") or idx < 0 or idx >= len(rows):
+        if provider not in ("openai", "anthropic", "mistral", "cohere") or idx < 0 or idx >= len(rows):
             return await call.answer(tr("❌ مدل نامعتبر است."), show_alert=True)
         model = rows[idx][0]
         await asyncio.to_thread(db.set_setting, f"{provider}_model", model)
@@ -11736,7 +11736,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         provider = call.data.split(":", 1)[1]
-        if provider not in ("openai", "anthropic"):
+        if provider not in ("openai", "anthropic", "mistral", "cohere"):
             return await call.answer(tr("❌ Provider نامعتبر است."), show_alert=True)
         await state.set_state(AdminSetAIModelName.waiting_model)
         await state.update_data(ai_model_provider=provider)
@@ -11864,10 +11864,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     async def cb_admin_ai_set_modelname(call: CallbackQuery, state: FSMContext):
         if not full_admin_only(call.from_user.id): return await deny_support(call)
         provider = call.data.split(":", 1)[1]
-        if provider not in ("openai", "anthropic"):
+        if provider not in ("openai", "anthropic", "mistral", "cohere"):
             return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
         current = ai_support.resolve_provider_model(db, provider) or "—"
-        label = "OpenAI" if provider == "openai" else "Claude"
+        label = ai_support.provider_display_name(db, provider)
         rows = await ai_support.discover_provider_models(db, provider, force=True)
         if rows:
             await state.clear()
@@ -11892,7 +11892,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         data = await state.get_data()
         provider = data.get("ai_model_provider")
         model = (message.text or "").strip()
-        if provider not in ("openai", "anthropic", "cloudflare") or not model or len(model) > 120 or any(ch.isspace() for ch in model):
+        if provider not in ("openai", "anthropic", "mistral", "cohere", "cloudflare") or not model or len(model) > 120 or any(ch.isspace() for ch in model):
             await message.answer(tr("⚠️ نام مدل نامعتبر است؛ دوباره بفرست."))
             return
         if provider == "cloudflare" and not model.startswith(("@cf/", "@hf/")):

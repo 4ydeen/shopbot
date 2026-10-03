@@ -436,6 +436,27 @@ async def discover_provider_models(db, provider: str, base_url: str = "", api_ke
         except Exception as exc:
             _log.warning("Anthropic model discovery failed: %s", exc)
             return cached[1] if cached else []
+    if provider == "cohere":
+        if not api_key:
+            return []
+        import time
+        cache_key = ("cohere", api_key)
+        cached = _model_discovery_cache.get(cache_key)
+        if not force and cached and time.time() - cached[0] < _MODEL_DISCOVERY_TTL:
+            return cached[1]
+        try:
+            headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                async with session.get("https://api.cohere.com/v1/models", params={"endpoint": "chat", "page_size": 100}, headers=headers) as resp:
+                    if resp.status >= 400:
+                        return []
+                    data = await resp.json(content_type=None)
+            rows = _model_rows_from_payload(data)
+            _model_discovery_cache[cache_key] = (time.time(), rows)
+            return rows
+        except Exception as exc:
+            _log.warning("Cohere model discovery failed: %s", exc)
+            return cached[1] if cached else []
     return await discover_openai_compatible_models(base_url, api_key, force)
 
 
