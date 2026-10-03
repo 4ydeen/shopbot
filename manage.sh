@@ -1301,6 +1301,9 @@ setup_bot_mode() {
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 100m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:$WEBHOOK_PORT;
@@ -1407,6 +1410,9 @@ EOF
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 100m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:8001;
@@ -1557,6 +1563,9 @@ EOF
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 100m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:8002;
@@ -1771,6 +1780,9 @@ setup_panel_proxy() {
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 100m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location ${BACKEND_PATH} {
         proxy_pass ${BACKEND_SCHEME}://${BACKEND};
@@ -2182,6 +2194,9 @@ EOF
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 100m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:8003;
