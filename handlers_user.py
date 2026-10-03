@@ -41,7 +41,7 @@ from config_delivery import deliver_config_to_user, send_individual_configs, bui
 from renewal_engine import execute_renewal, RenewalError
 import renewal_log
 from temp_messages import schedule_message_autodelete
-from force_join import is_channel_member, CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK, terms_keyboard
+from force_join import is_channel_member, CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK, terms_keyboard, _join_keyboard
 from sub_info import fetch_sub_info, format_sub_info_fa, fetch_individual_links
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
@@ -219,7 +219,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
 
     @router.callback_query(F.data.startswith("language:"))
-    async def cb_language(call: CallbackQuery, state: FSMContext):
+    async def cb_language(call: CallbackQuery, state: FSMContext, bot: Bot):
         lang = normalize_language(call.data.split(":", 1)[1])
         if not await asyncio.to_thread(is_language_enabled, db, lang):
             await call.answer(tr("زبان در حال حاضر فعال نیست."), show_alert=True)
@@ -234,25 +234,32 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await call.answer(language_label(lang))
             data = await state.get_data()
             if data.get("pending_welcome"):
-                # اولین انتخاب زبان بعد از /start: به‌جای پیام تغییر زبان، مستقیم
-                # پیام خوش‌آمد و منوی اصلی فرستاده می‌شود.
+                # اولین انتخاب زبان بعد از /start: به‌جای پیام تغییر زبان، مسیر عادی
+                # ورود ادامه پیدا می‌کند: عضویت اجباری -> قوانین -> پیام خوش‌آمد و
+                # منو (+ اکشن‌های دیپ‌لینک که قبل از انتخاب زبان در state ذخیره شده‌اند).
+                await state.update_data(pending_welcome=False)
+                fj = await asyncio.to_thread(db.get_force_join_settings)
+                if (
+                    fj["enabled"] and fj["channel"]
+                    and not db.is_admin(user_id)
+                    and not await asyncio.to_thread(db.is_force_join_exempt, user_id)
+                    and not await is_channel_member(bot, fj["channel"], user_id)
+                ):
+                    await call.message.answer(
+                        tr("برای استفاده از بات، ابتدا باید در کانال زیر عضو شوید؛ سپس دکمه‌ی «بررسی مجدد عضویت» را بزنید:"),
+                        reply_markup=_join_keyboard(fj["channel"]),
+                    )
+                    return
                 terms = await asyncio.to_thread(db.get_terms_settings)
                 if terms["enabled"] and not await asyncio.to_thread(db.is_terms_accepted, user_id):
-                    await state.update_data(pending_welcome=True, pending_terms=True, pending_post_start_actions=[])
+                    await state.update_data(pending_terms=True)
                     await call.message.answer(terms["text"], reply_markup=terms_keyboard())
                     return
-                await state.update_data(pending_welcome=False)
-                welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
-                reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
-                if reply_enabled:
-                    await call.message.answer(welcome, reply_markup=kb.menu_for_user(db, user_id, is_main_bot))
-                    await _send_inline_main_menu(call.message, user_id)
-                else:
-                    inline_kb = (await asyncio.to_thread(kb.inline_menu_for_user, db, user_id, is_main_bot))
-                    await call.message.answer(
-                        welcome,
-                        reply_markup=inline_kb if inline_kb is not None else kb.menu_for_user(db, user_id, is_main_bot),
-                    )
+                try:
+                    target = call.message.model_copy(update={"from_user": call.from_user})
+                except Exception:
+                    target = call.message
+                await _send_welcome_after_terms(target, user_id, state, bot)
             else:
                 await call.message.answer(
                     db.get_text("handlers_user.language.changed", "زبان با موفقیت تغییر کرد.")
@@ -739,6 +746,26 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             elif token:
                 (await asyncio.to_thread(db.set_acquisition_source, message.from_user.id, token))
 
+        # کاربر تازه (یا کسی که هنوز زبان را انتخاب نکرده): قبل از هر چیز (قوانین،
+        # پیام خوش‌آمد، منو) زبان ربات پرسیده می‌شود. تشخیص «تازه بودن» باید بر اساس
+        # پرچم ذخیره‌شده‌ی language_selected باشد، نه وجود ردیف کاربر؛ چون
+        # BlockedUserMiddleware ردیف را قبل از رسیدن به این هندلر می‌سازد.
+        # دیپ‌لینک‌ها در state می‌مانند و بعد از انتخاب زبان (در cb_language) اجرا می‌شوند.
+        if not await asyncio.to_thread(db.is_user_language_selected, message.from_user.id):
+            if not existing_user:
+                await _notify_new_signup(message, bot)
+            await state.update_data(
+                pending_welcome=True, pending_terms=False, pending_post_start_actions=post_start_actions
+            )
+            await message.answer(
+                db.get_text(
+                    "handlers_user.language.choose_first",
+                    "🌐 لطفاً زبان خود را انتخاب کنید\nPlease choose your language:",
+                ),
+                reply_markup=kb.language_kb(db),
+            )
+            return
+
         # قوانین باید بعد از عضویت (یا معافیت عضویت) و قبل از استفاده از بات تأیید شوند.
         # دیپ‌لینک‌ها تا اینجا پردازش و برای ادامه در state نگه داشته می‌شوند.
         if (await asyncio.to_thread(db.get_setting, "terms_enabled", "0")) == "1" and not await asyncio.to_thread(db.is_terms_accepted, message.from_user.id):
@@ -754,16 +781,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         welcome = (await asyncio.to_thread(db.get_setting, "welcome_text"))
         reply_enabled = (await asyncio.to_thread(db.get_setting, "main_menu_reply_enabled", "1")) == "1"
-        if not existing_user:
-            await _notify_new_signup(message, bot)
-            # کاربر تازه: به‌جای تنظیم خودکار زبان بر اساس لوکیل تلگرام، از او سوال می‌شود.
-            # پیام خوش‌آمد/منو بلافاصله بعد از انتخاب زبان (در cb_language) فرستاده می‌شود.
-            await state.update_data(pending_welcome=True)
-            await message.answer(
-                db.get_text("handlers_user.language.choose", "لطفاً زبان موردنظر را انتخاب کنید:"),
-                reply_markup=kb.language_kb(db),
-            )
-        elif reply_enabled:
+        if reply_enabled:
             # منوی پایین فعال است: طبق روال قبلی، پیام خوش‌آمد با منوی پایین
             # ارسال می‌شود و منوی شیشه‌ای (در صورت فعال بودن) در پیام جدا می‌آید،
             # چون یک پیام نمی‌تواند هم‌زمان هر دو نوع کیبورد را داشته باشد.

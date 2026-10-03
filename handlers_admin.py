@@ -9861,7 +9861,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     @router.callback_query(F.data == "adm_receipt_agents")
     async def cb_admin_receipt_agents(call: CallbackQuery, state: FSMContext):
-        # ایجنت‌های رسید به بخش جدا «ایجنت‌های هوش مصنوعی» منتقل شدند؛ این کال‌بک قدیمی همان‌جا هدایت می‌کند.
+        # کلیدهای رسید به لیست «ارائه‌دهنده‌ها» در بخش «هوش مصنوعی» منتقل شدند؛ این کال‌بک قدیمی همان‌جا هدایت می‌کند.
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         await _show_ai_agents_hub(call, state)
@@ -9889,7 +9889,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             call,
             tr(f"🔑 {title}\n\nمقدار را بفرست؛ برای چند کلید هر کلید در یک خط."
                f"\n🔗 راهنما/ثبت‌نام: {link}\n\nمقدار فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {env_name}"),
-            reply_markup=kb.admin_back_kb("adm_ai_agents"),
+            reply_markup=kb.admin_back_kb("adm_ai_providers"),
         )
         await call.answer()
 
@@ -9908,12 +9908,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             keys = ai_support._split_keys(text)
             value = "\n".join(keys if secret else keys[:1])
         await asyncio.to_thread(db.set_setting, setting_key, value)
-        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "receipt_agent_key_change", f"{title}: {'حذف شد' if not value else 'ذخیره شد'}")
+        await asyncio.to_thread(db.log_admin_action, message.from_user.id, "ai_provider_key_change", f"{title}: {'حذف شد' if not value else 'ذخیره شد'}")
         try:
             await message.delete()
         except Exception:
             pass
-        await message.answer(tr(f"✅ {title} {'حذف شد.' if not value else 'ذخیره شد.'}"), reply_markup=kb.ai_agents_hub_kb(db))
+        await message.answer(tr(f"✅ {title} {'حذف شد.' if not value else 'ذخیره شد.'}"), reply_markup=kb.ai_providers_kb(db))
 
     @router.callback_query(F.data == "adm_set_card_edit")
     async def cb_admin_set_card_edit(call: CallbackQuery, state: FSMContext):
@@ -11554,7 +11554,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     async def _show_ai_faq_menu(call: CallbackQuery):
         """منوی دستیار هوشمند پشتیبانی: فقط روشن/خاموش و سوالات متداول.
-        کلیدها/مدل‌ها/ارائه‌دهنده‌ها در «ایجنت‌های هوش مصنوعی» (adm_ai_agents) هستند."""
+        کلیدها/مدل‌ها/ارائه‌دهنده‌ها در «هوش مصنوعی» (adm_ai_agents) هستند."""
         items = await asyncio.to_thread(db.get_ai_faq_items)
         enabled = db.get_setting("ai_support_enabled", "1") == "1"
         try:
@@ -11564,8 +11564,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         text = (
             f"{tr('🤖 دستیار هوشمند پشتیبانی')}\n\n"
             f"{tr('وضعیت')}: {tr('🟢 فعال') if enabled else tr('🔴 غیرفعال')}\n"
-            f"{tr('ایجنت آماده')}: {tr('🟢 بله') if ready else tr('⚪️ نه (کلیدی تنظیم نشده)')}\n\n"
-            f"{tr('🔑 کلیدها، مدل‌ها و ارائه‌دهنده‌ها را از «⚙️ تنظیم ایجنت‌های هوش مصنوعی» تنظیم کن.')}\n\n"
+            f"{tr('آماده')}: {tr('🟢 بله') if ready else tr('⚪️ نه (کلیدی تنظیم نشده)')}\n\n"
+            f"{tr('🔑 کلیدها، مدل‌ها و ارائه‌دهنده‌ها را از «⚙️ کلیدها و مدل‌ها» تنظیم کن.')}\n\n"
         )
         if items:
             text += tr("سوالات متداولی که به دستیار آموزش داده شده (برای حذف، روی 🗑 بزن):")
@@ -11578,50 +11578,50 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             provider_label = ai_support.PROVIDER_LABELS.get(ai_support.resolve_provider_mode(db), "🤖 خودکار")
         except Exception:
             provider_label = "🤖 خودکار"
-        statuses = []
-        for name, label in (("gemini", "Gemini"), ("groq", "Groq"), ("openrouter", "OpenRouter"), ("openai", "OpenAI"), ("anthropic", "Claude")):
-            try:
-                configured = bool(ai_support.resolve_provider_keys(db, name))
-                if name in ("openai", "anthropic"):
-                    configured = configured and bool(ai_support.resolve_provider_model(db, name))
-            except Exception:
-                configured = False
-            statuses.append(f"{'🟢' if configured else '⚪️'} {label}")
-        try:
-            custom_count = len([r for r in ai_support.custom_providers(db) if r["keys"] and r["model"]])
-        except Exception:
-            custom_count = 0
-        statuses.append(f"{'🟢' if custom_count else '⚪️'} {tr('سفارشی')}: {custom_count}")
-        rcpt = []
-        for _id, title, setting_key, env_name, _link, _secret in ai_support.RECEIPT_AGENT_FIELDS:
-            if _id == "cfa":
-                continue
-            ok = ai_support.receipt_agent_configured(db, setting_key, env_name)
-            rcpt.append(f"{'🟢' if ok else '⚪️'} {title.split(' - ')[0]}")
+        statuses = kb.ai_providers_status(db)
+        active = [label for _id, label, ok in statuses if ok]
+        head = (
+            f"{tr('🧬 هوش مصنوعی')}\n\n"
+            f"{tr('کلیدها و مدل‌های هوش مصنوعی ربات یک‌جا تنظیم می‌شوند و در همه‌ی بخش‌های هوشمند (پشتیبان مشتری، دستیار مدیر، بیزنس، کمپین، رسید و ...) استفاده می‌شوند.')}\n\n"
+        )
+        if not active:
+            return (
+                head
+                + f"{tr('⚪️ هنوز هیچ ارائه‌دهنده‌ای تنظیم نشده.')}\n\n"
+                + f"{tr('شروع سریع (۲ دقیقه):')}\n"
+                + f"{tr('۱) از https://aistudio.google.com/ یک کلید رایگان Gemini بگیر.')}\n"
+                + f"{tr('۲) «🚀 شروع سریع با Gemini رایگان» را بزن و کلید را بفرست.')}\n"
+                + f"{tr('۳) تمام؛ بقیه‌ی ارائه‌دهنده‌ها اختیاری‌اند.')}"
+            )
+        return (
+            head
+            + f"{tr('🟢 فعال')}: {' | '.join(active)}\n"
+            + f"{tr('🔀 مسیر')}: {tr(provider_label)}\n\n"
+            + f"{tr('💡 پیشنهاد: مسیر «خودکار» را بگذار تا در صورت خطای سهمیه/اختلال، ارائه‌دهنده‌ی بعدی امتحان شود.')}"
+        )
 
-        def _model(fn, default):
+    def _ai_providers_text() -> str:
+        def _model(fn, default="—"):
             try:
                 return fn(db) or default
             except Exception:
                 return default
 
         return (
-            f"{tr('🧬 ایجنت‌های هوش مصنوعی')}\n\n"
-            f"{tr('همه‌ی کلیدها و مدل‌های هوش مصنوعی ربات یک‌جا تنظیم می‌شوند. هر ایجنتی که کلید دارد، در بخش‌هایی مثل پشتیبان مشتری، دستیار مدیر، تلگرام بیزنس، کمپین/پست کانال، پیشنهاد ریزش و درک تصویر/صدا استفاده می‌شود.')}\n\n"
-            f"{tr('🔀 مسیر')}: {tr(provider_label)}\n"
-            f"{' | '.join(statuses)}\n\n"
-            f"🔷 Gemini: {_model(ai_support.resolve_gemini_model, '—')}\n"
-            f"🚀 Groq: {_model(ai_support.resolve_groq_model, '—')}\n"
-            f"🌐 OpenRouter: {_model(ai_support.resolve_openrouter_model, '—')}\n"
-            f"🟢 OpenAI: {_model(ai_support.resolve_openai_model, '—')}\n"
-            f"🟠 Claude: {_model(ai_support.resolve_anthropic_model, '—')}\n\n"
-            f"{tr('🧾 ایجنت‌های تشخیص رسید')}: {' | '.join(rcpt)}\n"
-            f"{tr('(هر ایجنتی که کلید دارد روی هر رسید به‌صورت موازی و مستقل بررسی می‌کند. Gemini/Groq/OpenRouter بالا هم در رسید شرکت می‌کنند.)')}\n\n"
+            f"{tr('🔌 ارائه‌دهنده‌ها و کلیدها')}\n\n"
+            f"{tr('روی نام هر ارائه‌دهنده بزن تا کلیدش را بفرستی؛ «🧠 مدل» مدل را عوض می‌کند. 🟢 یعنی تنظیم شده، ⚪️ یعنی نشده.')}\n\n"
+            f"🔷 Gemini: {_model(ai_support.resolve_gemini_model)}\n"
+            f"🚀 Groq: {_model(ai_support.resolve_groq_model)}\n"
+            f"🌐 OpenRouter: {_model(ai_support.resolve_openrouter_model)}\n"
+            f"🟢 OpenAI: {_model(ai_support.resolve_openai_model)}\n"
+            f"🟠 Claude: {_model(ai_support.resolve_anthropic_model)}\n\n"
             f"{tr('📖 دریافت کلید')}\n"
             "🔷 Gemini: https://aistudio.google.com/\n"
             "🚀 Groq: https://console.groq.com/\n"
-            "🌐 OpenRouter: https://openrouter.ai/\n\n"
-            f"{tr('💡 پیشنهاد: مسیر «خودکار» را بگذار تا در صورت خطای سهمیه/اختلال، ایجنت بعدی امتحان شود.')}"
+            "🌐 OpenRouter: https://openrouter.ai/\n"
+            "Mistral: https://console.mistral.ai/api-keys\n"
+            "Cohere: https://dashboard.cohere.com/api-keys\n"
+            "Cloudflare: https://dash.cloudflare.com/profile/api-tokens"
         )
 
     async def _show_ai_agents_hub(call: CallbackQuery, state: FSMContext = None):
@@ -11634,6 +11634,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not full_admin_only(call.from_user.id):
             return await deny_support(call)
         await _show_ai_agents_hub(call, state)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_ai_providers")
+    async def cb_admin_ai_providers(call: CallbackQuery, state: FSMContext):
+        if not full_admin_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        await replace_admin_view(call, _ai_providers_text(), reply_markup=kb.ai_providers_kb(db))
         await call.answer()
 
     @router.callback_query(F.data == "adm_ai_support_settings")
@@ -11719,7 +11727,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         model = rows[idx][0]
         await asyncio.to_thread(db.set_setting, f"{provider}_model", model)
         await asyncio.to_thread(db.log_admin_action, call.from_user.id, "ai_model_change", f"{provider}: {model}")
-        await replace_admin_view(call, tr(f"✅ مدل {provider} روی «{model}» تنظیم شد."), reply_markup=kb.ai_agents_hub_kb(db))
+        await replace_admin_view(call, tr(f"✅ مدل {provider} روی «{model}» تنظیم شد."), reply_markup=kb.ai_providers_kb(db))
         await call.answer(tr("✅ ذخیره شد"))
 
     @router.callback_query(F.data.startswith("adm_ai_manual_model:"))
@@ -11770,7 +11778,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             call,
             tr(f"{title}\n\nکلید یا چند کلید را بفرست؛ هر کلید در یک خط. در صورت 429 کلید بعدی امتحان می‌شود."
             f"{guide}\n\nکلیدهای فعلی:\n{masked}\n\nبرای حذف: «حذف»\n\nENV جایگزین: {source_env}"),
-            reply_markup=kb.admin_back_kb("adm_ai_agents"),
+            reply_markup=kb.admin_back_kb("adm_ai_providers"),
         )
         await call.answer()
 
@@ -11812,7 +11820,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await replace_admin_view(
             call,
             tr(f"🧠 نام مدل {label}\n\nنام دقیق مدل را مطابق مستندات رسمی بفرست.\n\nمدل فعلی: {current}"),
-            reply_markup=kb.admin_back_kb("adm_ai_agents"),
+            reply_markup=kb.admin_back_kb("adm_ai_providers"),
         )
         await call.answer()
 
@@ -11827,7 +11835,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await state.clear()
         await asyncio.to_thread(db.set_setting, f"{provider}_model", model)
         await asyncio.to_thread(db.log_admin_action, message.from_user.id, "ai_model_change", f"{provider}: {model}")
-        await message.answer(tr(f"✅ مدل روی «{model}» تنظیم شد."), reply_markup=kb.ai_agents_hub_kb(db))
+        await message.answer(tr(f"✅ مدل روی «{model}» تنظیم شد."), reply_markup=kb.ai_providers_kb(db))
 
     async def _show_ai_custom_menu(call: CallbackQuery):
         rows = ai_support.custom_providers(db)
@@ -12211,14 +12219,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if text in ("حذف", "/حذف", "-"):
             await asyncio.to_thread(db.set_setting, setting_key, "")
             await asyncio.to_thread(db.log_admin_action, message.from_user.id, action, "کلیدها حذف شدند.")
-            await message.answer(db.get_text('handlers_admin.auto_3f0ed323', '✅ کلیدها حذف شدند.'), reply_markup=kb.ai_agents_hub_kb(db))
+            await message.answer(db.get_text('handlers_admin.auto_3f0ed323', '✅ کلیدها حذف شدند.'), reply_markup=kb.ai_providers_kb(db))
             return
         keys = ai_support._split_keys(text)
         await asyncio.to_thread(db.set_setting, setting_key, "\n".join(keys))
         await asyncio.to_thread(db.log_admin_action, message.from_user.id, action, f"{len(keys)} کلید ذخیره شد.")
         try: await message.delete()
         except Exception: pass
-        await message.answer(tr(f"✅ {len(keys)} کلید ذخیره شد."), reply_markup=kb.ai_agents_hub_kb(db))
+        await message.answer(tr(f"✅ {len(keys)} کلید ذخیره شد."), reply_markup=kb.ai_providers_kb(db))
 
     @router.message(AdminSetGeminiKey.waiting_key)
     async def process_set_gemini_key(message: Message, state: FSMContext):
