@@ -11867,9 +11867,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if provider not in ("openai", "anthropic"):
             return await call.answer(db.get_text('handlers_admin.auto_bc1a559a', '❌ مدل نامعتبر'), show_alert=True)
         current = ai_support.resolve_provider_model(db, provider) or "—"
+        label = "OpenAI" if provider == "openai" else "Claude"
+        rows = await ai_support.discover_provider_models(db, provider, force=True)
+        if rows:
+            await state.clear()
+            await replace_admin_view(
+                call,
+                tr(f"🧠 مدل‌های {label}؛ یکی را انتخاب کن:\n\nمدل فعلی: {current}"),
+                reply_markup=kb.ai_single_provider_models_kb(provider, rows, ai_support.resolve_provider_model(db, provider)),
+            )
+            await call.answer()
+            return
         await state.set_state(AdminSetAIModelName.waiting_model)
         await state.update_data(ai_model_provider=provider)
-        label = "OpenAI" if provider == "openai" else "Claude"
         await replace_admin_view(
             call,
             tr(f"🧠 نام مدل {label}\n\nنام دقیق مدل را مطابق مستندات رسمی بفرست.\n\nمدل فعلی: {current}"),
