@@ -13453,14 +13453,6 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         stats = await asyncio.to_thread(db.get_user_full_stats, tg_id)
         is_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
         text = _fmt_user_full_stats_report(stats)
-        if report_router.is_report_group_message(db, call.message):
-            try:
-                await call.bot.send_message(call.from_user.id, text)
-            except Exception:
-                await call.answer(tr("ارسال به پی‌وی ناموفق بود؛ ابتدا در پی‌وی بات /start بزن."), show_alert=True)
-                return
-            await call.answer(tr("پروفایل در پی‌وی بات برایت ارسال شد."))
-            return
         markup = kb.user_full_stats_kb(tg_id, is_blocked)
         try:
             await call.message.reply(text, reply_markup=markup)
