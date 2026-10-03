@@ -4745,6 +4745,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             # ثابت است.
             products = [p for p in all_products if p["provision_server_id"] == current_panel_id]
             if not products:
+                products = all_products
+            if not products:
                 await call.answer(db.get_text('handlers_user.auto_4559ece1', 'در حال حاضر پلن تمدیدی روی همین پنل VPN تعریف نشده.'), show_alert=True)
                 return
             await call.answer()

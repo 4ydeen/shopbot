@@ -615,8 +615,8 @@ def service_detail_kb(db, cb_id: str, kind: str, deletable: bool, show_links: bo
         row7.append(InlineKeyboardButton(text=tr("⚠️ گزارش اختلال"), callback_data=f"svc_disruption:{cb_id}"))
         if on("svc_show_rating"):
             row7.append(InlineKeyboardButton(text=tr("⭐ امتیاز به سرویس"), callback_data=f"svc_rate:{cb_id}"))
-        if row7:
-            rows.append(row7)
+        for i in range(0, len(row7), 2):
+            rows.append(row7[i:i + 2])
     if kind == "custom":
         row_inquiry = []
         if on("svc_show_inquiry"):
