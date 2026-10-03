@@ -46,12 +46,12 @@ fetch_project_code() {
         return 0
     fi
 
-    echo -e "${YELLOW}⚠️  دسترسی git مسدود شد، در حال دریافت از طریق آرشیو مستقیم...${RESET}"
+    echo -e "${YELLOW}$(t git_blocked_fallback)${RESET}"
     local tmp_tar tmp_dir
     tmp_tar=$(mktemp)
     tmp_dir=$(mktemp -d)
     if ! curl -fsSL "https://codeload.github.com/${GITHUB_OWNER}/${GITHUB_REPO}/tar.gz/refs/heads/${GITHUB_BRANCH}" -o "$tmp_tar"; then
-        echo -e "${RED}❌ دانلود آرشیو پروژه هم ناموفق بود. اتصال اینترنت سرور را بررسی کن.${RESET}"
+        echo -e "${RED}$(t archive_download_failed)${RESET}"
         rm -f "$tmp_tar"; rm -rf "$tmp_dir"
         return 1
     fi
@@ -121,6 +121,7 @@ if [ -f "$LANG_FILE" ]; then
     _saved_lang=$(tr -d '[:space:]' < "$LANG_FILE" 2>/dev/null)
     [ "$_saved_lang" = "fa" ] && APP_LANG="fa"
 fi
+export SHOPVPN_UI_LANG="$APP_LANG"
 
 toggle_lang() {
     if [ "$APP_LANG" = "en" ]; then
@@ -129,6 +130,7 @@ toggle_lang() {
         APP_LANG="en"
     fi
     echo "$APP_LANG" > "$LANG_FILE" 2>/dev/null
+    export SHOPVPN_UI_LANG="$APP_LANG"
 }
 
 declare -A MSG_EN
@@ -174,6 +176,14 @@ MSG_EN[pause_prompt]="Press Enter to return to the menu..."
 MSG_FA[pause_prompt]="برای بازگشت به منو، Enter را بزن..."
 
 # install_bot
+MSG_EN[git_blocked_fallback]="⚠️  Git access was blocked, downloading via the direct archive..."
+MSG_FA[git_blocked_fallback]="⚠️  دسترسی git مسدود شد، در حال دریافت از طریق آرشیو مستقیم..."
+MSG_EN[archive_download_failed]="❌ Downloading the project archive failed too. Check the server's internet connection."
+MSG_FA[archive_download_failed]="❌ دانلود آرشیو پروژه هم ناموفق بود. اتصال اینترنت سرور را بررسی کن."
+MSG_EN[install_translation_runtime]="🌍 Installing the local translation engine and language models..."
+MSG_FA[install_translation_runtime]="🌍 نصب خودکار موتور ترجمه محلی و مدل‌های زبان..."
+MSG_EN[translation_install_incomplete]="⚠️ Translation engine install did not complete; the bot keeps running and will retry on the next update."
+MSG_FA[translation_install_incomplete]="⚠️ نصب موتور ترجمه کامل نشد؛ بات ادامه می‌دهد و در آپدیت بعدی دوباره تلاش می‌کند."
 MSG_EN[installing_prereqs]="📦 Checking and installing prerequisites (git, python3, pip, venv)..."
 MSG_FA[installing_prereqs]="📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv)..."
 MSG_EN[already_installed_pulling]="⚠️ Project is already installed. Fetching the latest version..."
@@ -818,9 +828,9 @@ EOF
         echo -e "${GREEN}$(t env_exists)${RESET}"
     fi
 
-    echo -e "${CYAN}🌍 نصب خودکار موتور ترجمه محلی و مدل‌های زبان...${RESET}"
+    echo -e "${CYAN}$(t install_translation_runtime)${RESET}"
     if ! bash "$INSTALL_DIR/setup_local_translation.sh"; then
-        echo -e "${YELLOW}⚠️ نصب موتور ترجمه کامل نشد؛ بات ادامه می‌دهد و در آپدیت بعدی دوباره تلاش می‌کند.${RESET}"
+        echo -e "${YELLOW}$(t translation_install_incomplete)${RESET}"
     fi
 
     echo -e "${CYAN}$(t creating_service)${RESET}"

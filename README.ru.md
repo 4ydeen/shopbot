@@ -51,6 +51,9 @@
 
 - 📢 **Проект:** [@celenorbot](https://t.me/celenorbot)
 - 👤 **Автор:** [@celenor](https://t.me/celenor)
+- 💎 **Адреса для пожертвований:**
+  - `USDT-BNB (BEP20):` `0x3c026D27DEbE24d659d6dDcF074b3063Fd47bc63`
+  - `USDT-TRX (TRC20):` `TBm712Gdcbfp3Tkv1CpNgfwUfKuFNn8iWE`
 
 ### ⚡ Краткое описание
 

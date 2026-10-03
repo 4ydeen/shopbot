@@ -51,6 +51,13 @@ set_env() {
   fi
 }
 
+# UI language: follow manage.sh (SHOPVPN_UI_LANG) or its saved choice; default English.
+UI_LANG="${SHOPVPN_UI_LANG:-}"
+if [ -z "$UI_LANG" ] && [ -f "$HOME/.shopvpn_manage_lang" ]; then
+  UI_LANG="$(tr -d '[:space:]' < "$HOME/.shopvpn_manage_lang" 2>/dev/null || true)"
+fi
+[ "$UI_LANG" = "fa" ] || UI_LANG="en"
+
 has_tty() {
   ( : </dev/tty ) 2>/dev/null
 }
@@ -81,16 +88,25 @@ choose_languages() {
   elif has_tty; then
     local codes=() line code native name idx=1 answer
     echo "" >/dev/tty
-    echo "[translation] زبان‌هایی که می‌خواهید نصب شوند را انتخاب کنید (فارسی و انگلیسی همیشه فعال‌اند)." >/dev/tty
-    echo "[translation] Choose the languages to install (Persian and English are always available)." >/dev/tty
+    if [ "$UI_LANG" = "fa" ]; then
+      echo "[translation] زبان‌هایی که می‌خواهید نصب شوند را انتخاب کنید (فارسی و انگلیسی همیشه فعال‌اند)." >/dev/tty
+    else
+      echo "[translation] Choose the languages to install (Persian and English are always available)." >/dev/tty
+    fi
     while IFS='|' read -r code native name; do
       codes+=("$code")
       printf '  %2d) %s - %s\n' "$idx" "$native" "$name" >/dev/tty
       idx=$((idx + 1))
     done < <(optional_languages)
-    echo "   a) همه / all" >/dev/tty
-    echo "   Enter) هیچ‌کدام / none" >/dev/tty
-    printf 'شماره‌ها یا کد زبان‌ها را با کاما یا فاصله وارد کنید (مثال: 1,3,5 یا tr,de): ' >/dev/tty
+    if [ "$UI_LANG" = "fa" ]; then
+      echo "   a) همه" >/dev/tty
+      echo "   Enter) هیچ‌کدام" >/dev/tty
+      printf 'شماره‌ها یا کد زبان‌ها را با کاما یا فاصله وارد کنید (مثال: 1,3,5 یا tr,de): ' >/dev/tty
+    else
+      echo "   a) all" >/dev/tty
+      echo "   Enter) none" >/dev/tty
+      printf 'Enter numbers or language codes separated by comma or space (e.g. 1,3,5 or tr,de): ' >/dev/tty
+    fi
     read -r answer </dev/tty || answer=""
     answer="$(echo "$answer" | sed 's/،/,/g' | tr 'A-Z' 'a-z' | tr ',' ' ')"
     local picked=()
