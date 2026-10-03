@@ -210,6 +210,9 @@ _MISTRAL_VISION_MODEL = "mistral-small-latest"
 _COHERE_VISION_MODEL = "command-a-vision-07-2025"
 _CLOUDFLARE_VISION_MODEL = ai_support.CLOUDFLARE_DEFAULT_VISION_MODEL  # پیش‌فرض؛ مدل واقعی از تنظیم cloudflare_model می‌آید
 
+_DEFAULT_VISION_TIMEOUT_S = 45
+_PROVIDER_VISION_TIMEOUT_S = {"openrouter": 25}
+
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
@@ -1665,7 +1668,8 @@ async def _run_openai_compatible_vision(provider: str, api_keys: list, model: st
         }],
         "temperature": 0.1,
     }
-    timeout = aiohttp.ClientTimeout(total=45, connect=10)
+    timeout = aiohttp.ClientTimeout(
+        total=_PROVIDER_VISION_TIMEOUT_S.get(provider, _DEFAULT_VISION_TIMEOUT_S), connect=10)
     json_mode = provider in _JSON_MODE_PROVIDERS
 
     last_exc = None
@@ -1692,16 +1696,17 @@ async def _run_openai_compatible_vision(provider: str, api_keys: list, model: st
             last_exc = exc
             if not ai_support._is_retryable(exc):
                 raise
-            _log.warning("receipt_ai_check: کلید %s شکست خورد، رفتن سراغ کلید بعدی: %s", provider, exc)
+            _log.warning("receipt_ai_check: کلید %s شکست خورد، رفتن سراغ کلید بعدی: %r", provider, exc)
     raise last_exc or RuntimeError(f"{provider} failed")
 
 
 
-async def _run_labeled(label: str, coro):
+async def _run_labeled(label, coro):
+    started = time.monotonic()
     try:
-        return label, await coro, None
+        return label, await coro, None, time.monotonic() - started
     except Exception as exc:
-        return label, None, exc
+        return label, None, exc, time.monotonic() - started
 
 async def _parse_stage(fetch, parser):
     parsed = parser(await fetch)
@@ -1751,23 +1756,25 @@ async def _run_vision_ensemble(db, image_bytes: bytes, mime_type: str) -> list:
     که حداقل یکی از دو مرحله‌شان موفق شد."""
     jobs = []
     for stage, prompt, fields, parser in _STAGES:
-        jobs.append(_run_labeled(("Gemini", stage), _parse_stage(
+        jobs.append(_run_labeled(("Gemini", stage, ai_support.resolve_gemini_model(db)), _parse_stage(
             _run_gemini_text(db, image_bytes, mime_type, prompt, fields), parser)))
     multi_model_enabled = (await asyncio.to_thread(db.get_setting, "receipt_ai_multi_model_enabled", "1")) != "0"
     # مدل‌های بینایی ایجنت‌های اضافی فعلاً فقط عکس را پشتیبانی می‌کنند، نه PDF.
     if multi_model_enabled and mime_type.startswith("image/"):
         for spec in _extra_vision_specs(db):
             for stage, prompt, _fields, parser in _STAGES:
-                jobs.append(_run_labeled((spec["label"], stage), _parse_stage(
+                jobs.append(_run_labeled((spec["label"], stage, spec["model"]), _parse_stage(
                     _run_openai_compatible_vision(spec["provider"], spec["keys"], spec["model"], prompt,
                                                   image_bytes, mime_type, spec["url"], spec["extra_headers"]),
                     parser)))
 
     models = {}
-    for (label, stage), parsed, exc in await asyncio.gather(*jobs):
+    for (label, stage, model), parsed, exc, elapsed in await asyncio.gather(*jobs):
         if exc is not None:
-            _log.warning("receipt_ai_check: مرحله‌ی %s با %s ناموفق بود: %s", stage, label, exc)
+            _log.warning("receipt_ai_check: مرحله‌ی %s با %s (%s) پس از %.1fs ناموفق بود: %r",
+                         stage, label, model, elapsed, exc)
             continue
+        _log.info("receipt_ai_check: مرحله‌ی %s با %s (%s) موفق بود، %.1fs", stage, label, model, elapsed)
         models.setdefault(label, {"label": label, "ocr": None, "verdict": None})[stage] = parsed
     return list(models.values())
 
