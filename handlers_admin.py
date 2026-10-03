@@ -105,6 +105,7 @@ from states import (
     AdminChangeRole,
     AdminEditWelcome,
     AdminEditPostDeliveryText,
+    AdminEditTestDeliveryText,
     AdminSetQrBackground,
     AdminReplyFlow,
     AdminTicketReplyFlow,
@@ -5735,6 +5736,35 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         (await asyncio.to_thread(db.set_setting, "post_delivery_custom_text", text))
         (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "post_delivery_text_change", "متن بعد از تحویل کانفیگ تغییر کرد."))
         await message.answer(tr("✅ متن بعد از تحویل کانفیگ ذخیره شد."), reply_markup=kb.delivery_settings_kb(db))
+
+    @router.callback_query(F.data == "adm_edit_test_delivery_text")
+    async def cb_admin_edit_test_delivery_text(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminEditTestDeliveryText.waiting_text)
+        current = (await asyncio.to_thread(db.get_setting, "test_post_delivery_text", ""))
+        status = f"متن فعلی:\n{current}" if current else "فعلاً چیزی تنظیم نشده (متن عمومی بعد از تحویل استفاده می‌شود)."
+        await safe_edit(
+            call,
+            "🧪 متنی که بعد از تحویل کانفیگ تست برای کاربر ارسال شود را بفرست.\n\n"
+            f"{status}\n\n"
+            "برای حذف، عبارت «حذف» را بفرست.",
+            reply_markup=kb.admin_back_kb("adm_delivery_settings"),
+        )
+        await call.answer()
+
+    @router.message(AdminEditTestDeliveryText.waiting_text)
+    async def process_edit_test_delivery_text(message: Message, state: FSMContext):
+        text = message.text.strip()
+        await state.clear()
+        if text in ("حذف", "/حذف", "-"):
+            (await asyncio.to_thread(db.set_setting, "test_post_delivery_text", ""))
+            (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "test_delivery_text_change", "متن بعد از تحویل کانفیگ تست حذف شد."))
+            await message.answer(tr("✅ متن بعد از تحویل کانفیگ تست حذف شد."), reply_markup=kb.delivery_settings_kb(db))
+            return
+        (await asyncio.to_thread(db.set_setting, "test_post_delivery_text", text))
+        (await asyncio.to_thread(db.log_admin_action, message.from_user.id, "test_delivery_text_change", "متن بعد از تحویل کانفیگ تست تغییر کرد."))
+        await message.answer(tr("✅ متن بعد از تحویل کانفیگ تست ذخیره شد."), reply_markup=kb.delivery_settings_kb(db))
 
     # -------------------------------------------------------------------
     # تصویر پس‌زمینه‌ی کد QR کانفیگ (فعلاً فقط از داخل خودِ بات اصلی قابل

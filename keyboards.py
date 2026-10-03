@@ -2103,6 +2103,8 @@ def delivery_settings_kb(db) -> InlineKeyboardMarkup:
     sub_link_on = db.get_setting("deliver_sub_link_enabled", "1") != "0"
     individual_on = db.get_setting("deliver_individual_configs_enabled", "1") != "0"
     post_text_set = bool((db.get_setting("post_delivery_custom_text", "") or "").strip())
+    test_text_set = bool((db.get_setting("test_post_delivery_text", "") or "").strip())
+    test_text_label = "🧪 متن دلخواه بعد از کانفیگ تست: تنظیم‌شده" if test_text_set else "🧪 متن دلخواه بعد از کانفیگ تست: تنظیم‌نشده"
     sub_link_text = "✅ ارسال لینک اشتراک: فعال" if sub_link_on else "❌ ارسال لینک اشتراک: غیرفعال"
     individual_text = "✅ ارسال کانفیگ‌های تکی: فعال" if individual_on else "❌ ارسال کانفیگ‌های تکی: غیرفعال"
     post_text_label = "📝 متن دلخواه بعد از ارسال کانفیگ: تنظیم‌شده" if post_text_set else "📝 متن دلخواه بعد از ارسال کانفیگ: تنظیم‌نشده"
@@ -2117,6 +2119,7 @@ def delivery_settings_kb(db) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=sub_link_text, callback_data="adm_deliver_sublink_toggle")],
         [InlineKeyboardButton(text=individual_text, callback_data="adm_deliver_individual_toggle")],
         [InlineKeyboardButton(text=post_text_label, callback_data="adm_edit_post_delivery_text")],
+        [InlineKeyboardButton(text=test_text_label, callback_data="adm_edit_test_delivery_text")],
         [InlineKeyboardButton(text=qr_bg_label, callback_data="adm_qr_background_menu")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:products")],
     ]

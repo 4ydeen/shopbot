@@ -303,6 +303,10 @@ class AdminEditPostDeliveryText(StatesGroup):
     waiting_text = State()
 
 
+class AdminEditTestDeliveryText(StatesGroup):
+    waiting_text = State()
+
+
 class AdminSetQrBackground(StatesGroup):
     waiting_photo = State()
 

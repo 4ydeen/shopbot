@@ -2856,20 +2856,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             pass
 
     async def _send_test_config_link(message: Message, link: str, prefix: str) -> None:
-        """ارسال لینک اشتراک کانفیگ تست و کانفیگ‌های تکی داخلش، هرکدام طبق تنظیمات
-        deliver_sub_link_enabled / deliver_individual_configs_enabled فعال/غیرفعال می‌شود."""
-        sub_link_on = (await asyncio.to_thread(db.get_setting, "deliver_sub_link_enabled", "1")) != "0"
-        if sub_link_on:
-            await message.answer(f"{prefix}\n\n`{link}`", parse_mode="Markdown")
-
-        individual_on = (await asyncio.to_thread(db.get_setting, "deliver_individual_configs_enabled", "1")) != "0"
-        if individual_on and link.startswith(("http://", "https://")):
-            try:
-                individual_links = await fetch_individual_links(link)
-            except Exception:
-                individual_links = []
-            if individual_links:
-                await send_individual_configs(message.bot, message.from_user.id, individual_links)
+        """تحویل کانفیگ تست با همان قالب کانفیگ خریداری‌شده (QR + اطلاعات سرویس + لینک‌ها)."""
+        await deliver_config_to_user(
+            message.bot, message.from_user.id, "", link,
+            final_price=None, db=db,
+            header_text=prefix.strip().rstrip(":").strip(),
+            is_test=True,
+        )
 
     @router.message(F.text.func(lambda t: t in (db.get_setting("btn_test"), tr(db.get_setting("btn_test")))))
     async def get_test_config(message: Message):

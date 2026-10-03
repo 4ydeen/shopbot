@@ -126,6 +126,7 @@ EXTRA_SETTINGS_GROUPS: List[Dict[str, Any]] = [
             _b("deliver_sub_link_enabled", "ارسال لینک اشتراک (Subscription)", "1"),
             _b("deliver_individual_configs_enabled", "ارسال کانفیگ‌های تکی", "1"),
             _ta("post_delivery_custom_text", "متن سفارشی بعد از تحویل سرویس (خالی = ندارد)", ""),
+            _ta("test_post_delivery_text", "متن سفارشی بعد از تحویل کانفیگ تست (خالی = همان متن عمومی)", ""),
             _t("custom_config_prefix", "پیشوند نام کانفیگ‌های سفارشی", ""),
         ],
     },
