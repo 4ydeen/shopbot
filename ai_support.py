@@ -70,6 +70,9 @@ PROVIDER_LABELS = {
     "openrouter": "🌐 فقط OpenRouter",
     "openai": "🟢 فقط OpenAI",
     "anthropic": "🟠 فقط Claude (Anthropic)",
+    "mistral": "🌬 فقط Mistral",
+    "cohere": "🔶 فقط Cohere",
+    "cloudflare": "☁️ فقط Cloudflare",
     "custom": "🔌 فقط ارائه‌دهنده‌های سفارشی",
 }
 
@@ -169,6 +172,14 @@ def resolve_anthropic_model(db) -> str:
     return _setting(db, "anthropic_model")
 
 
+def resolve_mistral_model(db) -> str:
+    return _setting(db, "mistral_model", "mistral-small-latest")
+
+
+def resolve_cohere_model(db) -> str:
+    return _setting(db, "cohere_model", "command-a-plus-05-2026")
+
+
 CUSTOM_PREFIX = "custom:"
 _CUSTOM_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 _OPENAI_COMPAT_URLS = {
@@ -176,10 +187,14 @@ _OPENAI_COMPAT_URLS = {
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     "openai": "https://api.openai.com/v1/chat/completions",
     "anthropic": "https://api.anthropic.com/v1/chat/completions",
+    "mistral": "https://api.mistral.ai/v1/chat/completions",
+    "cohere": "https://api.cohere.ai/compatibility/v1/chat/completions",
 }
+_CLOUDFLARE_CHAT_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions"
 _PROVIDER_NAMES = {
     "gemini": "Gemini", "groq": "Groq", "openrouter": "OpenRouter",
     "openai": "OpenAI", "anthropic": "Claude",
+    "mistral": "Mistral", "cohere": "Cohere", "cloudflare": "Cloudflare",
 }
 
 
@@ -469,6 +484,9 @@ def resolve_provider_keys(db, provider: str) -> list:
         "openrouter": resolve_openrouter_keys,
         "openai": resolve_openai_keys,
         "anthropic": resolve_anthropic_keys,
+        "mistral": resolve_mistral_keys,
+        "cohere": resolve_cohere_keys,
+        "cloudflare": resolve_cloudflare_keys,
     }.get(provider, lambda _db: [])(db)
 
 
@@ -476,6 +494,9 @@ def resolve_provider_url(db, provider: str) -> str:
     if provider.startswith(CUSTOM_PREFIX):
         entry = _custom_entry(db, provider)
         return entry["url"] if entry else ""
+    if provider == "cloudflare":
+        account_id = resolve_cloudflare_account_id(db)
+        return _CLOUDFLARE_CHAT_URL.format(account_id=account_id) if account_id else ""
     return _OPENAI_COMPAT_URLS.get(provider, "")
 
 
@@ -489,6 +510,9 @@ def resolve_provider_model(db, provider: str) -> str:
         "openrouter": resolve_openrouter_model,
         "openai": resolve_openai_model,
         "anthropic": resolve_anthropic_model,
+        "mistral": resolve_mistral_model,
+        "cohere": resolve_cohere_model,
+        "cloudflare": resolve_cloudflare_model,
     }.get(provider, lambda _db: "")(db)
 
 
@@ -502,6 +526,9 @@ def provider_display_name(db, provider: str) -> str:
 def configured_providers(db) -> list:
     pool = [p for p in ("gemini", "groq", "openrouter") if resolve_provider_keys(db, p)]
     pool += [p for p in ("openai", "anthropic") if resolve_provider_keys(db, p) and resolve_provider_model(db, p)]
+    pool += [p for p in ("mistral", "cohere") if resolve_provider_keys(db, p)]
+    if resolve_provider_keys(db, "cloudflare") and resolve_cloudflare_account_id(db):
+        pool.append("cloudflare")
     pool += [CUSTOM_PREFIX + r["id"] for r in custom_providers(db) if r["keys"] and r["model"]]
     return pool
 
@@ -1760,6 +1787,8 @@ async def _openai_chat(provider: str, api_key: str, model: str, messages: list, 
     }
     if not payload["tools"]:
         del payload["tools"], payload["tool_choice"]
+    if provider == "cohere":
+        payload.pop("tool_choice", None)
     # قبلاً ۷۵ ثانیه بود؛ یعنی اگر یک کلید/پروایدر کند یا گیر کرده بود، کاربر
     # تا ۷۵ ثانیه معطل یک تلاش می‌ماند قبل از رفتن سراغ کلید/پروایدر بعدی.
     # ۳۰ ثانیه برای این مدل‌های سریع (Groq/OpenRouter) به‌اندازه‌ی کافی زیاد
@@ -1821,6 +1850,8 @@ async def _openai_chat_stream(provider: str, api_key: str, model: str, messages:
         "temperature": 0.2,
         "stream": True,
     }
+    if provider == "cohere":
+        payload.pop("tool_choice", None)
     content = ""
     calls: dict = {}
     timeout = aiohttp.ClientTimeout(total=60, connect=10, sock_read=30)
