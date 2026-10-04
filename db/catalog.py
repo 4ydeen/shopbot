@@ -326,6 +326,30 @@ class CatalogMixin:
             if row:
                 new_val = 0 if row["is_active"] else 1
                 conn.execute("UPDATE products SET is_active=? WHERE id=?", (new_val, product_id))
+                return new_val
+            return None
+
+    def add_product_waitlist(self, product_id: int, user_id: int) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO product_waitlist (product_id, user_id) VALUES (?, ?)",
+                (product_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def get_product_waitlist(self, product_id: int) -> list:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM product_waitlist WHERE product_id=? ORDER BY created_at, rowid",
+                (product_id,),
+            ).fetchall()
+            return [r["user_id"] for r in rows]
+
+    def remove_product_waitlist(self, product_id: int, user_id: int):
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM product_waitlist WHERE product_id=? AND user_id=?", (product_id, user_id)
+            )
 
 
     def edit_product(self, product_id: int, name: str = None, price: int = None,
@@ -391,6 +415,7 @@ class CatalogMixin:
     def delete_product(self, product_id: int):
         with self._get_conn() as conn:
             conn.execute("DELETE FROM products WHERE id=?", (product_id,))
+            conn.execute("DELETE FROM product_waitlist WHERE product_id=?", (product_id,))
 
     # -----------------------------------------------------------------------
     # مخزن کانفیگ (بانک لینک)
