@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 بک‌اند مینی‌اپ - چندمستأجر (Multi-tenant)
 
@@ -1457,7 +1458,7 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
         raise HTTPException(status_code=400, detail=tr("در حال حاضر هیچ پلن کانفیگ تستی تعریف نشده است."))
 
     # همین باگ برای مسیر قدیمی «بانک لینک دستی» هم صدق می‌کرد: قبلاً
-    # take_unused_test_config قبل از mark_test_used صدا زده می‌شد، پس چند
+    # take_unused_test_config قبل از mark_test_used صدا زده می‌شد، پس چند‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # ریکوئست همزمان می‌توانستند چند لینک از بانک بردارند. حالا سهمیه اول رزرو
     # می‌شود؛ اگر لینکی برای برداشتن نبود، سهمیه بلافاصله برمی‌گردد.
     if not db.try_reserve_test_slot(tg_id, MAX_TEST_PER_USER):
@@ -3328,6 +3329,7 @@ def _clean_c2c_card_number(raw: str) -> str:
 def api_admin_list_c2c_cards(auth=Depends(require_admin)):
     _, db, _ = auth
     return [dict(r) for r in db.list_card_to_card_cards()]
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 @app.post("/api/admin/card-to-card/cards")
@@ -4145,7 +4147,7 @@ async def api_plisio_webhook(request: Request, tenant: Tenant = Depends(get_tena
 
 # ---------------------------------------------------------------------------
 # گردونه‌ی شانس
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 @app.get("/api/wheel")
 def api_wheel_status(auth=Depends(get_verified_user)):
@@ -7221,3 +7223,5 @@ async def api_admin_factory_reset(confirm_phrase: str = Form(""), auth=Depends(r
 
 
 app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

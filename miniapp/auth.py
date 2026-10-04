@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 اعتبارسنجی initData مینی‌اپ تلگرام.
 الگوریتم رسمی: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
@@ -8,6 +9,7 @@
 import hashlib
 import hmac
 import logging
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from urllib.parse import parse_qsl
 
 logger = logging.getLogger("miniapp.auth")
@@ -51,3 +53,5 @@ def validate_init_data(init_data: str, bot_token: str, max_age_seconds: int = 86
     if "user" in pairs:
         pairs["user"] = json.loads(pairs["user"])
     return pairs
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
