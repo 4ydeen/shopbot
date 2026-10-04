@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from typing import Optional
 from .constants import *  # noqa: F403
 from .constants import _wallet_tag
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 class OrdersMixin:
     def _charge_wallet_atomic(self, conn, user_tg_id: int, amount: int) -> bool:
@@ -962,7 +964,7 @@ class OrdersMixin:
 
             # ---------------------------------------------------------------
             # ۴) عملکرد نمایندگان داخلی (لینک اختصاصی داخل همین بات - reseller
-            # سطح دیگری که دیتابیس جدا دارد، اینجا نیست، چون در این دیتابیس
+            # سطح دیگری که دیتابیس جدا دارد، اینجا نیست، چون در این دیتابیس‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # قابل‌کوئری نیست؛ آن یکی از پنل «نمایندگی‌ها» خودش گزارش می‌شود)
             # ---------------------------------------------------------------
             reseller_rows = conn.execute(
@@ -2413,7 +2415,7 @@ class OrdersMixin:
                 winners.append({"rank": idx, "user_id": int(row["telegram_id"]), "username": row["username"], "first_name": row["first_name"], "score": int(row["score"]), "prize": int(settings["prizes"][idx-1])})
             if not winners:
                 return {"status": "no_winners", "winners": [], "prizes": settings["prizes"]}
-            # ابتدا لاگ یکتا ثبت می‌شود تا دو پردازش همزمان نتوانند جایزه بدهند.
+            # ابتدا لاگ یکتا ثبت می‌شود تا دو پردازش همزمان نتوانند جایزه بدهند.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             conn.execute(
                 "INSERT INTO lottery_log(lottery_date,winners_json,prize_type,prizes_json) VALUES(?,?,?,?)",
                 (lottery_date, _json.dumps(winners, ensure_ascii=False), settings["prize_type"], _json.dumps(settings["prizes"]))
@@ -2819,3 +2821,5 @@ class OrdersMixin:
     # چت پشتیبانی (مینی‌اپ + بات، یکپارچه)
     # -----------------------------------------------------------------------
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

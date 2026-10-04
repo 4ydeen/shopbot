@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from .constants import *
 
 class PanelsMixin:
@@ -206,7 +207,7 @@ class PanelsMixin:
         with self._get_conn() as conn:
             if dependent:
                 conn.execute("DELETE FROM custom_configs WHERE panel_server_id=?", (server_id,))
-            # test_config_plans و custom_config_products هم FK به panel_servers دارند
+            # test_config_plans و custom_config_products هم FK به panel_servers دارند‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # (بدون CASCADE)؛ بدون پاک‌کردن این‌ها، DELETE پایین با IntegrityError
             # شکست می‌خورد چون PRAGMA foreign_keys=ON فعال است.
             conn.execute("DELETE FROM test_config_plans WHERE panel_server_id=?", (server_id,))
@@ -410,7 +411,7 @@ class PanelsMixin:
 
     # -----------------------------------------------------------------------
     # قیمت‌گذاری پلکانی ساخت کانفیگ شخصی
-    # -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
     def get_panel_rating_summary(self, panel_server_id: int) -> dict:
@@ -459,3 +460,5 @@ class PanelsMixin:
         "pending_review", "awaiting_payment", "awaiting_payment_review", "awaiting_bot_info",
     )
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

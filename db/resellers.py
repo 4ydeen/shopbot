@@ -1,7 +1,9 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 from notification_i18n import send_telegram
 # -*- coding: utf-8 -*-
 from .constants import *
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 class ResellersMixin:
     def _seed_default_reseller_tiers(self, conn):
@@ -645,7 +647,7 @@ class ResellersMixin:
                 # owner_reseller_id هنوز NULL است و بعد یک UPDATE بدون قید انجام
                 # می‌شد؛ بین این دو مرحله هیچ قفلی نبود، پس دو /start تقریباً
                 # هم‌زمان با دو لینک نماینده‌ی متفاوت (مثلاً باز شدن دوباره‌ی همان
-                # دیپ‌لینک در دو تب/دستگاه) می‌توانستند هر دو از NULL بودن مطمئن
+                # دیپ‌لینک در دو تب/دستگاه) می‌توانستند هر دو از NULL بودن مطمئن‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 # شوند و آخرین UPDATE، نتیجه‌ی اولی را بی‌سروصدا رونویسی کند. حالا
                 # خودِ UPDATE با WHERE owner_reseller_id IS NULL اتمیک است.
                 conn.execute(
@@ -907,7 +909,7 @@ class ResellersMixin:
             )
 
         # هم‌گام‌سازی role='owner' در دیتابیس محلی خودِ بات نماینده (اگر بات زنده/
-        # دیتابیس مجزا دارد؛ برای resellerهای has_live_bot=0 هم همین db_path معتبر
+        # دیتابیس مجزا دارد؛ برای resellerهای has_live_bot=0 هم همین db_path معتبر‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # و init_db شده است، پس بدون شرط اضافه امتحان می‌شود).
         try:
             from config import resolve_db_path
@@ -1530,3 +1532,5 @@ class ResellersMixin:
         req = self.get_reseller_request(request_id)
         if req and req["tier_code"]:
             self.set_user_reseller_tier(owner_telegram_id, req["tier_code"])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

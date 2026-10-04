@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Telegram Business: connections, per-chat state, exceptions, short message log."""
 
 
@@ -174,3 +175,5 @@ class BusinessMixin:
             conn.execute(
                 "DELETE FROM business_message_log WHERE created_at < datetime('now', ?)", (f"-{int(days)} days",)
             )
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from .constants import *
 
 class PaymentsMixin:
@@ -349,7 +350,7 @@ class PaymentsMixin:
 
     # -----------------------------------------------------------------------
     # فاکتورهای پرداخت NoapayBot (خرید استارز تلگرام)
-    # -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
     def create_noapay_invoice(self, invoice_token: str, kind: str, ref_id: int, user_id: int,
@@ -722,7 +723,7 @@ class PaymentsMixin:
         self.set_setting(f"push_timeout_{method_key}", str(max(0, int(minutes or 0))))
 
     # جدول/شرط «هنوز در جریان» هر درگاه آنی - برای هم مخفی‌نگه‌داشتن سفارش از
-    # لیست بررسی دستی (تا وقتی در جریان است) و هم تشخیص «معطل‌مانده» بعد از timeout.
+    # لیست بررسی دستی (تا وقتی در جریان است) و هم تشخیص «معطل‌مانده» بعد از timeout.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     _INSTANT_GATEWAY_TABLES = {
         "abangateway": ("abangateway_invoices", "status IN ('new','pending')"),
         "blupal": ("blupal_invoices", "status IN ('new','pending')"),
@@ -1305,3 +1306,5 @@ class PaymentsMixin:
                 self.set_user_reseller_tier(req["user_id"], req["tier_code"], int(req["discount_percent"]) if req["tier_code"] == "silver" and req["discount_percent"] is not None else None)
         return True
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

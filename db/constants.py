@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 لایه دیتابیس - SQLite
 
@@ -191,7 +192,7 @@ DEFAULT_SETTINGS = {
     "reseller_inline_commission_percent": "10",  # فقط fallback برای نماینده‌های قدیمی بدون درصد اختصاصی
     # حالت ۲: دریافت یک محصول/کانفیگ رایگان با رسیدن تعداد دعوت‌شده‌ها به یک آستانه (نیازی به خرید نیست)
     "referral_free_config_enabled": "0",
-    "referral_free_config_threshold": "10",  # تعداد دعوت لازم
+    "referral_free_config_threshold": "10",  # تعداد دعوت لازم‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     "referral_free_config_product_id": "",  # آیدی محصولی که رایگان تحویل داده می‌شود
     # حالت ۳: شارژ ثابت کیف پول به‌ازای هر دعوت (بدون نیاز به خرید)، تا سقف مشخص
     "referral_invite_bonus_enabled": "0",
@@ -316,7 +317,7 @@ DEFAULT_SETTINGS = {
     "volume_reminder_enabled": "1",
     "volume_reminder_mode": "percent",  # "percent" یا "gb" - مبنای آستانه‌ی هشدار
     "volume_reminder_percent": "80",  # وقتی درصد مصرف به این عدد رسید (mode=percent)
-    "volume_reminder_gb_left": "2",  # وقتی حجم باقی‌مانده به این تعداد گیگ رسید (mode=gb)
+    "volume_reminder_gb_left": "2",  # وقتی حجم باقی‌مانده به این تعداد گیگ رسید (mode=gb)‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     "volume_discount_percent": "20",  # درصد تخفیف کد تشویقی اتمام حجم
     "volume_discount_expiry_hours": "24",  # اعتبار کد تشویقی اتمام حجم (ساعت)
     "adm_volume_reminder_settings_style": "success",
@@ -387,6 +388,7 @@ DEFAULT_SETTINGS = {
     "smart_subscription_enabled": "1",
     "smart_subscription_base_url": "",
 }
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 DEFAULT_SETTINGS.update(extra_gateway_registry.default_settings())
 
 # روش‌های پرداخت «داخلی» (غیر از درگاه‌های سفارشی) که در همه‌جای پروژه
@@ -524,3 +526,5 @@ def _wallet_tag(conn, user_id, kind, note=None):
         conn.execute("DELETE FROM wallet_tx_label WHERE user_id=?", (user_id,))
 
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
