@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کلاینت سبک برای درگاه پرداخت کارت‌به‌کارت آبان گیت وی (https://abangateway.ir)
 ساخت فاکتور، استعلام وضعیت، تأیید یک‌بارمصرف و لغو.
@@ -35,6 +36,7 @@ class AbanGatewayAlreadyVerified(AbanGatewayError):
 class AbanGatewayNotYetPaid(AbanGatewayError):
     """۴۰۲ not_yet_paid: هنوز واریزی برای این فاکتور تشخیص داده نشده."""
     pass
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _headers(api_key: str) -> dict:
@@ -120,3 +122,5 @@ async def cancel_invoice(api_key: str, invoice_id: str) -> dict:
 async def simulate_payment(api_key: str, invoice_id: str) -> dict:
     """فقط برای توکن‌های test_؛ پرداخت را در محیط آزمایش شبیه‌سازی می‌کند."""
     return await _request("POST", api_key, f"/invoices/{invoice_id}/simulate-payment")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

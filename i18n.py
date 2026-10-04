@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Bilingual UI support (Persian/English).
 
 The active language is kept in a ContextVar so every Telegram update can use
@@ -159,7 +160,7 @@ _TRANSLATIONS = {
 # the hand-curated catalog above.
 
 # Common complete UI phrases. These take precedence over the lexical fallback and
-# keep the English copy natural for the most frequently displayed flows.
+# keep the English copy natural for the most frequently displayed flows.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _PHRASE_TRANSLATIONS = {
     "در حال بررسی...": "Checking...",
     "در حال دریافت...": "Loading...",
@@ -492,6 +493,7 @@ _DYNAMIC_PHRASES = [
 ]
 
 _dynamic_cache = {"size": -1, "items": []}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _compiled_dynamic():
@@ -590,7 +592,7 @@ def is_language_enabled(db, language: str) -> bool:
         # per string, the moment it is actually needed (see
         # bot_manager.TranslatingBot / translation_engine.translate_texts_now),
         # so admins can turn a language on immediately instead of waiting for a
-        # full sync. The manifest/ratio machinery still exists for health
+        # full sync. The manifest/ratio machinery still exists for health‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # reporting in the admin panel, it just no longer gates availability.
         return True
     except Exception:
@@ -965,3 +967,5 @@ _PHRASE_TRANSLATIONS.update({
     "⚠️ زبان همه‌ی کاربران ربات عوض می‌شه، نه فقط زبان تو. یکی رو انتخاب کن:": "⚠️ This changes the language for every bot user, not just yours. Pick one:",
     "✅ زبان همه‌ی کاربران ربات تغییر کرد.": "✅ Every bot user's language was changed.",
 })
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

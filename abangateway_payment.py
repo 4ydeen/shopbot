@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترک ساخت/تأیید فاکتور پرداخت کارت‌به‌کارت خودکار آبان گیت وی که هم از سرور
 مینی‌اپ (miniapp/server.py، برای دریافت وب‌هوک) و هم مستقیم از داخل بات
@@ -29,6 +30,7 @@ from stock_alerts import check_and_notify_low_stock
 from renewal_engine import execute_renewal, RenewalError
 
 logger = logging.getLogger("abangateway_payment")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class AbanGatewayPaymentError(Exception):
@@ -185,3 +187,5 @@ def extract_invoice_id_from_webhook(body: dict) -> str:
         if val:
             return str(val)
     return None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

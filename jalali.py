@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 تبدیل تاریخ میلادی به شمسی (جلالی) - بدون وابستگی به کتابخانه‌ی خارجی.
 
@@ -56,6 +57,7 @@ def gregorian_to_jalali(gy: int, gm: int, gd: int):
         j_day_no -= j_days_in_month[i]
 
     return jy, jm, jd
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def jalali_to_gregorian(jy: int, jm: int, jd: int):
@@ -147,3 +149,5 @@ def to_jalali_month_day(value) -> str:
         return "-"
     jy, jm, jd = gregorian_to_jalali(dt.year, dt.month, dt.day)
     return f"{jm:02d}/{jd:02d}"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

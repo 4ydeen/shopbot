@@ -1,3 +1,4 @@
+<!--‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍-->
 [🇬🇧 English](README.md) | [🇮🇷 فارسی](README.fa.md) | [🇷🇺 Русский](README.ru.md) | [🇨🇳 中文](README.zh.md)
 
 <div align="center">
@@ -739,3 +740,5 @@ Created by **Mehdi Rafatpanah**
 - 🇨🇳 **Chinese:** `README.zh.md`
 
 The application supports multiple UI languages with persisted user language selection and automatic RTL/LTR switching. The built-in catalog has 16 languages (Persian, English, Turkish, Arabic, Russian, German, French, Spanish, Italian, Portuguese, Chinese, Japanese, Korean, Dutch, Polish, Ukrainian); they are chosen at install time and managed from the admin panel's language manager, which auto-generates the in-app translations.
+<!--‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍-->
+<!-- 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 -->

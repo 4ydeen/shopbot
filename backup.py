@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 بکاپ خودکار دیتابیس.
 
@@ -59,6 +60,7 @@ def create_backup(db_path: str, backup_dir: str, keep: int = 14) -> Optional[str
             pass
 
     return backup_path
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def create_full_backup(main_db, main_db_path: str, output_dir: str, keep: int = 5) -> Optional[str]:
@@ -205,7 +207,7 @@ def restore_full_backup(main_db, main_db_path: str, zip_path: str) -> dict:
         result["main_pre_restore_path"] = main_db.replace_file(main_extracted)
         result["main_restored"] = True
 
-        # ۲) حالا reseller_bots را از روی دیتابیس *تازه* بخوان
+        # ۲) حالا reseller_bots را از روی دیتابیس *تازه* بخوان‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         resellers_by_id = {row["id"]: row for row in main_db.list_reseller_bots(active_only=False)}
 
         for name in sorted(os.listdir(tmp_dir)):
@@ -343,7 +345,7 @@ async def backup_loop(bot, db, db_path: str, interval_seconds: int = 86400, keep
     می‌شود، تغییر آن از پنل ادمین از همان چرخه‌ی بعدی اعمال خواهد شد.
     """
     backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "backups")
-    # قبل از اولین چرخه کمی صبر می‌کنیم تا بات کاملاً بالا بیاید
+    # قبل از اولین چرخه کمی صبر می‌کنیم تا بات کاملاً بالا بیاید‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     await asyncio.sleep(60)
     while True:
         try:
@@ -450,3 +452,5 @@ def restore_backup(db, db_path: str, uploaded_file_path: str) -> str:
         raise ValueError("فایل ارسالی یک دیتابیس sqlite معتبر نیست.")
 
     return db.replace_file(uploaded_file_path)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

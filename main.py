@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 نقطه ورود - اجرا با: python main.py
 
@@ -17,6 +18,7 @@ from database import Database
 from bot_manager import BotManager
 
 os.makedirs("logs", exist_ok=True)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _file_handler = RotatingFileHandler(
     "logs/bot.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
 )
@@ -57,7 +59,7 @@ async def main():
     # ۱. بات اصلی
     # قبلاً بدون try/except بود: اگر start_bot به هر دلیلی (مثلاً خطای موقت
     # تلگرام) exception می‌داد، کل main() می‌ترکید و چون سرویس با
-    # Restart=always/RestartSec=5 اجرا می‌شود، این باعث یک چرخه‌ی کرش سریع
+    # Restart=always/RestartSec=5 اجرا می‌شود، این باعث یک چرخه‌ی کرش سریع‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # می‌شد که می‌توانست چند دقیقه طول بکشد تا خودش تمام شود.
     try:
         await manager.start_bot(BOT_TOKEN, DB_PATH, OWNER_ID, is_main_bot=True)
@@ -77,7 +79,7 @@ async def main():
     reseller_bots = [rb for rb in reseller_bots if (rb["has_live_bot"] if "has_live_bot" in rb.keys() else 1)]
     for rb in reseller_bots:
         resolved_path = resolve_db_path(rb["db_path"])
-        # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ - باید قبل از start_bot باشد تا
+        # هماهنگ‌سازی شناسه‌ی تننت مینی‌اپ - باید قبل از start_bot باشد تا‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # لینک مینی‌اپ این نماینده از همون اول درست ساخته شود.
         try:
             reseller_db = Database(resolved_path)
@@ -132,3 +134,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nبرنامه با Ctrl+C متوقف شد.")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 تحویل خودکار محصولاتی که مستقیماً به یک پنل VPN مشخص (products.provision_server_id)
 وصل هستند - بدون دخالت اعتبار حجمی نماینده.
@@ -15,6 +16,7 @@ import string
 
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from user_limit import order_user_limit, provider_kwargs
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
         # رفع باگ: برخلاف ادعای docstring («واحدهای ساخته‌شده گم نمی‌شوند»)، قبلاً
         # اگر واحد Nام از چند واحدِ یک خرید با خطا مواجه می‌شد، واحدهای ۱..N-۱ که
         # واقعاً روی پنل ساخته شده بودند نه پاک می‌شدند و نه در ProvisionError پرتاب‌شده
-        # به‌جایی اشاره می‌شدند - یعنی اکانت‌های واقعی روی پنل مشتری برای همیشه یتیم
+        # به‌جایی اشاره می‌شدند - یعنی اکانت‌های واقعی روی پنل مشتری برای همیشه یتیم‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # می‌ماندند (نه در custom_configs ثبت می‌شدند، نه قابل پیگیری بودند) درحالی‌که
         # خودِ خرید با خطا مواجه شده بود. دقیقاً مثل reseller_auto_provision._rollback_built،
         # الان قبل از پرتاب ProvisionError هر واحدِ تا این لحظه ساخته‌شده حذف می‌شود.
@@ -90,7 +92,7 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
 
     try:
         for index in range(quantity):
-            # بررسی دوم درست قبل از ساخت، برای کاهش احتمال عبور از سقف در خریدهای هم‌زمان.
+            # بررسی دوم درست قبل از ساخت، برای کاهش احتمال عبور از سقف در خریدهای هم‌زمان.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             if not db.panel_has_capacity(server_id, 1):
                 await _rollback_built()
                 raise ProvisionError("ظرفیت پنل در همین لحظه تکمیل شد؛ مبلغ سفارش به شما برگردانده می‌شود.")
@@ -148,3 +150,5 @@ async def provision_direct(db, product, quantity: int = 1, user_id: int = None, 
                 )
 
     return built
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

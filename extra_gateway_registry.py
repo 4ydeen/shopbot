@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """رجیستری درگاه‌های پرداخت افزوده‌شده از میرزابات (فقط داده، بدون import سنگین)."""
 
 GATEWAY_ORDER = ["zarinpal", "aqayepardakht", "tetra98", "cubepay", "nowpayments", "tgstars"]
@@ -83,6 +84,7 @@ GATEWAYS = {
 
 def enable_setting(key: str) -> str:
     return f"{key}_payment_enabled"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def min_amount_setting(key: str) -> str:
@@ -110,3 +112,5 @@ def settings_groups() -> list:
             fields.append({"key": field["setting"], "label": field["label"], "type": kind})
         groups.append({"title": f"{meta['icon']} {meta['title']} (تایید آنی)", "fields": fields})
     return groups
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

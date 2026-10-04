@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ابزار ارسال پست تبلیغاتی (عکس + کپشن + دکمه‌ی دیپ‌لینک) به کانال.
 
@@ -17,6 +18,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from dotenv import load_dotenv, set_key
 
 load_dotenv()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
@@ -107,3 +109,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

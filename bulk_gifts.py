@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """هدیه‌ی گروهی حجم/زمان با صف پایدار و قابل ادامه بعد از ری‌استارت."""
 import asyncio
 import json
@@ -8,6 +9,7 @@ import time
 from datetime import datetime
 
 from panel_providers import get_provider, PanelError
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 _workers = {}
@@ -47,8 +49,8 @@ def _process_item(db, item):
     if not server or not server["is_active"]:
         db.fail_bulk_gift_item(item["id"], "پنل غیرفعال یا حذف شده است")
         return
-    # سرویس On-hold که هنوز اولین اتصالش رخ نداده، با افزایش زمان معمولی از حالت
-    # انتظار خارج می‌شود؛ بنابراین هدیه‌ی زمانی را عمداً رد می‌کنیم.
+    # سرویس On-hold که هنوز اولین اتصالش رخ نداده، با افزایش زمان معمولی از حالت‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+    # انتظار خارج می‌شود؛ بنابراین هدیه‌ی زمانی را عمداً رد می‌کنیم.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     if item["start_on_first_use"] and not item["expires_at"] and int(params.get("days") or 0) > 0:
         db.fail_bulk_gift_item(item["id"], "سرویس On-hold هنوز اولین اتصال را نداشته است؛ هدیه‌ی زمانی اعمال نشد")
         return
@@ -76,3 +78,5 @@ def start_job(db, *, admin_id, panel_server_id=None, user_ids=None, volume_gb=0,
         admin_id=admin_id, panel_server_id=panel_server_id, user_ids=user_ids or [],
         volume_gb=volume_gb, days=days, note=note,
     )
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

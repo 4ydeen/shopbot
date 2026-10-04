@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """تولید پست و کمپین تبلیغاتی کانال با AI از روی محصولات، موجودی و کدهای تخفیف واقعیِ فروشگاه."""
 
 import asyncio
@@ -11,6 +12,7 @@ import ai_text
 CAPTION_LIMIT = 1024
 _PARAM_RE = re.compile(r"^[A-Za-z0-9_]{1,40}$")
 _CODE_LIKE_RE = re.compile(r"\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,}\b")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _HIDDEN_CODE_SOURCES = {"bulk_admin", "churn_offer", "renewal", "early_renewal", "wheel", "referral"}
 
 _SYSTEM_PROMPT = """تو کپی‌رایتر کانال تلگرامی یک فروشگاه فروش اشتراک VPN هستی. از روی داده‌ی واقعی فروشگاه چند نسخه‌ی متفاوت پست تبلیغاتی می‌نویسی.
@@ -160,3 +162,5 @@ async def generate_campaigns(db, goal: str = "", count: int = 3, facts: dict = N
             return variants, facts
         last_error = ValueError("هیچ‌کدام از نسخه‌های AI معتبر نبود.")
     raise last_error
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

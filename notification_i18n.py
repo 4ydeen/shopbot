@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Localized delivery helpers for background Telegram/Push notifications."""
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ def user_language(db, user_id: int) -> str:
         return normalize_language(db.get_user_language(user_id))
     except Exception:
         return "fa"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def admin_language(db, admin_id: int) -> str:
@@ -54,3 +56,5 @@ def localized_payload(db, admin_id: int, payload: dict) -> dict:
         return out
     finally:
         reset_language(token)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

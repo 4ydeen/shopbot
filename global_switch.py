@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """
@@ -26,6 +27,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 SETTING_KEY = "global_bot_enabled"
 TEXT_KEY = "global_bot_off_text"
@@ -50,7 +52,7 @@ class GlobalBotSwitchMiddleware(BaseMiddleware):
         self._last_notice = {}  # user_id -> time.monotonic()
 
     def _is_enabled(self) -> bool:
-        # get_setting از کش حافظه می‌خواند و روی event loop بلوکه نمی‌کند
+        # get_setting از کش حافظه می‌خواند و روی event loop بلوکه نمی‌کند‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         try:
             return str(self.db.get_setting(SETTING_KEY, "1")).strip() != "0"
         except Exception:
@@ -99,7 +101,7 @@ class GlobalBotSwitchMiddleware(BaseMiddleware):
         if self._is_enabled():
             return await handler(event, data)
 
-        # --- ربات خاموش است و کاربر عادی است ---
+        # --- ربات خاموش است و کاربر عادی است ---‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         off_text = (self.db.get_setting(TEXT_KEY, "") or "").strip() or tr(DEFAULT_OFF_TEXT)
 
         if isinstance(event, CallbackQuery):
@@ -123,3 +125,5 @@ class GlobalBotSwitchMiddleware(BaseMiddleware):
                     except Exception:
                         pass
         return  # هندلر اصلی اجرا نمی‌شود
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

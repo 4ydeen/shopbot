@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کلاینت سبک برای درگاه پرداخت کارت‌به‌کارت بلوپال (https://www.blupal.net)
 ساخت فاکتور و استعلام وضعیت.
@@ -21,6 +22,7 @@ import aiohttp
 
 BLUPAL_BASE_URL = "https://www.blupal.net/api"
 logger = logging.getLogger("blupal")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class BluPalError(Exception):
@@ -79,3 +81,5 @@ async def create_invoice(api_key: str, amount_rial: int, card_number: str = None
 async def get_invoice(api_key: str, invoice_id) -> dict:
     """وضعیت فعلی فاکتور را برمی‌گرداند (PENDING/PAID/EXPIRED/CANCELED)."""
     return await _request("GET", api_key, f"/v1/invoices/{invoice_id}")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

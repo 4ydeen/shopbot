@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Language policy for admin broadcasts.
 
 Broadcast content written by an administrator is user-authored/custom content.
@@ -9,6 +10,7 @@ etc.) are localized separately by the caller.
 from __future__ import annotations
 
 from typing import Any
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def custom_broadcast_text(text: str) -> str:
@@ -28,3 +30,5 @@ async def send_scheduled_broadcast(bot: Any, chat_id: int, text: str, **kwargs):
     scheduled-broadcast worker.
     """
     return await bot.send_message(chat_id, custom_broadcast_text(text), **kwargs)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

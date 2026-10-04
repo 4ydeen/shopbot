@@ -1,4 +1,5 @@
 #!/bin/bash
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # Fully automatic local translation setup for ShopVPN.
 # Installs system/Python prerequisites, Argos Translate and the language models
 # required by ShopVPN. No API key is required and public translation APIs are
@@ -25,6 +26,7 @@ as_root() {
   fi
 }
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 install_system_prereqs() {
   if command -v apt-get >/dev/null 2>&1; then
     echo "[translation] Installing system prerequisites..."
@@ -58,6 +60,7 @@ if [ -z "$UI_LANG" ] && [ -f "$HOME/.shopvpn_manage_lang" ]; then
 fi
 [ "$UI_LANG" = "fa" ] || UI_LANG="en"
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 has_tty() {
   ( : </dev/tty ) 2>/dev/null
 }
@@ -74,6 +77,7 @@ for code, meta in LANGUAGE_CATALOG.items():
 PY
 }
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 choose_languages() {
   local saved="" has_key=0
   if grep -q '^SHOPVPN_TRANSLATION_LANGS=' "$ENV_FILE"; then
@@ -248,3 +252,5 @@ fi
 
 echo "[translation] Local translation setup completed."
 echo "[translation] Public translation APIs are disabled by default."
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

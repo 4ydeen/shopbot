@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 import asyncio
 import logging
 
@@ -26,6 +27,7 @@ def _empty_quote(kind: str, cc, base: dict, paid: int = 0) -> dict:
         "eligible": False, "kind": kind, "amount": 0, "paid": paid, "used_gb": 0.0, "product_id": None,
         "volume_gb": int(cc["volume_gb"] or 0), "window_hours": base["window_hours"], "reason": base["reason"],
     }
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def quote_service_refund(db, cc, user_tg_id: int, credit_db=None) -> dict:
@@ -114,3 +116,5 @@ def refund_quote_text(quote: dict) -> str:
     if quote["reason"] == "usage":
         return tr("ℹ️ در حال حاضر محاسبه‌ی مقدار برگشتی ممکن نیست (خطا در دریافت مصرف)؛ با حذف، چیزی برگردانده نمی‌شود.")
     return ""
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

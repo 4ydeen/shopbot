@@ -1,4 +1,5 @@
 #!/bin/bash
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # اسکریپت نصب/آپدیت خودکار بات فروش کانفیگ V2Ray
 #
 # استفاده (بعد از اینکه این فایل را در مخزن گیت‌هاب خودت گذاشتی و REPO_URL را
@@ -45,6 +46,7 @@ GITHUB_REPO="Shopvpn"
 GITHUB_BRANCH="main"
 export GIT_TERMINAL_PROMPT=0
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 fetch_project_code() {
     local ok=0
     if [ -d "$INSTALL_DIR/.git" ]; then
@@ -225,3 +227,5 @@ echo "  لاگ زنده:      sudo journalctl -u $SERVICE_NAME -f"
 echo "  ری‌استارت:     sudo systemctl restart $SERVICE_NAME"
 echo "  متوقف کردن:    sudo systemctl stop $SERVICE_NAME"
 echo "──────────────────────────────────────────"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

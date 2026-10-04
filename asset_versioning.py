@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Content-hash asset versions and no-store API headers shared by the admin panel and mini app."""
 
 import hashlib
@@ -6,6 +7,7 @@ import os
 from starlette.datastructures import MutableHeaders
 
 _STATIC_EXTENSIONS = (".html", ".js", ".css")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _digest_cache = {}
 
 
@@ -54,3 +56,5 @@ class ApiNoStoreMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_header)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ساخت کانفیگ تست از روی یک ردیف test_config_plans (چندمدلی، مثل محصولات).
 
@@ -15,6 +16,7 @@ from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 
 class ProvisionError(Exception):
     pass
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _random_username(prefix: str) -> str:
@@ -78,3 +80,5 @@ def format_plan_amount(plan) -> str:
     hours = plan["duration_hours"]
     dur_text = f"{hours / 24:.2f}".rstrip("0").rstrip(".") + " روز" if hours >= 24 and hours % 24 == 0 else f"{hours} ساعت"
     return f"{vol_text} / {dur_text}"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

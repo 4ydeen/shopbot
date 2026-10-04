@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 استعلام بانکی برای بررسی رسید جعلی (کارت↔شبا، نام صاحب کارت).
 
@@ -110,6 +111,7 @@ def iban_valid(iban: str) -> bool:
         return int("".join(str(int(c, 36)) for c in rearranged)) % 97 == 1
     except ValueError:
         return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def bank_from_iban(iban: str) -> str:
@@ -169,7 +171,7 @@ def check_destination_bank_local(dest_raw: str, expected_raw: str, bin_bank_of_c
 
 # ---------------------------------------------------------------- استعلام HTTP
 
-_CACHE = {}  # sha256(card) -> (expires_ts, result)
+_CACHE = {}  # sha256(card) -> (expires_ts, result)‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _setting(db, key: str, default: str = "") -> str:
@@ -324,7 +326,7 @@ async def run_checks(db, *, dest_raw: str, expected_card: str, source_raw: str,
     # --- مقصد: شبای رسید در برابر کارت فروشنده (یا برعکس) با استعلام دقیق
     pair = None
     if _is_iban(d) and iban_valid(d) and _is_full_card(e):
-        pair = (e, d)      # کارت فروشنده را استعلام کن، با شبای رسید مقایسه کن
+        pair = (e, d)      # کارت فروشنده را استعلام کن، با شبای رسید مقایسه کن‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     elif _is_full_card(d) and _is_iban(e) and iban_valid(e):
         pair = (d, e)      # کارتِ داخل رسید را استعلام کن، با شبای فروشنده مقایسه کن
     if pair:
@@ -358,3 +360,5 @@ async def run_checks(db, *, dest_raw: str, expected_card: str, source_raw: str,
         pass  # کارت ماسک‌شده؛ قابل‌استعلام نیست و طبیعی است
 
     return out
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

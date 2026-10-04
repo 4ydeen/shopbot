@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترک ساخت/بررسی فاکتور پرداخت کارت‌به‌کارت خودکار بلوپال که هم از سرور
 مینی‌اپ (miniapp/server.py، برای دریافت وب‌هوک) و هم مستقیم از داخل بات
@@ -36,13 +37,14 @@ from renewal_engine import execute_renewal, RenewalError
 logger = logging.getLogger("blupal_payment")
 
 # نگاشت وضعیت‌های حروف‌بزرگ API بلوپال به همان الگوی داخلی lowercase که بقیه‌ی
-# درگاه‌های این پروژه (abangateway/crypto/noapay) استفاده می‌کنند.
+# درگاه‌های این پروژه (abangateway/crypto/noapay) استفاده می‌کنند.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _REMOTE_STATUS_MAP = {
     "PENDING": "pending",
     "PAID": "paid",
     "EXPIRED": "expired",
     "CANCELED": "cancelled",
 }
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class BluPalPaymentError(Exception):
@@ -157,7 +159,7 @@ async def try_verify_and_finalize(db, invoice_row) -> str:
         return "not_paid_yet"
 
     # علامت‌گذاری یک‌بارمصرف: اگر بین لحظه‌ی خواندن وضعیت و این‌جا، یک مسیر دیگر
-    # (مثلاً وب‌هوک) هم‌زمان همین فاکتور را completed کرده باشد، claim دومی هیچ
+    # (مثلاً وب‌هوک) هم‌زمان همین فاکتور را completed کرده باشد، claim دومی هیچ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # ردیفی را تغییر نمی‌دهد و ما آن را already_delivered در نظر می‌گیریم.
     if not db.claim_blupal_invoice(invoice_id):
         return "already_delivered"
@@ -177,3 +179,5 @@ def extract_invoice_id_from_webhook(body: dict) -> str:
     if val is not None:
         return str(val)
     return None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

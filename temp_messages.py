@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """پیام موقت: ارسال پیام + زمان‌بندی حذف خودکارش بعد از مدت مشخص.
 
 send_temp_message از هر جای دیگر کد (هندلر ادمین، تحویل کانفیگ، شماره کارت و ...)
@@ -11,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def send_temp_message(bot, db, chat_id: int, text: str, expire_seconds: int, **kwargs):
@@ -43,3 +45,5 @@ async def temp_message_cleanup_loop(bot, db, interval: float = 30.0):
         except Exception:
             logger.exception("temp_message_cleanup_loop ناموفق بود (db_path=%s).", db.db_path)
         await asyncio.sleep(interval)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 دستیار پشتیبانی هوش مصنوعی (Google Gemini)
 
@@ -371,6 +372,7 @@ def _model_rows_from_payload(data: dict) -> list:
         rows.append((mid, label[:100]))
     seen = set()
     return [(m, l) for m, l in rows if not (m in seen or seen.add(m))]
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def discover_openai_compatible_models(base_url: str, api_key: str, force: bool = False) -> list:
@@ -1051,7 +1053,7 @@ async def _tool_check_account_status(db, user_tg_id: int) -> dict:
         else:
             entry["data_available"] = False
 
-        # توجه: هدر subscription-userinfo (بالا) فقط حجم/انقضا را می‌دهد و در
+        # توجه: هدر subscription-userinfo (بالا) فقط حجم/انقضا را می‌دهد و در‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # خیلی از پنل‌ها (از جمله 3x-ui) حتی برای کاربر غیرفعال‌شده هم برمی‌گردد؛
         # پس برای وضعیت واقعیِ روشن/خاموش بودن باید مستقیماً از خودِ پنل (همان
         # API ادمین که ساخت/تمدید کانفیگ هم با آن انجام می‌شود) بپرسیم.
@@ -1657,7 +1659,7 @@ _BUSINESS_TOOL_NAMES = frozenset({
     "escalate_to_human",
 })
 
-# حالت فروشِ بیزنس: business_mode می‌تواند False، True (فقط خواندنی) یا
+# حالت فروشِ بیزنس: business_mode می‌تواند False، True (فقط خواندنی) یا‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # BUSINESS_SALES باشد. در BUSINESS_SALES علاوه بر ابزارهای خواندنی، فقط
 # show_purchase_options مجاز است (کارت محصول + دکمه‌ی لینک به بات؛ هیچ مبلغی
 # کسر نمی‌شود و هیچ پرداختی داخل چت بیزنس انجام نمی‌شود).
@@ -2137,3 +2139,5 @@ async def get_reply(db, user_tg_id: int, history: list, user_message: str, busin
     _log.error("All AI providers failed: %s", last_exc)
     return {"reply": "در حال حاضر سرویس هوش مصنوعی در دسترس نیست؛ پیامت رو برای پشتیبانی انسانی می‌فرستم.", "escalate": True}
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هشدار زیرمجموعه‌گیری فیک.
 
@@ -18,6 +19,7 @@ import logging
 import report_router
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 TOPIC_KEY = "security"
 
@@ -61,3 +63,5 @@ async def check_and_notify_referral_fraud(send_fn, db, referrer_id: int, bot_tok
             await send_fn(admin_id, text)
         except Exception:
             logger.warning("ارسال هشدار زیرمجموعه‌گیری فیک به ادمین %s ناموفق بود.", admin_id)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

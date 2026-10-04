@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """کلاینت‌های سبک درگاه‌های زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی و NowPayments."""
 
 import asyncio
@@ -21,6 +22,7 @@ NOWPAYMENTS_BASE = "https://api.nowpayments.io/v1"
 PAID = "paid"
 PENDING = "pending"
 FAILED = "failed"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class GatewayError(Exception):
@@ -257,3 +259,5 @@ def nowpayments_verify_ipn_signature(secret: str, body: dict, signature: str) ->
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha512).hexdigest()
     return hmac.compare_digest(expected, signature.strip().lower())
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

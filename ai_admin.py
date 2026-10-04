@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Read-only natural-language assistant for senior admins."""
 
 import asyncio
@@ -107,6 +108,7 @@ def _plain(obj):
 def _valid_date(value):
     value = (value or "").strip()
     return value if _DATE_RE.match(value) else None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _limit(args, default, cap):
@@ -342,3 +344,5 @@ async def get_reply(db, admin_id: int, text: str) -> str:
         except Exception:
             _log.exception("ai_admin provider %s failed", provider)
     return "الان نتونستم جواب بگیرم؛ چند لحظه بعد دوباره امتحان کن."
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

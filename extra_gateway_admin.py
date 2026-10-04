@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """پنل ادمین بات اصلی برای درگاه‌های افزوده‌شده: تنظیمات، فهرست فاکتورها، بررسی و لغو."""
@@ -11,6 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import extra_gateway_payment as egp
 import extra_gateway_registry as registry
 from config import API_BASE_URL
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from states import AdminSetExtraGateway
 
 _STATUS_TEXT = {
@@ -305,3 +307,5 @@ def register(router, db, is_main_bot: bool, admin_only, full_admin_only, deny_su
         await asyncio.to_thread(db.cancel_and_delete_extra_invoice, invoice_id)
         await call.answer(tr("✅ فاکتور لغو و حذف شد."))
         await _show_invoices(call, invoice["gateway"])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

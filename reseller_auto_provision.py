@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 تحویل خودکار محصولات «اعتبار حجمی» در بات‌های نمایندگی.
 
@@ -21,6 +22,7 @@ from config import DB_PATH as MAIN_DB_PATH
 from database import Database
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
 from user_limit import order_user_limit, provider_kwargs
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,7 @@ async def provision_auto_config(
         # نه از reseller_credit_gb. حجم/مدت محصول همچنان برای خودِ ساخت کانفیگ روی
         # پنل لازم است، ولی اعتبارسنجی/کسر بر اساس تعداد است نه گیگابایت.
         # در مدل چندمحصولی، محصول انتخاب‌شده از موجودی خودش منبع حقیقت است؛
-        # fixed_product_main_id فقط برای سازگاری با نسخه‌های قدیمی نگه داشته شده.
+        # fixed_product_main_id فقط برای سازگاری با نسخه‌های قدیمی نگه داشته شده.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         fixed_product_id = int(product.get("id") or 0)
         if not fixed_product_id:
             fixed_product_id = supply["product_id"]
@@ -185,7 +187,7 @@ async def provision_auto_config(
 
     if user_id is not None:
         # مهم: server["id"] شناسه‌ی ردیف در دیتابیس بات *اصلی* است، درحالی‌که
-        # add_custom_config روی local_db (دیتابیس همین بات نمایندگی) نوشته
+        # add_custom_config روی local_db (دیتابیس همین بات نمایندگی) نوشته‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # می‌شود و custom_configs.panel_server_id یک FOREIGN KEY به
         # panel_servers *همان* دیتابیس محلی دارد - نه به بات اصلی. قبلاً همین
         # id خام بات اصلی مستقیم پاس داده می‌شد که تقریباً همیشه (بات‌های
@@ -304,3 +306,5 @@ async def provision_reseller_fixed_product(main_db: Database, owner_id: int, pro
             except Exception: pass
         raise ProvisionError("موجودی محصول هم‌زمان توسط خرید دیگری مصرف شد؛ دوباره تلاش کنید.")
     return built
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

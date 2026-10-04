@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Generated English catalog for Persian strings passed to tr()."""
 
 EXTRA_PHRASES = {
@@ -743,7 +744,7 @@ EXTRA_PHRASES.update({
 
 
 
-# --- handlers_user.py coverage (i18n bug-fix pass) ---
+# --- handlers_user.py coverage (i18n bug-fix pass) ---‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 EXTRA_PHRASES.update({
     '⚡️ این محصول خودکار و لحظه\u200cای ساخته می\u200cشود (محدودیت موجودی ندارد)\n': '⚡️ This product is created automatically and instantly (no stock limit)\n',
     'یک گزینه را انتخاب کنید:': 'Choose an option:',
@@ -994,7 +995,7 @@ EXTRA_PHRASES.update({
 
 
 
-# --- handlers_admin.py / keyboards.py coverage (i18n bug-fix pass) ---
+# --- handlers_admin.py / keyboards.py coverage (i18n bug-fix pass) ---‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 EXTRA_PHRASES.update({
     '💳 این محصول با کدام روش(های) پرداخت قابل خرید باشد؟\n\nبا لمس هر گزینه، فعال/غیرفعال می\u200cشود. اگر «همه\u200cی روش\u200cها» تیک بخورد، این محصول از هر روش پرداخت فعالی قابل خرید است (با اضافه\u200cشدن هر درگاه جدید در آینده هم خودکار برایش فعال می\u200cشود).': '💳 Which payment method(s) can this product be bought with?\n\nTapping each option toggles it on/off. If "All methods" is checked, this product can be bought with any active payment method (and any new gateway added in the future will be enabled for it automatically too).',
     'این نماینده یا توکن راه\u200cاندازی\u200cاش دیگر پیدا نشد؛ دوباره از منوی نمایندگی امتحان کن.': 'This reseller or its setup token was no longer found; try again from the reseller menu.',
@@ -1577,6 +1578,7 @@ EXTRA_PHRASES.update({
     '🛠 Groq Qwen 3.6 27B — ابزار و reasoning قوی': '🛠 Groq Qwen 3.6 27B — strong tools and reasoning',
     '🆓 OpenRouter Free — روتر مدل\u200cهای رایگان؛ مدل پشت آن ممکن است تغییر کند': '🆓 OpenRouter Free — free-model router; the model behind it may change',
 })
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 EXTRA_DYNAMIC_PHRASES = [
     ('✅ زبان {x} فعال شد. منوی اصلی از همین الان ترجمه\u200cشده؛ بقیه\u200cی بخش\u200cها همین که کاربری بهشان برسد، خودکار ترجمه و ذخیره می\u200cشوند.', '✅ {x} language activated. The main menu is translated from now on; the rest of the sections are translated and saved automatically as users reach them.'),
@@ -2174,3 +2176,5 @@ EXTRA_DYNAMIC_PHRASES.extend([
     ('📜 وضعیت: {x}', '📜 Status: {x}'),
     ('📝 متن فعلی: {x}', '📝 Current text: {x}'),
 ])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

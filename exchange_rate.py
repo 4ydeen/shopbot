@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 دریافت خودکار نرخ لحظه‌ای دلار (بر پایه‌ی USDT) به تومان.
 
@@ -37,6 +38,7 @@ BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class _DoHResolver(aiohttp.abc.AbstractResolver):
@@ -93,7 +95,7 @@ def _make_connector() -> aiohttp.TCPConnector:
 # لاگ مشخص شود کدام‌یک (اگر هیچ‌کدام) جواب داده — این برای دیباگ سریع‌تر
 # دفعه‌ی بعدی که سایت دوباره عوض شود ضروری است.
 _TGJU_PATTERNS = [
-    # ۱) نوار قیمت لحظه‌ای بالای صفحه، مثلا: "دلار</b> 1,878,000 (0%)"
+    # ۱) نوار قیمت لحظه‌ای بالای صفحه، مثلا: "دلار</b> 1,878,000 (0%)"‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     ("inline_change", re.compile(r"دلار[^0-9]{0,20}([\d,]{4,10})\s*\([-\d.]+%\)")),
     # ۲) دیتای JSON تعبیه‌شده در صفحه با کلید price_dollar_rl و فیلد p (قیمت)
     #    - چه با کوتیشن تک/دوتایی، چه با فاصله‌ی متفاوت بین کلید/مقدار.
@@ -162,7 +164,7 @@ async def _from_tgju(session: aiohttp.ClientSession) -> float:
             if raw <= 0:
                 continue
             # صفحه‌ی tgju نرخ را به ریال می‌دهد؛ چون همه‌ی الگوها از یک واحد
-            # (ریال) می‌خوانند، همیشه بر ۱۰ تقسیم می‌کنیم تا به تومان برسیم.
+            # (ریال) می‌خوانند، همیشه بر ۱۰ تقسیم می‌کنیم تا به تومان برسیم.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             toman = _sanity_check_toman(raw, divide_by_10=True)
             if toman is not None:
                 logger.info("نرخ دلار از tgju با الگوی '%s' استخراج شد: %s تومان", pattern_name, toman)
@@ -332,3 +334,5 @@ async def refresh_rate(manual_fallback: Optional[float] = None) -> dict:
     _cache["ts"] = 0.0  # کش را باطل کن تا get_usd_to_toman_rate مجبور به فراخوانی منابع شود
     await get_usd_to_toman_rate(manual_fallback=manual_fallback)
     return get_cache_status()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

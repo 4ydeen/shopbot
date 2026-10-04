@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 مدیریت چند بات هم‌زمان (بات اصلی + هر بات نمایندگی).
 
@@ -36,6 +37,7 @@ from churn_prediction import churn_offer_loop
 from backup import backup_loop
 from temp_messages import temp_message_cleanup_loop
 import extra_gateway_payment
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from force_join import ForceJoinMiddleware
 from blocked_user import BlockedUserMiddleware
 from spam_guard import ThrottleMiddleware
@@ -413,7 +415,7 @@ class BotManager:
         dp.include_router(create_user_router(db, is_main_bot=is_main_bot, bot_manager=self))
 
         # قبلاً بدون try/except بود: اگر همین یک تماس (مثلاً به‌خاطر FloodWait یا
-        # قطعی موقت شبکه‌ی تلگرام) خطا می‌داد، کل main() با exception می‌ترکید و
+        # قطعی موقت شبکه‌ی تلگرام) خطا می‌داد، کل main() با exception می‌ترکید و‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # چون پروسه با systemd (Restart=always, RestartSec=5) اجرا می‌شود، هر ۵
         # ثانیه دوباره تلاش می‌کرد - و چون این تلاش خودش دوباره به همین API
         # می‌خورد، محدودیت تلگرام هر بار بزرگ‌تر می‌شد؛ از دید کاربر این حالت
@@ -603,7 +605,7 @@ class BotManager:
                             # فرمول یکسان با _reseller_miniapp_link (اسلاگ در
                             # صورت وجود، وگرنه آیدی عددی) - وگرنه لینکی که پنل
                             # مدیریت نشان می‌دهد با لینک واقعی دکمه‌ی منوی بات
-                            # یکی نمی‌شود.
+                            # یکی نمی‌شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                             reseller_db.set_setting("miniapp_tenant_id", row["link_slug"] or str(row["id"]))
                         except Exception:
                             logger.exception(
@@ -698,3 +700,5 @@ class BotManager:
                         logger.exception("پاک‌کردن فایل دیتابیس نماینده ناموفق بود: %s", purge_row["db_path"])
             except Exception:
                 logger.exception("خطا در حلقه‌ی reconcile نمایندگی‌ها.")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

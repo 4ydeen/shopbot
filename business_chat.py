@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Telegram Business: AI auto-reply on the seller's account, human handoff, in-bot admin settings."""
 
 import asyncio
@@ -22,6 +23,7 @@ import user_limit as ul
 from i18n import tr
 from spam_guard import ThrottleMiddleware
 from states import AdminBusiness
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -389,8 +391,8 @@ def create_business_router(db, language_mw=None) -> Router:
                 pass
 
     # ------------------------------------------------------------------
-    # In-bot admin panel
-    # ------------------------------------------------------------------
+    # In-bot admin panel‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+    # ------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
     async def _deny(call: CallbackQuery):
         await call.answer(tr("⛔️ این بخش فقط برای مدیران کامل در دسترس است."), show_alert=True)
@@ -668,3 +670,5 @@ def create_business_router(db, language_mw=None) -> Router:
             await _show_humans(call)
 
     return router
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

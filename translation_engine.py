@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Automatic translation engine and language registry helpers.
 
 Translations are generated from the existing English UI source of truth. The
@@ -106,7 +107,7 @@ _MYMEMORY_LANG = {
     "ko": "ko-KR", "nl": "nl-NL", "pl": "pl-PL", "uk": "uk-UA",
 }
 # LibreTranslate's argos-translate models expose Chinese under the code
-# "zh-Hans" (per its own /languages endpoint), not the bare "zh" the rest of
+# "zh-Hans" (per its own /languages endpoint), not the bare "zh" the rest of‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # ShopVPN's catalog uses; without this, every Chinese request 404s/errors on
 # a self-hosted LibreTranslate instance even though the model is installed.
 _LIBRETRANSLATE_LANG = {"zh": "zh-Hans"}
@@ -202,7 +203,7 @@ def _source_catalog_cached() -> Dict[str, str]:
     out.update({str(k): str(v) for k, v in i18n._FRAGMENT_TRANSLATIONS.items()})
     out.update({fa: en for fa, en in _dynamic_sources().items()})
     # The word catalog is useful for short labels that appear independently in
-    # the web UI. Exact phrases above always win over these entries.
+    # the web UI. Exact phrases above always win over these entries.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     out.update({str(k): str(v) for k, v in i18n._WORD_TRANSLATIONS.items()})
     return {k: v for k, v in out.items() if v and v.strip()}
 
@@ -224,6 +225,7 @@ def split_translatable(texts: Iterable[str]) -> tuple[list[str], list[str]]:
         text = str(text)
         (allowed if text in values else verbatim).append(text)
     return allowed, verbatim
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class RateLimiter:
@@ -1196,3 +1198,5 @@ def prewarm_enabled_languages(db) -> list[dict]:
             # translations remain usable and the next request can retry.
             results.append({"language": code, "prewarmed": False, "health": "degraded", "error": error})
     return results
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

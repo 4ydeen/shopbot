@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ساخت کیبوردهای شیشه‌ای و معمولی بات
 
@@ -1025,7 +1026,7 @@ def card_auto_card_detail_kb(card) -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------------
-# سفارش برای ادمین (تایید/رد)
+# سفارش برای ادمین (تایید/رد)‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # ---------------------------------------------------------------------------
 
 def order_review_kb(order_id, user_id=None) -> InlineKeyboardMarkup:
@@ -2381,6 +2382,7 @@ def admin_config_detail_kb(tg_id: int, cc_id: int, enabled: bool, auto_renew: bo
     rows.append([InlineKeyboardButton(text=tr("🕒 تاریخچه"), callback_data=f"adm_cfg_history:{tg_id}:{cc_id}")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت به لیست کانفیگ‌ها"), callback_data=f"adm_user_cfglist:{tg_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def admin_cfg_transfer_confirm_kb(tg_id: int, cc_id: int, target_id: int) -> InlineKeyboardMarkup:
@@ -3575,7 +3577,7 @@ def discount_scope_products_multi_kb(products, selected_ids) -> InlineKeyboardMa
 
 
 # ---------------------------------------------------------------------------
-# تنظیمات زیرمجموعه‌گیری
+# تنظیمات زیرمجموعه‌گیری‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # ---------------------------------------------------------------------------
 
 def referral_share_kb(link: str) -> InlineKeyboardMarkup:
@@ -4581,3 +4583,5 @@ def credit_reseller_panel_pick_kb(user_tg_id: int, panels) -> InlineKeyboardMark
     rows.append([InlineKeyboardButton(text=tr("↩️ خودکار (اولین پنل فعالِ نمایندگی)"), callback_data=f"adm_cres_panel_set:{user_tg_id}:0")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data=f"adm_cres_view:{user_tg_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

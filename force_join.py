@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """
@@ -19,6 +20,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 CHECK_CALLBACK = "check_force_join"
 TERMS_ACCEPT_CALLBACK = "accept_terms"
@@ -75,7 +77,7 @@ class ForceJoinMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery) and event.data in (CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK):
             return await handler(event, data)
 
-        # کاربری که هنوز زبان را انتخاب نکرده، اول باید زبان را انتخاب کند (قبل از
+        # کاربری که هنوز زبان را انتخاب نکرده، اول باید زبان را انتخاب کند (قبل از‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # پیام عضویت/قوانین)؛ cmd_start و cb_language خودشان بعدش عضویت را چک می‌کنند.
         if (
             (isinstance(event, Message) and (event.text or "").startswith("/start"))
@@ -102,7 +104,7 @@ class ForceJoinMiddleware(BaseMiddleware):
                 await event.answer(text, reply_markup=markup)
             return
 
-        # /start بعد از عبور از مرحله‌ی عضویت باید اجرا شود تا دیپ‌لینک‌ها و
+        # /start بعد از عبور از مرحله‌ی عضویت باید اجرا شود تا دیپ‌لینک‌ها و‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # رفرال‌ها ثبت شوند؛ خود cmd_start قوانین را بلافاصله بعد از آن نشان می‌دهد.
         if isinstance(event, Message) and (event.text or "").startswith("/start"):
             return await handler(event, data)
@@ -124,3 +126,5 @@ class ForceJoinMiddleware(BaseMiddleware):
                 pass
         elif isinstance(event, Message):
             await event.answer(text, reply_markup=markup)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

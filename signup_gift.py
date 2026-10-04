@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 from notification_i18n import send_telegram
 # -*- coding: utf-8 -*-
@@ -13,6 +14,7 @@ import asyncio
 import logging
 
 import report_router
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +64,5 @@ async def signup_gift_loop(bot, db, interval: int = 3600):
         except Exception:
             logger.exception("خطا در حلقه‌ی هدیه‌ی عضویت")
         await asyncio.sleep(max(300, int(interval)))
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

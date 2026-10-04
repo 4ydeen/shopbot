@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترک ساخت/تأیید فاکتور پرداخت NoapayBot (خرید استارز تلگرام، به‌عنوان یک
 روش پرداخت کارت‌به‌کارت با تایید آنی) که هم از سرور مینی‌اپ (miniapp/server.py،
@@ -37,6 +38,7 @@ from stock_alerts import check_and_notify_low_stock
 from renewal_engine import execute_renewal, RenewalError
 
 logger = logging.getLogger("noapay_payment")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class NoapayPaymentError(Exception):
@@ -203,3 +205,5 @@ def extract_invoice_token_from_webhook(body: dict) -> str:
 
 from payment_delivery import finalize_paid_order, finalize_paid_topup  # noqa: F401
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

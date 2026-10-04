@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترکِ اجرای واقعیِ «تمدید سرویس» از حساب کاربری، برای استفاده در همه‌ی
 مسیرهای تایید پرداخت (تایید دستی کارت‌به‌کارت در پنل ادمین، تایید خودکار
@@ -12,6 +13,7 @@ abangateway_payment.finalize_paid_order صدا زده می‌شود).
 from panel_providers import get_provider, PanelError
 from user_limit import provider_kwargs
 import renewal_log
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class RenewalError(Exception):
@@ -58,8 +60,8 @@ async def execute_renewal(db, order) -> str:
                 preserve_remaining=(mode == "full"), **provider_kwargs(provider, renewal_users),
             )
             if mode == "full" and add_volume:
-                # سقف واقعیِ بعد از preserve_remaining را از خود پنل می‌خوانیم تا رکورد
-                # محلی دقیقاً هم‌سو با پنل بماند (نه با محاسبه‌ی جداگانه و احتمالاً ناهم‌خوان).
+                # سقف واقعیِ بعد از preserve_remaining را از خود پنل می‌خوانیم تا رکورد‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+                # محلی دقیقاً هم‌سو با پنل بماند (نه با محاسبه‌ی جداگانه و احتمالاً ناهم‌خوان).‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 usage = await provider.get_user_usage(cc["username"])
                 set_volume_gb = usage["data_limit_bytes"] / (1024 ** 3)
         except PanelError as e:
@@ -81,3 +83,5 @@ async def execute_renewal(db, order) -> str:
         return "✅ سرویس شما با موفقیت تمدید شد."
 
     raise RenewalError("نوع سرویس برای تمدید نامعتبر است.")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

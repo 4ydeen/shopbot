@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """پاکسازی دوره‌ای سرویس‌های منقضی (F14).
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 def _utcnow():
     return datetime.utcnow()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _parse_iso(value):
@@ -161,7 +163,7 @@ async def cleanup_once(bot: Bot, db):
     dry_run = _safe_bool(db, "expired_cleanup_dry_run", True)
 
     # اعلان اتمام مستقل از قابلیت پاکسازی است؛ حتی اگر حذف خودکار خاموش باشد،
-    # رسیدن سرویس به expires_at فقط یک‌بار در کانال اعلام می‌شود.
+    # رسیدن سرویس به expires_at فقط یک‌بار در کانال اعلام می‌شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     expiry_rows = await asyncio.to_thread(db.get_service_expiry_notification_candidates, now_iso)
     expiry_notified = 0
     for row in expiry_rows:
@@ -204,7 +206,7 @@ async def cleanup_once(bot: Bot, db):
 
     soft_count = deleted_count = warned_count = 0
 
-    # هشدار قبل از انقضا؛ هشدار صرفاً وقتی سرویس هنوز active است ارسال می‌شود.
+    # هشدار قبل از انقضا؛ هشدار صرفاً وقتی سرویس هنوز active است ارسال می‌شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     warning_to = (now + timedelta(days=warning_days)).isoformat()
     warning_rows = await asyncio.to_thread(db.get_cleanup_warning_candidates, now_iso, warning_to)
     for row in warning_rows:
@@ -333,3 +335,5 @@ async def cleanup_loop(bot: Bot, db, interval: int = 3600):
         except Exception:
             logger.exception("خطا در انقضای خودکار سفارش‌های رهاشده با کد تخفیف (قابلیت ۸۶)")
         await asyncio.sleep(max(300, int(interval)))
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

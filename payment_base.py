@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هلپرهای مشترک ۷ درگاه پرداخت.
 
@@ -33,6 +34,7 @@ def rial_to_toman(amount_rial: int) -> int:
 def toman_to_irt(amount_toman: int) -> int:
     """Alias واضح‌تر برای toman_to_rial — بعضی API ها واحد را IRT می‌نامند."""
     return toman_to_rial(amount_toman)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 PAYMENT_RESULT_ALREADY_DELIVERED = "already_delivered"
@@ -43,3 +45,5 @@ PAYMENT_RESULT_NOT_PAID = "not_paid_yet"
 def amounts_match(a: int, b: int, tolerance_rial: int = 0) -> bool:
     """مقایسه‌ی دو مبلغ با tolerance اختیاری (برای خطای گرد کردن ارز)."""
     return abs(int(a) - int(b)) <= tolerance_rial
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

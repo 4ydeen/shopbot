@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 اسکنر خودکار «متن‌های ربات» (قابلیت ۵۰: تغییر همه متن‌های ربات از طریق سایت).
 
@@ -28,9 +29,10 @@ import os
 logger = logging.getLogger(__name__)
 
 # فقط فایل‌های خودِ پردازش بات (ریشه‌ی پروژه + panel_providers) اسکن می‌شوند؛
-# admin_panel/ و miniapp/ و api/ برنامه‌های وب جدا هستند و «متن ربات» محسوب
-# نمی‌شوند.
+# admin_panel/ و miniapp/ و api/ برنامه‌های وب جدا هستند و «متن ربات» محسوب‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# نمی‌شوند.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _SCAN_SUBDIRS = (".", "panel_providers")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _EXCLUDE_FILES = {"text_scanner.py", "test_config_provision.py"}
 
 
@@ -89,3 +91,5 @@ def scan_bot_texts(root: str = None) -> list:
                     key, default = result
                     found[key] = {"key": key, "default_text": default, "category": category}
     return list(found.values())
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

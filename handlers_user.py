@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هندلرهای مربوط به کاربر عادی
 
@@ -40,6 +41,7 @@ from database import Database, DuplicateBotTokenError
 from config_delivery import deliver_config_to_user, send_individual_configs, build_qr_bytes
 from renewal_engine import execute_renewal, RenewalError
 import renewal_log
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from temp_messages import schedule_message_autodelete
 from force_join import is_channel_member, CHECK_CALLBACK, TERMS_ACCEPT_CALLBACK, terms_keyboard, _join_keyboard
 from sub_info import fetch_sub_info, format_sub_info_fa, fetch_individual_links
@@ -2931,7 +2933,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # می‌شد و mark_test_used فقط *بعد* از ساخت واقعی کانفیگ روی پنل صدا زده
         # می‌شد - یعنی بین چک و مصرف، کل زمانِ تماس با پنل (که می‌تواند طول
         # بکشد) بدون قفل بود. چند درخواست همزمان از همین دکمه (دبل‌تپ، یا چند
-        # ریکوئست موازی از مینی‌اپ) همه از همان چک اولیه رد می‌شدند و هرکدام
+        # ریکوئست موازی از مینی‌اپ) همه از همان چک اولیه رد می‌شدند و هرکدام‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # واقعاً یک کانفیگ تست می‌ساختند (و در بات‌های نمایندگی، هرکدام واقعاً
         # از اعتبار حجمی نماینده کم می‌کردند). حالا سهمیه با یک UPDATE اتمیک
         # *قبل* از تماس با پنل رزرو می‌شود؛ اگر ساخت کانفیگ شکست بخورد، سهمیه
@@ -6500,7 +6502,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     # (panel_servers محلی با used_for_custom_config=1) و is_full_access_bot هم آن را
     # قفل می‌کند؛ نمایندگی نه پنل شخصی دارد و نه اجازه‌ی ساختش را (طبق ممیزی
     # امنیتی بند ۳.۲). یعنی حتی با روشن‌کردن این تاگل، فیچر عملاً کار نمی‌کرد. برای
-    # اینکه یک گزینه‌ی ظاهراً فعال ولی درعمل بی‌اثر به نماینده نشان داده نشود، این مرحله
+    # اینکه یک گزینه‌ی ظاهراً فعال ولی درعمل بی‌اثر به نماینده نشان داده نشود، این مرحله‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # حذف و wants_custom_config همیشه ۰ ثبت می‌شود.
 
     async def _resreq_finalize(event, state: FSMContext):
@@ -8225,3 +8227,5 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         # اصلی آن (open_admin_panel) در همان روتر تعریف شده است.
 
     return router
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

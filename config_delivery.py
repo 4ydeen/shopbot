@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """
@@ -47,7 +48,7 @@ QR_BACKGROUND_PATH = os.path.join(config.BASE_DIR, "qr_background.png")
 QR_BACKGROUND_SETTING_KEY = "qr_background_enabled"
 
 QR_CANVAS_SIZE = 1000       # اندازه‌ی نهایی تصویر مربعی خروجی (پیکسل)
-QR_PANEL_RATIO = 0.62       # نسبت عرض کادر سفید حامل QR به کل تصویر
+QR_PANEL_RATIO = 0.62       # نسبت عرض کادر سفید حامل QR به کل تصویر‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 QR_PANEL_PADDING_RATIO = 0.09  # حاشیه‌ی سفید داخل کادر، دور خودِ QR
 QR_PANEL_RADIUS_RATIO = 0.06   # شعاع گردی گوشه‌های کادر سفید
 
@@ -62,6 +63,7 @@ def qr_background_enabled(db) -> bool:
     if db is None or not has_qr_background():
         return False
     return db.get_setting(QR_BACKGROUND_SETTING_KEY, "1") != "0"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def save_qr_background(source_path: str) -> None:
@@ -260,7 +262,7 @@ def get_post_delivery_text(db, is_test: bool = False) -> str:
 # قالب جدید پیام تحویل سفارش (یک پیام واحد: عکس QR + کپشن)
 #
 #   سفارش جدید شما 😍
-#   ┃ اطلاعات سرویس: پروتکل / نام سرویس / حجم / مدت
+#   ┃ اطلاعات سرویس: پروتکل / نام سرویس / حجم / مدت‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 #   ┃ لینک های اتصال: config / subscription
 #   با لمس کردن هر یک از لینک ها، خودکار کپی میشود
 #
@@ -486,3 +488,5 @@ async def deliver_config_to_user(
             await tutorial.send_device_picker(bot, user_tg_id, db)
         except Exception:
             pass
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """تولید خروجی JSON از Provider های تنظیم‌شده‌ی دستیار هوشمند، بدون ابزار و بدون مکالمه."""
 
 import asyncio
@@ -9,6 +10,7 @@ import re
 import aiohttp
 
 import ai_support
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _log = logging.getLogger("ai_text")
 
@@ -103,3 +105,5 @@ async def generate_json(db, system_prompt: str, user_text: str) -> dict:
             last_exc = exc
             _log.warning("ai_text provider %s failed: %s", provider, exc)
     raise last_exc or RuntimeError("all AI providers failed")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

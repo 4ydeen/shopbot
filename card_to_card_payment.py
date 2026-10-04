@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کارت‌به‌کارت با تایید خودکار: به هر فاکتور یک مبلغ یکتا (مبلغ اصلی + چند رقم
 آخر تصادفی) اختصاص داده می‌شود؛ اپ اندروید BankSmsForwarder پیامک واریزی بانک
@@ -18,6 +19,7 @@ logger = logging.getLogger("card_to_card_payment")
 
 _PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹"
 _ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _MAX_ATTEMPTS = 40
 
 
@@ -83,8 +85,8 @@ def create_invoice(db, kind: str, ref_id: int, user_id: int, base_amount_toman: 
     last_err = None
     for attempt in range(_MAX_ATTEMPTS):
         # اگر رقم‌های عادی چند بار پشت‌سرهم تصادف رزرو‌شده درآمدند (بار همزمانی
-        # خیلی بالا)، برای تلاش‌های آخر یک رقم بیشتر اضافه می‌کنیم تا فضای
-        # مبلغ‌های ممکن بزرگ‌تر شود.
+        # خیلی بالا)، برای تلاش‌های آخر یک رقم بیشتر اضافه می‌کنیم تا فضای‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+        # مبلغ‌های ممکن بزرگ‌تر شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         d = digits if attempt < _MAX_ATTEMPTS - 10 else digits + 1
         amount_toman = base_amount_toman + _random_offset(d)
         try:
@@ -125,3 +127,5 @@ def match_and_complete(db, amount_toman: int, sender: str = None, body: str = No
         return None
     db.complete_card_to_card_invoice(invoice["id"], sender=sender, body=body, device_id=device_id)
     return db.get_card_to_card_invoice(invoice["id"])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

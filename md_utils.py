@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ابزار کمکی برای Escape کردن متن قبل از قرار گرفتن در پیام‌هایی با
 parse_mode="Markdown" (لگاسی تلگرام).
@@ -22,6 +23,7 @@ parse_mode="Markdown" (لگاسی تلگرام).
 import html as _html
 
 _MD_SPECIAL_CHARS = ("\\", "_", "*", "`", "[")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def escape_html(value) -> str:
@@ -47,3 +49,5 @@ def escape_md(value) -> str:
     for ch in _MD_SPECIAL_CHARS:
         text = text.replace(ch, "\\" + ch)
     return text
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

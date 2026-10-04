@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """صفحه‌های مدیریت داخل بات: سکه و قرعه‌کشی، کش‌بک، هدیه‌ی گروهی و ضداسپم."""
@@ -16,6 +17,7 @@ import bulk_gifts
 import global_switch
 import lottery_loop
 from states import AdminBulkGift, AdminSettingInput
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
@@ -510,7 +512,7 @@ def register(router: Router, db, is_main_bot, full_admin_only, senior_admin_only
         await replace_admin_view(call, text, reply_markup=markup)
         await call.answer()
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # کش‌بک
     # ------------------------------------------------------------------
 
@@ -633,7 +635,7 @@ def register(router: Router, db, is_main_bot, full_admin_only, senior_admin_only
         await replace_admin_view(call, text, reply_markup=markup)
         await call.answer(tr("ذخیره شد."))
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # سوئیچ سراسری ربات (خاموش/روشن کردن ربات برای کاربران عادی)
     # ------------------------------------------------------------------
 
@@ -1041,3 +1043,5 @@ def register(router: Router, db, is_main_bot, full_admin_only, senior_admin_only
         await replace_admin_view(call, text, reply_markup=markup)
         await call.answer("عملیات لغو شد." if ok else "عملیات قابل لغو نیست.", show_alert=not ok)
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

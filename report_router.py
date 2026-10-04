@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """مسیریابی گزارش‌ها به گروه فوروم تاپیک‌دار؛ بدون گروه یا هنگام خطا، ارسال مستقیم به مدیران."""
@@ -76,6 +77,7 @@ async def _create_topic(bot, db, chat_id: int, topic_key: str) -> int:
     created = await bot.create_forum_topic(chat_id, name)
     await _db(db.set_report_topic, chat_id, topic_key, created.message_thread_id)
     return created.message_thread_id
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def rename_topic(bot, db, chat_id: int, topic_key: str, new_name: str) -> None:
@@ -483,3 +485,5 @@ class ReportGroupGuardMiddleware(BaseMiddleware):
                         logger.warning("پاسخ به دکمه‌ی خارج از لیست مجاز در گروه گزارش ناموفق بود.", exc_info=True)
                     return None
         return await handler(event, data)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

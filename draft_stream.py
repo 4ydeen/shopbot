@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """نمایش زنده‌ی پاسخ AI در چت خصوصی با sendMessageDraft (Bot API 9.5 به بعد).
 
 پیش‌نویس موقت است (حدود ۳۰ ثانیه) و با ارسال پیام نهایی از بین می‌رود؛ پیام کامل همیشه باید
@@ -10,6 +11,7 @@ import asyncio
 import logging
 import random
 import time
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -77,3 +79,5 @@ class DraftStreamer:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

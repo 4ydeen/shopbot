@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 from notification_i18n import send_telegram
 # -*- coding: utf-8 -*-
@@ -24,6 +25,7 @@ STATUS_KEY_LAST_VOLUME_SENT = "_job_renewal_last_volume_sent"
 from sub_info import fetch_sub_info
 from jalali import to_jalali_str
 import report_router
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ async def _send_single_reminder(bot, db, row, mark_fn, cache) -> bool:
     settings = await _db(db.get_renewal_settings)
 
     # زمان انقضا فقط از Subscription واقعی خوانده می‌شود.
-    # cf.expires_at دیتابیس نباید روی زمان ارسال یادآوری اثر بگذارد.
+    # cf.expires_at دیتابیس نباید روی زمان ارسال یادآوری اثر بگذارد.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     info = await _live_info(row["link"], cache)
     if not info.get("ok"):
         logger.warning(
@@ -99,7 +101,7 @@ async def _send_single_reminder(bot, db, row, mark_fn, cache) -> bool:
     if row["sent"]:
         return False
 
-    # محاسبه فقط برای نمایش پیام است؛ شرط ارسال با ثانیه انجام می‌شود.
+    # محاسبه فقط برای نمایش پیام است؛ شرط ارسال با ثانیه انجام می‌شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     real_days_left = int(seconds_left // (24 * 60 * 60))
     days_left = max(0, real_days_left)
 
@@ -379,3 +381,5 @@ async def renewal_reminder_loop(bot, db, interval_seconds: int = 3600) -> None:
         except Exception:
             logger.exception("خطا در ذخیره‌ی وضعیت آخرین اجرای یادآوری‌ها")
         await asyncio.sleep(interval_seconds)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

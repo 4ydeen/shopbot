@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """پایش دوره‌ای سلامت پنل‌های VPN و هشدار قطعی/بازیابی به مدیران."""
 
 import asyncio
@@ -17,6 +18,7 @@ FAIL_THRESHOLD = 3
 PROBE_TIMEOUT = 20
 PROBE_CONCURRENCY = 5
 REFERENCE_HOST = ("api.telegram.org", 443)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 REFERENCE_TIMEOUT = 5
 OUTAGE_REMINDER_SECONDS = 3600
 
@@ -102,8 +104,8 @@ async def _apply_result(bot, db, server, ok: bool, error: str, prev) -> None:
     type_label = html.escape(PANEL_TYPE_LABELS.get(server["panel_type"], server["panel_type"] or ""))
 
     if status == prev_status:
-        # هنوز قطع است؛ اگر از آخرین هشدار/یادآوری بیش از یک ساعت گذشته، دوباره یادآوری کن
-        # تا قطعی چندساعته ساکت نماند.
+        # هنوز قطع است؛ اگر از آخرین هشدار/یادآوری بیش از یک ساعت گذشته، دوباره یادآوری کن‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+        # تا قطعی چندساعته ساکت نماند.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         if status != "down":
             return
         reference = prev_alert or prev_change
@@ -197,3 +199,5 @@ async def panel_health_loop(bot, db, interval_seconds: int = INTERVAL_SECONDS) -
         except Exception:
             logger.exception("خطا در چرخه‌ی پایش سلامت پنل‌ها")
         await asyncio.sleep(interval_seconds)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 پیاده‌سازی ساده و سبک یک FSM Storage پایدار (روی دیسک، با SQLite) برای aiogram،
 جایگزین MemoryStorage پیش‌فرض.
@@ -26,6 +27,7 @@ import asyncio
 import json
 import sqlite3
 import threading
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from typing import Any, Dict, Optional
 
 from aiogram.fsm.storage.base import BaseStorage, StorageKey
@@ -139,3 +141,5 @@ class SQLiteStorage(BaseStorage):
 
     async def close(self) -> None:
         await asyncio.to_thread(self._close_sync)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

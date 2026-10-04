@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """هشدار وضعیت فعلی سرویس قبل از تمدید و ارسال لاگ تمدیدها به گروه گزارش مدیر."""
 
 import asyncio
@@ -28,6 +29,7 @@ def fmt_bytes(n: int) -> str:
     if gb >= 1:
         return f"{gb:.2f} گیگابایت"
     return f"{n / (1024 ** 2):.2f} مگابایت"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _parse_expiry(raw):
@@ -190,3 +192,5 @@ def notify(db, order, service_name, before=None, after_cc=None, provider=None) -
     task = asyncio.get_running_loop().create_task(_send(db, order, service_name, before, after_cc, provider))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 #!/bin/bash
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # ============================================================================
 # Text management panel for the V2Ray config sales bot
 # پنل مدیریت متنی بات فروش کانفیگ V2Ray
@@ -718,6 +719,7 @@ service_state() {
     fi
 }
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 unit_state() {
     if systemctl list-units --type=service --all 2>/dev/null | grep -q "$1.service"; then
         service_state "$1"
@@ -977,6 +979,7 @@ shopvpn_nginx_domains() {
     } | grep -E '^[A-Za-z0-9.-]+$' | sort -u
 }
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 factory_reset() {
     local CONFIRM ans_backup ans_ssl real_dir script_path unit domain backup_file
     local -a DOMAINS=()
@@ -1140,6 +1143,7 @@ set_env_key() {
         && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
 }
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 edit_env() {
     local env_file="$INSTALL_DIR/.env" ans resp unit failed=0
     if [ ! -d "$INSTALL_DIR" ]; then
@@ -2561,3 +2565,5 @@ while true; do
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
     esac
 done
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کلاینت سبک برای درگاه پرداخت NoapayBot/StarBot (https://noapay.mirname.xyz)
 ساخت فاکتور (خرید استارز تلگرام) و استعلام وضعیت.
@@ -37,6 +38,7 @@ class NoapayPendingApproval(NoapayError):
 class NoapayPhoneRequired(NoapayError):
     """422 PHONE_VERIFICATION_REQUIRED: خریدار باید ابتدا شماره‌اش را در بات NoapayBot ثبت کند."""
     pass
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class NoapayKeyDisabled(NoapayError):
@@ -140,3 +142,5 @@ async def get_invoice(api_key: str, invoice_token: str, base_url: str = None) ->
 async def get_me(api_key: str, base_url: str = None) -> dict:
     """اطلاعات کلید API و آمار کلی؛ برای «تست اتصال» در پنل مدیریت مناسب است."""
     return await _request("GET", api_key, "/me", base_url=base_url)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

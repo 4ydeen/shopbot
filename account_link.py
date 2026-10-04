@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """پیدا کردن یک کاربر موجود روی پنل‌ها از روی لینک ساب یا نام کاربری (برای «افزودن حساب»)."""
 import asyncio
 import logging
@@ -20,6 +21,7 @@ _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@\-]{2,64}$")
 _UA = {"User-Agent": "v2rayNG/1.8.29"}
 _SERVER_TIMEOUT = 25
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _FAIL_WINDOW = 1800
 _FAIL_LIMIT = 8
 _fails: dict = {}
@@ -181,3 +183,5 @@ async def resolve_account(db, user_id: int, kind: str, value: str) -> dict:
         out["candidates"].append(cand)
     out["unreachable"] = bool(failures) and failures == len(outcomes) and not out["candidates"]
     return out
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

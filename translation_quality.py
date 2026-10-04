@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Quality guards for machine-generated ShopVPN translations.
 
 Structural tokens (placeholders, URLs, markup, code) are replaced by sentinels
@@ -28,14 +29,14 @@ _MARKDOWN_LINK_URL_RE = re.compile(r"\]\(([^)]+)\)")
 # Single emoji code point, used only to *detect* emoji for the post-hoc mismatch
 # check below. Covers the ranges ShopVPN actually uses (pictographs, misc
 # symbols, dingbats, transport, flags) - the old range (1F000-1FAFF only)
-# missed common symbols like the warning/check/cross marks used throughout
+# missed common symbols like the warning/check/cross marks used throughout‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # the bot's own UI text (⚠️ ✅ ❌ ✨), silently letting those slip past the
 # mismatch check even when a provider dropped them.
 _EMOJI_RE = re.compile(
     "[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u2300-\u23FF]"
 )
 # Same code points, but grouped into whole *sequences* (flag pairs, and a base
-# emoji plus its optional variation selector / ZWJ-joined parts) so protect()
+# emoji plus its optional variation selector / ZWJ-joined parts) so protect()‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # can replace an entire emoji as one atomic sentinel instead of one code point
 # at a time - splitting a ZWJ sequence across separate sentinels would let a
 # provider reorder or partially translate its pieces.
@@ -44,6 +45,7 @@ _EMOJI_SEQUENCE_RE = re.compile(
     "|[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u2300-\u23FF]\uFE0F?"
     "(?:\u200D[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\u2300-\u23FF]\uFE0F?)*)"
 )
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 _PROTECT_RE = re.compile(
     "|".join(f"(?:{p.pattern})" for p in (_URL_RE, _HTML_RE, _CODE_RE, _PLACEHOLDER_RE, _EMOJI_SEQUENCE_RE)),
     re.S | re.I,
@@ -127,3 +129,5 @@ def validate_many(pairs: Iterable[tuple[str, str]], target: str | None = None) -
         if not ok:
             errors.append((source, translated, reason))
     return errors
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

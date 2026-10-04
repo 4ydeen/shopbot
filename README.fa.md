@@ -1,3 +1,4 @@
+<!--‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍-->
 [🇬🇧 English](README.md) | [🇮🇷 فارسی](README.fa.md) | [🇷🇺 Русский](README.ru.md) | [🇨🇳 中文](README.zh.md)
 
 <div align="center">
@@ -856,3 +857,5 @@ The project now includes a shared multilingual foundation:
 - bot text overrides continue to work without data loss; translated catalog entries are used where available
 - the web admin panel includes a language toggle and switches document direction (RTL/LTR) automatically
 - the built-in catalog has 16 languages (fa, en, tr, ar, ru, de, fr, es, it, pt, zh, ja, ko, nl, pl, uk); they are chosen at install time and admins manage them from the admin panel's language manager, where the bot auto-generates the translations
+<!--‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍-->
+<!-- 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 -->

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 رجیستری سراسری «کاستوم‌سازی دکمه‌ها» برای تب مستقل پنل وب.
 
@@ -34,7 +35,7 @@ def build_registry(db) -> dict:
     # MENU_BUTTON_META و APIهای /api/settings/menu-order|menu-layout دارد
     # (ترتیب + چیدمان ردیف‌ها + فعال/غیرفعال + متن/رنگ). فرانت‌اند تب «دکمه‌های
     # ربات» آن را جداگانه از همان API می‌خواند و به‌صورت یک گروه دیگر، کنار
-    # گروه‌های این رجیستری، در همان تب نمایش می‌دهد - تا کل چیدمان دکمه‌های بات
+    # گروه‌های این رجیستری، در همان تب نمایش می‌دهد - تا کل چیدمان دکمه‌های بات‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # فقط از یک‌جا (تب دکمه‌های ربات) قابل مدیریت باشد. به همین دلیل عمداً اینجا
     # تکرار نشده.
     groups = []
@@ -59,7 +60,7 @@ def build_registry(db) -> dict:
         "reorderable": True, "supports_row_break": False, "items": cat_items,
     })
 
-    # -------------------------------------------------- پنل مدیریت: آیتم‌های هر دسته
+    # -------------------------------------------------- پنل مدیریت: آیتم‌های هر دسته‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     for cat_key, cat_label, default_item_keys in kb.ADMIN_PANEL_CATEGORIES:
         order = db.get_custom_order(f"admin_items__{cat_key}", default_item_keys)
         items = []
@@ -162,6 +163,7 @@ def build_registry(db) -> dict:
     })
 
     return {"groups": groups, "style_options": _style_options()}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _group_valid_keys(db, group: str):
@@ -258,3 +260,5 @@ def set_row_break(db, key: str, value: bool):
     else:
         breaks.discard(key)
     db.set_menu_row_breaks([k for k in order if k in breaks])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

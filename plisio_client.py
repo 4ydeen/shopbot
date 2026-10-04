@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کلاینت سبک برای درگاه پرداخت کریپتو Plisio (https://plisio.net)
 فقط دو کار انجام می‌دهد: ساخت فاکتور (invoice) و اعتبارسنجی امضای کال‌بک.
@@ -11,6 +12,7 @@ import json
 import logging
 
 import aiohttp
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 PLISIO_BASE_URL = "https://api.plisio.net/api/v1"
 logger = logging.getLogger("plisio")
@@ -92,3 +94,5 @@ def verify_callback(api_key: str, data: dict) -> bool:
     payload = json.dumps(ordered, separators=(",", ":"), ensure_ascii=False)
     computed = hmac.new(api_key.encode(), payload.encode("utf-8"), hashlib.sha1).hexdigest()
     return hmac.compare_digest(computed, verify_hash)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

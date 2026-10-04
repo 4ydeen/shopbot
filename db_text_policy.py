@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Policy for text stored in the database.
 
 Database text is intentionally split into two classes:
@@ -56,7 +57,7 @@ CUSTOM_TEXT_FIELDS = {
     "report_topics": {"name"},
 }
 
-# Explicitly system-owned text fields stored in DB.
+# Explicitly system-owned text fields stored in DB.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 SYSTEM_TEXT_FIELDS = {
     "bot_text_registry": {"default_text"},
 }
@@ -79,6 +80,7 @@ def classify_text_field(table: str, column: str, *, setting_key: Optional[str] =
     if column in SYSTEM_TEXT_FIELDS.get(table, set()):
         return TextStorageKind.SYSTEM
     return TextStorageKind.NEUTRAL
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def is_custom_text_field(table: str, column: str) -> bool:
@@ -101,7 +103,7 @@ def render_db_text(table: str, column: str, value: object, language: Optional[st
         return localize_system_text(value, language)
     return str(value or "")
 
-# Frontend-facing stored content. These values are intentionally CUSTOM:
+# Frontend-facing stored content. These values are intentionally CUSTOM:‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # the Admin Panel/Mini App may display them, but i18n must never rewrite them.
 CUSTOM_SETTING_KEYS = {
     "store_name",
@@ -141,3 +143,5 @@ def render_stored_setting(key: str, value: object, language: Optional[str] = Non
 def render_custom_content(value: object) -> str:
     """Render admin/user-authored frontend content without localization."""
     return str(value or "")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

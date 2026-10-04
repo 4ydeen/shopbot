@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 دریافت اطلاعات زنده‌ی اشتراک (حجم مصرف‌شده/باقی‌مانده و تاریخ انقضا) مستقیماً از روی
 لینک ساب کاربر — دقیقاً مثل کاری که اپ‌هایی نظیر v2Box یا v2rayNG انجام می‌دهند.
@@ -35,6 +36,7 @@ _CONFIG_SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hyst
 # برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند نه ابتدای خط؛ این regex (عیناً
 # مثل geo_scan._CONFIG_URI_RE) برای استخراج از وسط چنین متنی استفاده می‌شود.
 _CONFIG_URI_RE = re.compile(r"(?:vmess|vless|trojan|hysteria2|hy2|hysteria|tuic|ssr|ss)://[^\s\"'<>]+")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 # ------------------------------------------------------- فرمت JSON کامل ---
@@ -42,7 +44,7 @@ _CONFIG_URI_RE = re.compile(r"(?:vmess|vless|trojan|hysteria2|hy2|hysteria|tuic|
 # لیست لینک‌های vmess://... یک کانفیگ *کامل* Xray-core به فرمت JSON برمی‌گردانند
 # (شامل کلیدهای سطح‌بالای log/policy/inbounds/outbounds و...). این فرمت هیچ
 # رشته‌ی vless://... در خودش ندارد، پس هیچ regex/base64-decode‌ای نمی‌تواند
-# «کانفیگ تکی» ازش دربیاورد؛ باید از روی فیلدهای outbounds[] یک لینک استاندارد
+# «کانفیگ تکی» ازش دربیاورد؛ باید از روی فیلدهای outbounds[] یک لینک استاندارد‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # (قابل کپی/وارد کردن در v2rayNG و مشابه) از نو ساخت.
 def _net_params_from_stream(stream: dict, host: str) -> dict:
     stream = stream or {}
@@ -327,7 +329,7 @@ async def fetch_individual_links(sub_url: str) -> list:
 
     _log.info("fetch_individual_links: %d بایت خام دریافت شد از %s؛ نمونه: %r", len(raw), sub_url, raw[:200])
 
-    # حالت ۱: خودِ متن خام، یک کانفیگ کامل Xray-core/sing-box به فرمت JSON است
+    # حالت ۱: خودِ متن خام، یک کانفیگ کامل Xray-core/sing-box به فرمت JSON است‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # (نه لیست لینک) - این حالت اصلاً base64 نیست، پس باید قبل از تلاش برای
     # decode روی متن خام امتحان شود.
     json_uris = _full_json_configs_to_uris(raw.strip())
@@ -424,3 +426,5 @@ def format_sub_info_fa(info: dict) -> str:
         lines.append("📅 انقضا: نامحدود")
 
     return "\n".join(lines)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Per-section help guides for the in-bot admin panel."""
 
 import time
@@ -746,6 +747,7 @@ def _gateway_help(item_key: str):
             "دسترسی: مالک، مدیر کامل و ادمین میانی (نقش پشتیبان دسترسی ندارد)."
         )
     return None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def item_body(item_key: str):
@@ -867,3 +869,5 @@ def guide_kb(section: dict, can_ask: bool) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="❓ سؤال از دستیار درباره این بخش", callback_data=HELP_ASK_CB)])
     rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=section["cb"])])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

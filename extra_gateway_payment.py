@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """منطق مشترک ساخت، بررسی و تحویل فاکتور درگاه‌های زرین‌پال، آقای پرداخت، تترا۹۸، کیوب‌پی، NowPayments و استارز داخلی تلگرام (فقط بات اصلی)."""
@@ -63,6 +64,7 @@ def is_configured(db, key: str) -> bool:
     if missing_fields(db, key):
         return False
     return bool(API_BASE_URL) or not spec(key)["needs_base_url"]
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def is_available(db, key: str, is_main_bot: bool = True) -> bool:
@@ -94,7 +96,7 @@ def _order_number(kind: str, ref_id: int) -> str:
     return f"{code}{ref_id}x{secrets.token_hex(4)}"
 
 
-STAR_USD_DEFAULT = 0.013  # مبلغی که توسعه‌دهنده بابت هر استارز دریافت می‌کند (دلار)
+STAR_USD_DEFAULT = 0.013  # مبلغی که توسعه‌دهنده بابت هر استارز دریافت می‌کند (دلار)‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def resolve_star_rate(db) -> float:
@@ -416,3 +418,5 @@ async def poll_loop(bot, db, interval: int = 15):
         except Exception:
             logger.exception("خطا در حلقه‌ی بررسی فاکتورهای درگاه‌های افزوده‌شده")
         await asyncio.sleep(interval)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

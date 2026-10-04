@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 اسکیمای مشترک «تنظیمات تکمیلی» برای پنل وب مدیر و بخش مدیریت مینی‌اپ.
 
@@ -257,8 +258,9 @@ EXTRA_SETTINGS_GROUPS: List[Dict[str, Any]] = [
         ],
     },
 ]
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _FIELD_INDEX: Dict[str, Dict[str, Any]] = {
     f["key"]: f for g in EXTRA_SETTINGS_GROUPS for f in g["fields"]
@@ -332,7 +334,7 @@ def _clean(field: Dict[str, Any], value: Any) -> Optional[str]:
         if value not in allowed:
             raise SettingsValidationError(f"«{label}» نامعتبر است.")
         return value
-    # text / textarea
+    # text / textarea‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     value = value.strip() if t == "text" else value.strip("\r\n ")
     if len(value) > int(field.get("maxlen", 8000)):
         raise SettingsValidationError(f"«{label}» بیش از حد طولانی است (حداکثر {field.get('maxlen', 8000)} کاراکتر).")
@@ -417,3 +419,5 @@ def save_values(db, surface: str, payload: Dict[str, Any]) -> List[str]:
         from datetime import datetime
         db.set_setting("terms_updated_at", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
     return changed
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

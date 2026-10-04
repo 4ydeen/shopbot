@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هشدار اتمام موجودی کانفیگ.
 
@@ -25,6 +26,7 @@ import logging
 import report_router
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 SERVICE_TOPIC_KEY = "service"
 
@@ -61,3 +63,5 @@ async def check_and_notify_low_stock(send_fn, db, product_id: int, bot_token: st
             await send_fn(admin_id, text)
         except Exception:
             logger.warning("ارسال هشدار موجودی کم به ادمین %s ناموفق بود.", admin_id)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

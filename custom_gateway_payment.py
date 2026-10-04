@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترک ساخت فاکتور «درگاه‌های پرداخت سفارشی/پویا» (payment_engine.GenericGateway)
 که هم از سرور مینی‌اپ (miniapp/server.py، برای مدیریت و دریافت وب‌هوک) و هم
@@ -21,6 +22,7 @@ import payment_engine
 import crypto_payment
 
 logger = logging.getLogger("custom_gateway_payment")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 class CustomGatewayPaymentError(Exception):
@@ -135,11 +137,11 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, gateway_key: str, k
     # روی "none" تنظیم شده (بعضی API‌ها اصلاً امضا/رمز پشتیبانی نمی‌کنند)، کاربر
     # نتواند با حدس‌زدن txn خودش، وب‌هوک را دستی صدا بزند و پرداخت جعلی ثبت کند.
     our_ref = f"{kind}-{tenant_slug}-{ref_id}-{int(datetime.now(timezone.utc).timestamp())}-{secrets.token_hex(6)}"
-    # برخی درگاه‌ها (مثل TonPays) سقف طول کاراکتر برای order_id دارند (مثلاً حداکثر
+    # برخی درگاه‌ها (مثل TonPays) سقف طول کاراکتر برای order_id دارند (مثلاً حداکثر‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # ۲۰ کاراکتر)؛ چون ردیابی واقعی سفارش از طریق gateway_ref (شناسه‌ای که خودِ
     # درگاه در پاسخ create_invoice برمی‌گرداند) انجام می‌شود نه با پارس order_id،
     # اینجا یک نسخه‌ی کوتاه‌شده و یکتا فقط برای ارسال به درگاه می‌سازیم؛ our_ref
-    # کامل همچنان برای callback_url/webhook_url و ذخیره‌ی txn_id داخلی حفظ می‌شود.
+    # کامل همچنان برای callback_url/webhook_url و ذخیره‌ی txn_id داخلی حفظ می‌شود.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     short_order_id = f"{ref_id}-{int(datetime.now(timezone.utc).timestamp())}"[:20]
     computed = await compute_send_amount(db, config, amount_toman)
     gw = payment_engine.GenericGateway(config)
@@ -164,3 +166,5 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, gateway_key: str, k
     if result.get("txn_id") and result.get("txn_id") != our_ref:
         db.set_custom_gateway_invoice_gateway_ref(invoice_id, result.get("txn_id"))
     return {"invoice_url": result.get("invoice_url"), "txn_id": our_ref}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

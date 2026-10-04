@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 Middleware ضداسپم: محدودیت نرخ رویداد هر کاربر با هشدار و سپس مسدودسازی.
 
@@ -26,6 +27,7 @@ from blocked_user import BLOCKED_MESSAGE
 from i18n import tr
 
 logger = logging.getLogger(__name__)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 DEFAULT_LIMIT = 35
 DEFAULT_WINDOW = 60
@@ -174,3 +176,5 @@ class ThrottleMiddleware(BaseMiddleware):
             await coro
         except Exception:
             logger.warning("ارسال پاسخ ضداسپم ناموفق بود.", exc_info=True)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

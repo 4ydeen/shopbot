@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """گزارش روزانه‌ی فروش برای مدیران، در ساعت تنظیم‌شده به وقت تهران (پیش‌فرض ۲۳:۴۵)."""
 
 import asyncio
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 60
 DEFAULT_TIME = (23, 45)
 STATUS_KEY_LAST_DATE = "_job_daily_report_last_date"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 WEEKDAYS_FA = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
 
 
@@ -146,3 +148,5 @@ async def daily_report_loop(bot, db, interval_seconds: int = CHECK_INTERVAL_SECO
         except Exception:
             logger.exception("خطا در چرخه‌ی گزارش روزانه‌ی فروش")
         await asyncio.sleep(interval_seconds)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

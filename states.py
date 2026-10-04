@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from aiogram.fsm.state import State, StatesGroup
 
 
@@ -114,7 +115,7 @@ class AdminSetAIModelName(StatesGroup):
 class AdminAICustomProviderAdd(StatesGroup):
     waiting_name = State()
     waiting_url = State()
-    waiting_model = State()  # fallback: discovery failed, enter model manually
+    waiting_model = State()  # fallback: discovery failed, enter model manually‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     waiting_key = State()
 
 
@@ -340,6 +341,7 @@ class AdminReferralPercent(StatesGroup):
 
 class AdminReferralMultilevel(StatesGroup):
     waiting_value = State()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 class AdminReferralCommissionMax(StatesGroup):
     waiting_value = State()
@@ -728,3 +730,5 @@ class AdminSettingInput(StatesGroup):
 
 class AdminAIChat(StatesGroup):
     chatting = State()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

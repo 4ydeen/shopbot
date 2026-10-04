@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """پیش‌بینی ریزش کاربران از الگوی خرید و مصرف و ارسال پیشنهاد تمدید شخصی با کد تخفیف اختصاصی."""
 
 import asyncio
@@ -28,6 +29,7 @@ def timing_points(days_since_last: float, interval_days: float) -> float:
     """۰ تا ۵۵ امتیاز؛ از ۹۰٪ فاصله‌ی معمول خرید شروع و در ۱۶۰٪ به سقف می‌رسد."""
     ratio = days_since_last / max(interval_days, 7.0)
     return 55.0 * min(1.0, max(0.0, (ratio - 0.9) / 0.7))
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def usage_summary(infos: list, now_ts: float) -> dict:
@@ -266,3 +268,5 @@ async def churn_offer_loop(bot, db, interval_seconds: int = 6 * 3600) -> None:
         except Exception:
             logger.exception("خطا در ذخیره‌ی وضعیت آخرین اجرای پیش‌بینی ریزش")
         await asyncio.sleep(interval_seconds)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

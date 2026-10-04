@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """اعلان کانالی رویدادهای اتمام و حذف کانفیگ (قابلیت ۱۱۵)."""
 import logging
 import aiohttp
@@ -8,6 +9,7 @@ import report_router
 logger = logging.getLogger(__name__)
 
 TOPIC_KEY = "config_alert"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def normalize_channel(value: str) -> str:
@@ -61,3 +63,5 @@ def send_service_alert_sync(bot_token: str, db, text: str) -> None:
             loop.close()
     except Exception:
         logger.exception("ارسال sync اعلان سرویس ناموفق بود")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

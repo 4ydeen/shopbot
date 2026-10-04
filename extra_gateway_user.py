@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from i18n import tr
 # -*- coding: utf-8 -*-
 """هندلرهای کاربر برای درگاه‌های افزوده‌شده (فقط بات اصلی): انتخاب روش، ساخت فاکتور، بررسی وضعیت و استارز داخلی."""
@@ -13,6 +14,7 @@ from aiogram.types import (
 )
 
 import extra_gateway_payment as egp
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 import extra_gateway_registry as registry
 from states import BuyFlow, CustomConfigFlow, RenewalFlow, WalletTopup
 
@@ -201,3 +203,5 @@ def register(router, db, is_main_bot: bool, order_error, topup_error, notify_adm
         for flow_state in (BuyFlow.waiting_receipt, CustomConfigFlow.waiting_receipt, RenewalFlow.waiting_receipt):
             router.callback_query.register(order_handler, F.data == callback, flow_state)
         router.callback_query.register(make_topup_handler(gateway_key), F.data == callback, WalletTopup.waiting_receipt)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

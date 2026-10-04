@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هشدار اتصال / عدم‌اتصال به کانفیگ
 
@@ -32,6 +33,7 @@ async def _db(fn, *args, **kwargs):
 
 # کلیدهای settings برای نمایش فقط‌خواندنیِ وضعیت آخرین اجرا در پنل وب مدیریت
 STATUS_KEY_LAST_RUN = "_job_connect_alerts_last_run"
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 STATUS_KEY_LAST_CONNECT_SENT = "_job_connect_alerts_last_connect_sent"
 STATUS_KEY_LAST_NO_CONNECT_SENT = "_job_connect_alerts_last_no_connect_sent"
 
@@ -40,7 +42,7 @@ def _format_alert_text(template: str, used_gb: float, threshold_gb: float) -> st
     try:
         return template.format(used_gb=f"{used_gb:.2f}", threshold_gb=f"{threshold_gb:.3f}")
     except Exception:
-        # اگر ادمین placeholder نامعتبری در متن گذاشته باشد، متن خام ارسال شود
+        # اگر ادمین placeholder نامعتبری در متن گذاشته باشد، متن خام ارسال شود‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # به‌جای کرش کردن کل چرخه.
         return template
 
@@ -90,7 +92,7 @@ async def _process_row(bot, db, row, is_custom: bool, settings: dict) -> tuple:
     connect_sent = False
     no_connect_sent = False
 
-    # --- هشدار اتصال ---
+    # --- هشدار اتصال ---‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     if need_connect_check:
         threshold_bytes = settings["connect_threshold_mb"] * (1024 ** 2)
         if used_bytes >= threshold_bytes:
@@ -215,3 +217,5 @@ async def connect_alert_loop(bot, db, interval_seconds: int = 900) -> None:
         except Exception:
             logger.exception("خطا در ذخیره‌ی وضعیت آخرین اجرای هشدار اتصال/عدم‌اتصال")
         await asyncio.sleep(interval_seconds)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

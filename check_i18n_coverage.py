@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 import ast
 import os
 import re
@@ -6,11 +7,12 @@ import sys
 import i18n
 
 PERSIAN = re.compile(r"[\u0600-\u06ff]")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # tr()/api_message()/localized() take the Persian text as arg 0.
 # db.get_text(key, default)/self.get_text(key, default) take it as arg 1 - the
-# actual UI string is the *default*, not the lookup key. This was previously
+# actual UI string is the *default*, not the lookup key. This was previously‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # missed entirely, which is how ~1000 db.get_text() fallback strings in
-# handlers_admin.py/handlers_user.py ended up with zero i18n coverage without
+# handlers_admin.py/handlers_user.py ended up with zero i18n coverage without‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # this scanner ever flagging them.
 CALLS_ARG0 = {"tr", "api_message", "localized"}
 CALLS_ARG1 = {"get_text"}
@@ -64,3 +66,5 @@ if __name__ == "__main__":
         print(f"{path}: {text!r}")
     print(f"uncovered: {len(literals)} literals, {len(templates)} f-string templates")
     sys.exit(1 if literals or templates else 0)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

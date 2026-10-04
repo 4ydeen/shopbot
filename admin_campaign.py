@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """ساخت پست و کمپین تبلیغاتی کانال با AI داخل پنل مدیریت بات (منوی «ابزار دیپ‌لینک و پست کانال»)."""
 
 import asyncio
@@ -13,6 +14,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import ai_support
 import campaign_ai
 from i18n import tr
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from states import AdminCampaign
 
 _log = logging.getLogger("admin_campaign")
@@ -269,3 +271,5 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await state.clear()
         await call.message.answer("لغو شد.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
         await call.answer()
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

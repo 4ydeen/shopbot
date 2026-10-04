@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ابزار افزودن دکمه‌ی دیپ‌لینک به یک پستِ از قبل منتشرشده در کانال
 (یعنی خودت عکس/متن را دستی داخل تلگرام در کانال گذاشته‌ای، این فقط دکمه را
@@ -18,6 +19,7 @@ import re
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -103,3 +105,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 اسکن «لینک ساب مادر» و استخراج موقعیت جغرافیایی سرورهای پشت آن، برای نمایش
 روی نقشه‌ی جهانِ داشبورد پنل وب.
@@ -72,6 +73,7 @@ _FLAG_RE = re.compile(r"[\U0001F1E6-\U0001F1FF]{2}")
 
 def _flag_to_cc(pair: str) -> str:
     return "".join(chr(ord(ch) - 0x1F1E6 + ord("A")) for ch in pair)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 # کد کشور -> (نام نمایشی انگلیسی، lat، lon پایتخت) — برای پین‌گذاری وقتی
@@ -495,7 +497,7 @@ def parse_subscription_text(text: str) -> list:
 
     if not out:
         # بعضی پنل‌ها (به‌جای متن خام) یک صفحه‌ی HTML «Subscription
-        # Information» برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند، نه
+        # Information» برمی‌گردانند که لینک‌های کانفیگ وسط تگ‌ها هستند، نه‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         # ابتدای خط. این‌جا با regex از هر جای متن (حتی وسط HTML) استخراج
         # می‌کنیم تا این حالت هم پوشش داده شود.
         for match in _CONFIG_URI_RE.finditer(candidate):
@@ -768,7 +770,7 @@ async def _protocol_probe(cfg: dict, ip: str, timeout: float) -> Optional[str]:
             if not chunk:
                 return "offline"
             if network == "ws":
-                # بعد از handshake، WebSocket framing فعال است؛ برای health
+                # بعد از handshake، WebSocket framing فعال است؛ برای health‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 # check باید payload فریم‌های دریافتی را استخراج کنیم.
                 frames = _extract_ws_payloads(chunk)
                 if frames:
@@ -1030,3 +1032,5 @@ def _count_distinct_servers(servers: list) -> int:
     دقیقاً روی یک سرور باشند."""
     ips_with_val = [s["ip"] for s in servers if s["ip"]]
     return len(set(ips_with_val)) + sum(1 for s in servers if not s["ip"])
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

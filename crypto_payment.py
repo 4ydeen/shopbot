@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 منطق مشترک ساخت فاکتور پرداخت کریپتو (Plisio) که هم از سرور مینی‌اپ (server.py)
 و هم مستقیم از داخل بات (handlers_user.py) قابل استفاده است، تا رفتار و
@@ -24,6 +25,7 @@ def resolve_plisio_key(db) -> str:
     """کلید API Plisio را برمی‌گرداند: اولویت با کلیدی است که ادمین از داخل بات
     برای همین فروشگاه (تننت) تنظیم کرده؛ در غیر این صورت کلید سراسری .env."""
     return db.get_setting("plisio_api_key", "") or PLISIO_API_KEY
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def resolve_plisio_key_source(db) -> str:
@@ -126,3 +128,5 @@ async def create_invoice_for(db, tenant_id: str, tg_id: int, kind: str, ref_id: 
         invoice_url=data.get("invoice_url"),
     )
     return {"invoice_url": data.get("invoice_url"), "txn_id": data["txn_id"]}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 کلاینت Firebase Cloud Messaging (FCM HTTP v1) برای ارسال نوتیفیکیشن پوش به
 اپ اندروید مدیریت.
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _SETTING_KEY = "firebase_service_account_json"
 _SA_PATH = os.environ.get("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 # کش توکن OAuth2، کلید‌شده بر اساس client_email سرویس‌اکانت (چون هر تننت
 # می‌تواند سرویس‌اکانت/پروژه‌ی متفاوتی داشته باشد و یک کش سراسری تک‌مقداری
@@ -151,13 +153,13 @@ async def send_to_tokens(db, tokens: list, title: str, body: str, data: dict = N
         for token in tokens:
             # عمداً بدون کلید top-level "notification" - وقتی پیام هم
             # notification و هم data داشته باشه، FCM اسمش رو می‌ذاره
-            # "notification message" و وقتی اپ در پس‌زمینه یا کامل بسته باشه،
+            # "notification message" و وقتی اپ در پس‌زمینه یا کامل بسته باشه،‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # خودِ سیستم‌عامل (نه PushService.onMessageReceived) نوتیف رو مستقیم
             # از روی همون فیلد نشون می‌ده - یعنی فیلتر category توی
             # PushService اصلاً اجرا نمی‌شه و خاموش‌کردن سوییجِ یک بخش هیچ اثری
             # نداره مگر وقتی اپ باز و در فورگراند باشه. با فرستادنِ پیام
             # "data-only" (بدون notification در سطح بالا)، اندروید همیشه
-            # onMessageReceived رو صدا می‌زنه (فورگراند، پس‌گراند، یا حتی اپ
+            # onMessageReceived رو صدا می‌زنه (فورگراند، پس‌گراند، یا حتی اپ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # بسته) و PushService خودش نوتیف رو (بعد از چک‌کردن فیلتر) می‌سازه.
             message = {
                 "message": {
@@ -253,3 +255,5 @@ async def send_test(db, token: str, admin_id: int | None = None) -> dict:
                 }
     except Exception as e:
         return {"ok": False, "reason": "request_failed", "detail": str(e)}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
