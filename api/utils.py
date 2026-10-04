@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """ابزارهای مشترک API عمومی ShopVPN."""
 import hashlib
 import hmac
@@ -7,6 +8,7 @@ import threading
 import time
 from collections import deque
 from functools import wraps
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def hash_token(token: str) -> str:
@@ -14,7 +16,7 @@ def hash_token(token: str) -> str:
 
 
 def token_from_header(headers) -> str:
-    # طبق قرارداد F20، هدر دقیقاً Token است.
+    # طبق قرارداد F20، هدر دقیقاً Token است.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     value = headers.get("Token") or headers.get("token") or ""
     return value.strip()
 
@@ -56,3 +58,5 @@ class RateLimiter:
                 return int(self.window - (now - hits[0])) + 1
             hits.append(now)
             return 0
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

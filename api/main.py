@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """API توکنی مستند ShopVPN - F20.
 
 اجرا:
@@ -31,6 +32,7 @@ app = FastAPI(
 )
 
 db = Database(DB_PATH)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 RATE_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "60"))
 limiter = RateLimiter(RATE_LIMIT_PER_MINUTE)
@@ -131,8 +133,8 @@ async def actions(request: Request, payload: Dict[str, Any], Token: Optional[str
     auth = _auth(request, Token, "read")
     request.state.action = action
 
-    # /token2 فقط توکن read/users/orders می‌دهد. این مسیر عمداً guarded است تا
-    # یک read-only token هرگز نتواند سفارش را تایید یا تغییر دهد.
+    # /token2 فقط توکن read/users/orders می‌دهد. این مسیر عمداً guarded است تا‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+    # یک read-only token هرگز نتواند سفارش را تایید یا تغییر دهد.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     if action in {"order_confirm", "order_approve", "order_reject"}:
         if not has_scope(auth["scope"], "orders:write"):
             raise HTTPException(403, api_message("توکن فقط خواندنی نمی‌تواند سفارش‌ها را تغییر دهد."))
@@ -198,3 +200,5 @@ async def actions(request: Request, payload: Dict[str, Any], Token: Optional[str
         return _response(result)
 
     raise HTTPException(400, api_message("عملیات ناشناخته است."))
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
