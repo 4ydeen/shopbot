@@ -14404,11 +14404,13 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
 
     _AI_ADMIN_INTRO = (
         "🧠 دستیار هوشمند مدیر آماده است. متن یا ویس بفرست؛ مثلاً:\n"
-        "• فروش این هفته نسبت به هفته قبل؟\n"
+        "• فروش این هفته نسبت به هفته قبل؟ چرا افت کرده؟\n"
         "• اطلاعات کاربر @username\n"
-        "• چند سفارش و تیکت منتظر بررسی است؟\n"
-        "• کدام محصولات کم‌موجودی‌اند؟\n\n"
-        "فقط می‌خواند و هیچ تغییری نمی‌دهد."
+        "• چند سفارش و تیکت منتظر بررسی است؟ جزئیات سفارش ۱۲۳\n"
+        "• کدام سرویس‌ها تا ۳ روز دیگر منقضی می‌شوند؟\n"
+        "• وضعیت پنل‌ها و درگاه‌ها چطور است؟\n"
+        "• چطور کد تخفیف بسازم؟ کدام دکمه؟\n\n"
+        "فقط می‌خواند و هیچ تغییری نمی‌دهد؛ برای کارها مسیر دقیق دکمه‌ها را می‌گوید."
     )
     _AI_ADMIN_NOT_CONFIGURED = "دستیار هوشمند تنظیم نشده؛ ابتدا کلید API را از بخش دستیار هوشمند وارد کن."
 
@@ -14493,7 +14495,7 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         thinking = await message.answer("در حال بررسی... ⏳")
         try:
             text = await ai_media.message_to_text(bot, db, message)
-            reply = await ai_admin.get_reply(db, user_id, text)
+            reply = await ai_admin.get_reply(db, user_id, text, is_main_bot)
         except Exception as exc:
             if not isinstance(exc, ai_media.MediaError):
                 logging.getLogger("handlers_admin").exception("خطای دستیار هوشمند مدیر")
