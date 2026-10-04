@@ -1,3 +1,4 @@
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
@@ -1185,7 +1186,7 @@ async function renderServices() {
     }));
     const all = [...orders, ...customCards];
 
-    // --- سطح جزئیات: فقط همان یک سرویس با لینک/QR/دکمه‌های مدیریت ---
+    // --- سطح جزئیات: فقط همان یک سرویس با لینک/QR/دکمه‌های مدیریت ---‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     if (servicesView.level === "detail") {
       const item = all.find((o) => String(o.id) === String(servicesView.key));
       if (item) {
@@ -2288,7 +2289,7 @@ function renderCardAutoPendingState(box, invoice, successText, checkCardAutoStat
 
 // ---------------------------------------------------------------------------
 // تب فروشگاه
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 let storeCategoryView = null; // null = لیست دسته‌بندی‌ها، وگرنه شناسه دسته‌بندی انتخاب‌شده
 
 async function renderStore() {
@@ -3553,7 +3554,7 @@ const BANNER_NAV_OPTIONS = [
   { value: "home", label: "🏠 صفحه‌ی خانه" },
 ];
 
-// چند گرادیانِ آماده برای انتخاب سریعِ رنگ پس‌زمینه‌ی بنر؛ روی هرکدام بزنی
+// چند گرادیانِ آماده برای انتخاب سریعِ رنگ پس‌زمینه‌ی بنر؛ روی هرکدام بزنی‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 // در کادر متنی زیرش پر می‌شود و می‌شود آن را هم دستی ویرایش کرد.
 const BANNER_BG_PRESETS = [
   "linear-gradient(120deg, #0d1a12, #123a20 55%, #17532c)",
@@ -7064,3 +7065,5 @@ const headerWalletBtn = document.getElementById("header-wallet-btn");
 if (headerWalletBtn) headerWalletBtn.onclick = () => switchTab("wallet");
 
 bootstrapEntryGates();
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
+// 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

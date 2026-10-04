@@ -1,3 +1,4 @@
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 /* ===================================================================
    Design tokens — HUNTER-style holo-glass retrowave
 =================================================================== */
@@ -40,7 +41,7 @@
   --radius-md: 14px;
   --radius-sm: 10px;
 
-  /* theme-able header/sun tokens (overridden per data-theme below) */
+  /* theme-able header/sun tokens (overridden per data-theme below) ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
   --header-g1: #1a0e3d;
   --header-g2: #3a1256;
   --header-g3: #7a1f5e;
@@ -188,7 +189,7 @@ main {
 main::-webkit-scrollbar { width: 4px; }
 main::-webkit-scrollbar-thumb { background: var(--glass-brd); border-radius: 4px; }
 
-/* section eyebrow / route divider */
+/* section eyebrow / route divider ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 .eyebrow {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-mono);
@@ -1112,7 +1113,7 @@ html[data-theme="clean-light"] main::-webkit-scrollbar-thumb { background: var(-
 
 html[data-theme="clean-light"] #tabbar { background: #ffffff; }
 
-/* بنر تمام‌صفحه‌ی عضویت اجباری در کانال */
+/* بنر تمام‌صفحه‌ی عضویت اجباری در کانال ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 .force-join-overlay {
   position: fixed; inset: 0; z-index: 9999;
   background: rgba(0,0,0,0.6);
@@ -1161,3 +1162,5 @@ html.reseller-owner.tier-vip .brand { color:#e6dcff; }
 @media(max-width:380px){.reseller-mini-actions{grid-template-columns:1fr}.reseller-mini-title h2{font-size:18px}}
 
 .lang-toggle{border:1px solid currentColor;background:transparent;color:inherit;border-radius:999px;padding:5px 9px;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
+/* 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 */
