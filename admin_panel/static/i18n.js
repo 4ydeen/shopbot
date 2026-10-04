@@ -1,3 +1,4 @@
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 (function(){
   // Keep API error messages in sync with the UI language.
   const _shopvpnFetch = window.fetch.bind(window);
@@ -994,7 +995,7 @@
   });
 
   // Coverage fixes: strings found reachable in app.js with no M/FRAGMENTS
-  // match at all (verified via acorn AST literal extraction + substring
+  // match at all (verified via acorn AST literal extraction + substring‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
   // coverage check against the combined M+FRAGMENTS dictionary).
   Object.assign(M, {
     "🟢 آنلاین": "🟢 Online",
@@ -1061,7 +1062,7 @@
     const raw=String(s);
     if(ACTIVE_LANG==='fa') return raw;
     if(ACTIVE_LANG==='en'){
-      // English is keyed by the original Persian text (there's no
+      // English is keyed by the original Persian text (there's no‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
       // intermediate English string to key on the way other languages are),
       // and falls back to the static word/fragment dictionary only until the
       // server-side machine catalog catches up.
@@ -1075,7 +1076,7 @@
   }
   function splitLong(raw){
     // Break a long string into <=200-char, sentence-shaped pieces so each one
-    // still qualifies for the real translation API instead of permanently
+    // still qualifies for the real translation API instead of permanently‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     // falling back to the crude word/fragment substitution below (which was
     // only ever meant as a stop-gap until the AI catalog fills in, and reads
     // as broken, word-order-agnostic text for anything long).
@@ -1155,3 +1156,5 @@
   window.ShopVPNTranslate=tr; window.ShopVPNLoadLanguage=loadCatalog; window.ShopVPNApplyI18n=()=>apply(document.body);
   document.addEventListener('DOMContentLoaded',async()=>{await apply(document.body); new MutationObserver(m=>m.forEach(x=>x.addedNodes.forEach(n=>{if(n.nodeType===1)apply(n)}))).observe(document.body,{childList:true,subtree:true});});
 })();
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
+// 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

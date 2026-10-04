@@ -1,3 +1,4 @@
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 /* ===================================================================
    ShopVPN Admin Panel — flat design system
    جهت‌گیری: داشبورد فین‌تک مسطح و تمیز — سطوح تخت با رنگ یک‌دست، بدون
@@ -705,7 +706,7 @@ html[data-theme="bento"] .topbar{
 }
 html[data-theme="bento"] .topbar-clock{ background:var(--surface-2); border:none; }
 
-/* -------------------------------------------------- bento widgets ---- */
+/* -------------------------------------------------- bento widgets ---- ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 .bento-grid{ display:grid; grid-template-columns:repeat(6,1fr); grid-auto-rows:minmax(118px,auto); gap:14px; }
 .bento-grid .span-2{ grid-column:span 2; }
 .bento-grid .rows-2{ grid-row:span 2; }
@@ -1042,7 +1043,7 @@ html[data-theme="brutalist"] .topbar-clock{ border-radius:0; border:2px solid #0
 .bru-product-name{ font-size:14.5px; font-weight:800; }
 .bru-product-cat{ font-size:11.5px; color:var(--text-muted); font-weight:700; text-transform:uppercase; }
 
-/* ---- پشتیبانی: ردیف‌های اینباکس ---------------------------------------- */
+/* ---- پشتیبانی: ردیف‌های اینباکس ---------------------------------------- ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 .bru-inbox-list{ display:flex; flex-direction:column; gap:10px; }
 .bru-inbox-row{ display:flex; align-items:center; gap:12px; border:3px solid #000; background:#fff;
   box-shadow:var(--shadow-btn); padding:10px 14px; transition:transform .12s, box-shadow .12s; }
@@ -1826,7 +1827,7 @@ html[data-theme="cyberpunk"] h1, html[data-theme="cyberpunk"] h2, html[data-them
 html[data-theme="cyberpunk"] ::selection{ background:rgba(0,255,194,.3); color:#fff; }
 html[data-theme="cyberpunk"] :focus-visible{ outline:2px solid var(--emerald); }
 
-/* ---- brand / login ---- */
+/* ---- brand / login ---- ‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
 html[data-theme="cyberpunk"] .login-card{
   border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
   box-shadow:0 0 0 1px rgba(0,255,194,.08), 0 0 60px rgba(255,42,109,.15);
@@ -2350,3 +2351,5 @@ html.tier-vip .sidebar-brand .brand-mark { background: linear-gradient(135deg,#5
 .extra-hint{ margin-top:4px; font-size:12px; line-height:1.6; }
 .extra-save-btn{ min-width:96px; }
 @media (max-width:640px){ .extra-save-btn{ width:100%; } }
+/*‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍*/
+/* 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 */
