@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 هش کردن پسورد و ساخت/بررسی توکن نشست (session) پنل وب مستقل.
 عمداً بدون هیچ وابستگی خارجی (فقط hashlib/hmac استاندارد پایتون) تا نیازی
@@ -13,6 +14,7 @@ import os
 import time
 
 PBKDF2_ITERATIONS = 260_000
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def hash_password(password: str) -> str:
@@ -46,7 +48,7 @@ def create_session_token(secret_key: str, admin_id: int, username: str, role: st
         "id": admin_id,
         "u": username,
         "r": role,
-        "b": tenant,  # شناسه/اسلاگ تننت (نماینده)؛ خالی یعنی بات اصلی. منبع اعتبار تننت همین payload است نه پارامتر URL.
+        "b": tenant,  # شناسه/اسلاگ تننت (نماینده)؛ خالی یعنی بات اصلی. منبع اعتبار تننت همین payload است نه پارامتر URL.‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
         "exp": int(time.time()) + hours * 3600,
     }
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -69,3 +71,5 @@ def verify_session_token(secret_key: str, token: str):
     if payload.get("exp", 0) < time.time():
         return None
     return payload
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

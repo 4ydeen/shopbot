@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 پنل مدیریت وب کاملاً مستقل ShopVPN - خارج از تلگرام.
 
@@ -1301,7 +1302,7 @@ def api_app_config(admin=Depends(get_current_admin)):
             "section": "کاربران و پشتیبانی",
             "source": "/api/users", "item_id_field": "tg_id", "search": True,
             # معادل تب‌های وضعیت («همه/فعال/منقضی/مسدود») در دایرکتوری کاربران
-            # پنل وب؛ چون این‌ها فیلترهای واقعی سمت سرور هستند (نه فقط جستجوی
+            # پنل وب؛ چون این‌ها فیلترهای واقعی سمت سرور هستند (نه فقط جستجوی‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # محلی روی همان صفحه)، به همان endpoint با پارامتر status ارسال می‌شوند.
             "filters": [{"key": "status", "label": "وضعیت", "options":
                          ["active", "expired", "blocked"]}],
@@ -3981,6 +3982,7 @@ def api_delete_all_discounts(admin=Depends(require_permission("discounts"))):
     count = db.delete_all_discount_codes()
     db.log_admin_action(admin["id"], "discount_delete_all", f"حذف همه کدهای تخفیف ({count})", "discount", None)
     return {"ok": True, "deleted": count}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 @app.post("/api/discounts/delete-category")
@@ -4233,7 +4235,7 @@ async def _deliver_reseller_webpanel_link(bot_id: int, request: Request) -> bool
         "این لینک یک‌بارمصرف است؛ با باز کردنش یک یوزرنیم/پسورد دلخواه برای پنل وب "
         "خودت تنظیم می‌کنی."
     )
-    # نماینده‌ی بدون بات توکن واقعی تلگرام ندارد و با no-bot:* ذخیره می‌شود؛
+    # نماینده‌ی بدون بات توکن واقعی تلگرام ندارد و با no-bot:* ذخیره می‌شود؛‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
     # لینک چنین نماینده‌ای باید با بات اصلی ارسال شود.
     send_token = reseller_bot["bot_token"]
     if str(send_token or "").startswith("no-bot:"):
@@ -7408,3 +7410,5 @@ def serve_setup_page():
     html = _bust_asset_cache(html)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

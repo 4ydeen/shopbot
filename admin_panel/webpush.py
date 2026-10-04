@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 ارسال اعلان Push به مرورگر ادمین‌های پنل وب، حتی وقتی مرورگر کاملاً بسته باشد
 (از طریق سرویس Push خودِ مرورگر - FCM برای Chrome/Edge، Mozilla Push برای
@@ -17,6 +18,7 @@ import logging
 from pywebpush import webpush, WebPushException
 
 from config import VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIM_EMAIL
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 logger = logging.getLogger("admin_panel.webpush")
 
@@ -54,3 +56,5 @@ async def send_push(sub_row, payload: dict) -> str:
         "keys": {"p256dh": sub_row["p256dh"], "auth": sub_row["auth"]},
     }
     return await asyncio.to_thread(_send_sync, subscription_info, payload)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

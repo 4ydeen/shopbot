@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """ارسال پیام ساده به کاربر از طریق Bot API؛ برای اطلاع‌رسانی تایید/رد سفارش
 و شارژ کیف پول وقتی این کارها از داخل پنل وب مستقل (نه خودِ بات) انجام می‌شوند."""
 
@@ -27,6 +28,7 @@ async def get_me(bot_token: str):
     except Exception:
         logger.exception("getMe ناموفق بود")
         return None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def send_message(bot_token: str, chat_id: int, text: str, parse_mode: str = None, reply_markup: dict = None) -> bool:
@@ -166,3 +168,5 @@ async def send_document(bot_token: str, chat_id: int, file_path: str, caption: s
     except Exception:
         logger.exception("ارسال فایل تلگرام به %s ناموفق بود", chat_id)
         return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
