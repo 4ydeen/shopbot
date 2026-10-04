@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider پنل Alireza x-ui (alireza0/x-ui): لاگین با کوکی و مسیرهای /xui/API. فقط یک inbound پشتیبانی می‌شود."""
 import json
 import secrets
@@ -5,6 +6,7 @@ import time
 import uuid
 
 from . import auth_cache
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from ._http import new_session, request_json, http_error, load_json, server_value, inbound_ids, new_limit_bytes
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
 
@@ -238,3 +240,5 @@ class AlirezaProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

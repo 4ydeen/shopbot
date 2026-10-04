@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider پنل WGDashboard (WireGuard): API Key در هدر wg-dashboard-apikey؛ نام configuration (اینترفیس) به‌جای «کاربر نمونه» گرفته می‌شود.
 
 حجم و انقضا با Peer Schedule Job (محدودسازی خودکار) اعمال می‌شود و خروجی، متن فایل .conf است.
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from ._http import new_session, request_json, http_error, load_json, gb_to_bytes, new_limit_bytes
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
 
 _JOB_TZ = timezone(timedelta(hours=3, minutes=30))
@@ -246,3 +248,5 @@ class WGDashboardProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

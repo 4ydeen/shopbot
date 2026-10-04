@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider MikroTik User Manager (RouterOS REST API): احراز هویت Basic با یوزر/پس ادمین روتر.
 
 حجم و مدت را profile تعیین می‌کند (نام profile به‌جای «کاربر نمونه» گرفته می‌شود)؛ مقدار حجم/مدت ورودی create_user اعمال نمی‌شود.
@@ -9,6 +10,7 @@ import aiohttp
 
 from ._http import new_session, request_json, load_json
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _UNSUPPORTED = "این نوع پنل از این عملیات پشتیبانی نمی‌کند."
 
@@ -132,3 +134,5 @@ class MikroTikProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

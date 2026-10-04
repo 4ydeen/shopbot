@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 Provider پنل Marzban (Gozargah/Marzban) - همان پنل اصلی که PasarGuard از روی آن
 فورک شده.
@@ -22,6 +23,7 @@ import json
 import asyncio
 import aiohttp
 from datetime import datetime
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 from . import auth_cache
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -314,10 +316,10 @@ class MarzbanProvider(BasePanelProvider):
             base_expire = current_expire if (current_expire and current_expire > now_ts) else now_ts
             new_expire = base_expire + add_days * 86400 if add_days else current_expire
             # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
-            # سقف حجم را با بستهٔ تازه جایگزین می‌کند (نه رویش اضافه)، وگرنه حجم باقیمانده‌ی
+            # سقف حجم را با بستهٔ تازه جایگزین می‌کند (نه رویش اضافه)، وگرنه حجم باقیمانده‌ی‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # قبلی هم به اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد
             # (تمدید کامل دستی)، حجم باقیمانده‌ی مصرف‌نشده حفظ و بستهٔ جدید رویش اضافه
-            # می‌شود - چون زمان (expire) همیشه به همین شکل جمعی/حفظ‌شونده محاسبه می‌شود و
+            # می‌شود - چون زمان (expire) همیشه به همین شکل جمعی/حفظ‌شونده محاسبه می‌شود و‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # این ناهم‌خوانی بین حجم و زمان همان مشکل گزارش‌شده بود. تمدید «افزایشی»
             # (reset_usage=False) همیشه روی سقف قبلی جمع می‌زند.
             if reset_usage and preserve_remaining:
@@ -363,3 +365,5 @@ class MarzbanProvider(BasePanelProvider):
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
         return PanelUserResult(username=data.get("username", username), subscription_url=sub_url, raw=data)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

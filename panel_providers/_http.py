@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """ابزارهای مشترک HTTP برای providerهای پنل."""
 import asyncio
 import json
@@ -31,6 +32,7 @@ async def request(session, method: str, url: str, **kwargs):
             return resp.status, (await resp.read()).decode("utf-8", errors="replace"), resp.headers
     except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
         raise PanelError(f"خطا در اتصال به پنل: {exc or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from exc
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 async def request_json(session, method: str, url: str, **kwargs):
@@ -89,3 +91,5 @@ def new_limit_bytes(current_limit, used, add_gb, reset_usage: bool, preserve_rem
     if add_gb:
         return add if reset_usage else current_limit + add
     return current_limit
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 Provider پنل Marzneshin (فورک جدیدتر و مقیاس‌پذیرتر Marzban).
 
@@ -23,6 +24,7 @@ import time
 import json
 import datetime
 import asyncio
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 import aiohttp
 
 from . import auth_cache
@@ -350,10 +352,10 @@ class MarzneshinProvider(BasePanelProvider):
                     current_expire_dt = None
             base_dt = current_expire_dt if (current_expire_dt and current_expire_dt > now_dt) else now_dt
             new_expire_dt = (base_dt + datetime.timedelta(days=add_days)) if add_days else current_expire_dt
-            # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
+            # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # سقف حجم را با بستهٔ تازه جایگزین می‌کند، وگرنه حجم باقیمانده‌ی قبلی هم به
             # اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد (تمدید کامل
-            # دستی)، حجم باقیمانده‌ی مصرف‌نشده حفظ و بستهٔ جدید رویش اضافه می‌شود - چون زمان
+            # دستی)، حجم باقیمانده‌ی مصرف‌نشده حفظ و بستهٔ جدید رویش اضافه می‌شود - چون زمان‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # همیشه به همین شکل حفظ‌شونده محاسبه می‌شود. تمدید «افزایشی» (reset_usage=False)
             # همیشه روی سقف قبلی جمع می‌زند.
             if reset_usage and preserve_remaining:
@@ -399,3 +401,5 @@ class MarzneshinProvider(BasePanelProvider):
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
         return PanelUserResult(username=data.get("username", username), subscription_url=sub_url, raw=data)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

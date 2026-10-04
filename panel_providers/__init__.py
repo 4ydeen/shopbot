@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 نقطه‌ی ورود مشترک: get_provider(server) بر اساس server["panel_type"] نمونه‌ی
 provider مناسب را برمی‌گرداند. برای اضافه‌کردن پنل جدید (X-UI فورک‌های دیگر،
@@ -20,6 +21,7 @@ from .sui_provider import SUIProvider
 from .wgdashboard_provider import WGDashboardProvider
 from .mikrotik_provider import MikroTikProvider
 from .ibsng_provider import IBSngProvider
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 PROVIDERS = {
     "pasarguard": PasarguardProvider,
@@ -51,8 +53,8 @@ PANEL_TYPE_LABELS = {
 
 # پنل‌هایی که مثل PasarGuard با «کاربر نمونه» قالب می‌گیرند (group_ids/proxy_settings)
 TEMPLATE_BASED_PANEL_TYPES = {"pasarguard", "marzban", "marzneshin", "rebecca", "sui", "wgdashboard", "mikrotik", "ibsng"}
-# پنل‌هایی که به یک «آدرس پایه‌ی Subscription» جدا از آدرس ادمین نیاز دارند
-# (چون آدرس API ادمین و لینک عمومی اشتراک معمولاً دامنه/مسیر یکسانی ندارند).
+# پنل‌هایی که به یک «آدرس پایه‌ی Subscription» جدا از آدرس ادمین نیاز دارند‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# (چون آدرس API ادمین و لینک عمومی اشتراک معمولاً دامنه/مسیر یکسانی ندارند).‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # 3X-UI علاوه بر این، انتخاب inbound را هم لازم دارد؛ Hiddify نیازی به inbound ندارد.
 SUB_BASE_URL_PANEL_TYPES = {"3xui", "hiddify", "alireza"}
 INBOUND_SELECT_PANEL_TYPES = {"3xui", "alireza"}
@@ -101,3 +103,5 @@ def get_provider(server) -> BasePanelProvider:
     if cls is None:
         raise PanelError(f"نوع پنل «{panel_type}» پشتیبانی نمی‌شود")
     return cls(server)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

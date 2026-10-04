@@ -1,8 +1,10 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider پنل Rebecca (فورک Marzban): احراز هویت با Bearer token در فیلد رمز و سرویس (service_id) از روی کاربر نمونه."""
 import time
 
 from ._http import new_session, request_json, load_json, new_limit_bytes
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from .marzban_provider import _expire_to_epoch
 
 
@@ -145,3 +147,5 @@ class RebeccaProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 Provider پنل 3X-UI (MHSanaei/3x-ui).
 
@@ -66,6 +67,7 @@ import json
 import secrets
 import time
 import uuid
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 import asyncio
 import aiohttp
 
@@ -405,7 +407,7 @@ class ThreeXUIProvider(BasePanelProvider):
                 # تمدید «کامل» (reset_usage=True) دو حالت دارد: پیش‌فرض (preserve_remaining=False)
                 # سقف حجم را با بستهٔ تازه جایگزین می‌کند، وگرنه حجم باقیمانده‌ی قبلی هم به
                 # اشتباه به سقف جدید اضافه می‌شود. اگر preserve_remaining=True باشد (تمدید کامل
-                # دستی)، حجم باقیمانده‌ی مصرف‌نشده (بر اساس مصرف واقعی خوانده‌شده از traffic
+                # دستی)، حجم باقیمانده‌ی مصرف‌نشده (بر اساس مصرف واقعی خوانده‌شده از traffic‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 # endpoint) حفظ و بستهٔ جدید رویش اضافه می‌شود. تمدید «افزایشی»
                 # (reset_usage=False) همیشه روی سقف قبلی جمع می‌زند.
                 if reset_usage and preserve_remaining:
@@ -449,7 +451,7 @@ class ThreeXUIProvider(BasePanelProvider):
 
             # یک UUID/subId مشترک برای همه‌ی inbound ها می‌سازیم (نه جدا-جدا)،
             # چون subId پایه‌ی لینک subscription تجمیعی است و اگر هر inbound
-            # subId متفاوتی می‌گرفت، یک لینک واحد دیگر همه‌ی کانفیگ‌ها را
+            # subId متفاوتی می‌گرفت، یک لینک واحد دیگر همه‌ی کانفیگ‌ها را‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
             # پوشش نمی‌داد.
             new_uuid = str(uuid.uuid4())
             new_sub_id = secrets.token_hex(8)
@@ -621,3 +623,5 @@ class ThreeXUIProvider(BasePanelProvider):
             "expired_clients": expired_clients,
             "disabled_clients": disabled_clients,
         }
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

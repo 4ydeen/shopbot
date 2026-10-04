@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 اینترفیس پایه‌ی مشترک برای همه‌ی provider های پنل VPN (PasarGuard، و در آینده
 Marzban، Marzneshin، X-UI و ...). هر provider جدید فقط باید این کلاس را
@@ -15,6 +16,7 @@ try:
     from aiohttp_socks import ProxyConnector
 except ImportError:
     ProxyConnector = None
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 @dataclass
@@ -149,3 +151,5 @@ class BasePanelProvider(ABC):
         پیاده‌سازی پیش‌فرض: پشتیبانی نمی‌شود؛ provider هایی که این قابلیت را
         دارند این متد را override و supports_online_status را True می‌کنند."""
         raise PanelError("این نوع پنل از استعلام وضعیت آنلاین لحظه‌ای پشتیبانی نمی‌کند.")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

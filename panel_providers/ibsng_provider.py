@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider IBSng: کلاینت مبتنی بر وب‌اسکرپینگ پنل ادمین (/IBSng/admin) با لاگین کوکی.
 
 گروه (group) IBSng به‌جای «کاربر نمونه» گرفته می‌شود و حجم/مدت را همان گروه تعیین می‌کند (مقدار ورودی create_user اعمال نمی‌شود).
@@ -12,6 +13,7 @@ from html import unescape
 from . import auth_cache
 from ._http import new_session, request, load_json
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _UNSUPPORTED = "این نوع پنل از این عملیات پشتیبانی نمی‌کند."
 _UNITS = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
@@ -203,3 +205,5 @@ class IBSngProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

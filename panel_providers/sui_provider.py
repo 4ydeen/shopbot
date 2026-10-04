@@ -1,3 +1,4 @@
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """Provider پنل S-UI (alireza0/s-ui): REST API با هدر Token روی /apiv2؛ inboundها از روی کاربر نمونه گرفته می‌شوند."""
 import json
 import secrets
@@ -5,6 +6,7 @@ import string
 import time
 import uuid
 from urllib.parse import urlparse
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 from ._http import new_session, request_json, http_error, load_json, server_value, new_limit_bytes
 from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
@@ -192,3 +194,5 @@ class SUIProvider(BasePanelProvider):
         except PanelError as e:
             self.last_error = str(e)
             return False
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
