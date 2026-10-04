@@ -5206,11 +5206,17 @@ def api_admin_edit_product(product_id: int, body: ProductUpdate, auth=Depends(re
 
 
 @app.post("/api/admin/products/{product_id}/toggle")
-def api_admin_toggle_product(product_id: int, auth=Depends(require_senior_admin)):
-    _, db, _ = auth
-    if not db.get_product(product_id):
+async def api_admin_toggle_product(product_id: int, auth=Depends(require_senior_admin)):
+    _, db, tenant = auth
+    if not await asyncio.to_thread(db.get_product, product_id):
         raise HTTPException(status_code=404, detail=tr("محصول یافت نشد."))
-    db.toggle_product(product_id)
+    new_state = await asyncio.to_thread(db.toggle_product, product_id)
+    if new_state:
+        import product_waitlist
+        from admin_panel.telegram_notify import send_message as tg_send
+        asyncio.create_task(product_waitlist.notify_waitlist(
+            db, product_id, product_waitlist.token_sender(tg_send, tenant.bot_token)
+        ))
     return {"status": "ok"}
 
 
