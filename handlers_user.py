@@ -819,7 +819,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         """معادلِ کلیک روی یک محصول از منو، ولی به‌صورت پیام جدید (برای بازکردن
         مستقیم صفحه‌ی یک محصول خاص از طریق دیپ‌لینک ?start=prod_<id>)."""
         product = (await asyncio.to_thread(db.get_product, product_id))
-        if not product or not product["is_active"]:
+        if product and not product["is_active"]:
+            await _register_product_waitlist(message.from_user.id, product_id, message=message)
+            return
+        if not product:
             await message.answer(db.get_text(
                 "handlers_user.product.not_found_or_inactive", "⛔️ محصول موردنظر یافت نشد یا دیگر فعال نیست."
             ))
@@ -975,7 +978,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
     @router.callback_query(F.data.startswith("cat:"))
     async def cb_category(call: CallbackQuery):
         cat_id = int(call.data.split(":")[1])
-        products = (await asyncio.to_thread(db.get_products, cat_id, active_only=True))
+        products = (await asyncio.to_thread(db.get_products, cat_id, active_only=False))
         if not products:
             await call.answer(
                 db.get_text("handlers_user.category.empty", "محصولی در این دسته‌بندی موجود نیست."), show_alert=True
@@ -1081,12 +1084,26 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         await state.update_data(discount_code_id=code_row["id"], discount_amount=discount_amount)
         return discount_amount, code_row["code"]
 
+    async def _register_product_waitlist(user_id: int, product_id: int, call: CallbackQuery = None, message: Message = None):
+        await asyncio.to_thread(db.add_product_waitlist, product_id, user_id)
+        text = db.get_text(
+            "handlers_user.product.inactive_waitlist",
+            "⛔️ این محصول در حال حاضر غیرفعال است.\n🔔 به محض فعال شدن، همراه با دکمه‌ی خرید سریع برایت پیام می‌فرستیم.",
+        )
+        if call is not None:
+            await call.answer(text, show_alert=True)
+        else:
+            await message.answer(text)
+
     @router.callback_query(F.data.startswith("prod:"))
     async def cb_product(call: CallbackQuery, state: FSMContext):
         product_id = int(call.data.split(":")[1])
         product = (await asyncio.to_thread(db.get_product, product_id))
         if not product:
             await call.answer(db.get_text("handlers_user.product.not_found_short", "محصول یافت نشد."), show_alert=True)
+            return
+        if not product["is_active"]:
+            await _register_product_waitlist(call.from_user.id, product_id, call=call)
             return
         stock = (await asyncio.to_thread(db.count_available_configs, product_id))
         wallet_credit = (await asyncio.to_thread(db.get_wallet_credit, call.from_user.id))

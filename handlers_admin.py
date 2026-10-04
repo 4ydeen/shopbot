@@ -1126,11 +1126,14 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if product_id is None:
             await call.answer(db.get_text('handlers_admin.auto_524e296b', '❌ درخواست نامعتبر است.'), show_alert=True)
             return
-        (await asyncio.to_thread(db.toggle_product, product_id))
+        new_state = (await asyncio.to_thread(db.toggle_product, product_id))
         product = (await asyncio.to_thread(db.get_product, product_id))
         if product is None:
             await call.answer(db.get_text('handlers_admin.auto_fa9715cb', '⚠️ این محصول دیگر وجود ندارد.'), show_alert=True)
             return
+        if new_state:
+            import product_waitlist
+            asyncio.create_task(product_waitlist.notify_waitlist(db, product_id, product_waitlist.bot_sender(call.bot)))
         (await asyncio.to_thread(db.log_admin_action, call.from_user.id, "product_toggle", f"محصول «{product['name']}»"))
         products = (await asyncio.to_thread(db.get_products, product["category_id"], active_only=False))
         await safe_edit(call, db.get_text('handlers_admin.auto_c8caee2c', 'لیست محصولات این دسته\u200cبندی:'), reply_markup=kb.admin_products_list_kb(db, products))

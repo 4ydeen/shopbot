@@ -366,12 +366,13 @@ def products_kb(db, products, category_id) -> InlineKeyboardMarkup:
     rows = []
     for p in products:
         stock = db.count_available_configs(p["id"])
-        stock_tag = "✅" if stock > 0 else "⛔️"
+        stock_tag = "✅" if stock > 0 and p["is_active"] else "⛔️"
+        inactive_tag = tr(" (غیرفعال)") if not p["is_active"] else ""
         rows.append(
             [
                 _styled_inline(
                     db,
-                    f"{stock_tag} {p['name']} - {p['price']:,} تومان",
+                    f"{stock_tag} {p['name']} - {p['price']:,} تومان{inactive_tag}",
                     f"prod:{p['id']}",
                     "btn_product_select_style",
                 )
