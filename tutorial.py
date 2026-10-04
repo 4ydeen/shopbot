@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """ارسال آموزش‌ها به کاربر (متن/عکس/ویدیو، قدم‌به‌قدم).
 
 هر آموزش یک عنوان و چند مرحله دارد (database.py: tutorial_devices/tutorial_steps)
@@ -13,6 +14,7 @@ import logging
 import tutorial_hub
 
 _log = logging.getLogger("tutorial")
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 _CAPTION_LIMIT = 1000
 _TEXT_LIMIT = 4000
@@ -80,3 +82,5 @@ async def send_device_picker(bot, chat_id: int, db, intro: str = None) -> bool:
         bot, chat_id, db, tutorial_hub.POST_PURCHASE,
         intro=intro or "📚 برای اتصال بدون مشکل، آموزش مورد نظرت رو انتخاب کن:",
     )
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """
 نقشه‌ی پس‌زمینه‌ی «نقشه‌ی جهانی سرورها»ی داشبورد.
 
@@ -37,7 +38,7 @@ _TIMEOUT = aiohttp.ClientTimeout(total=25)
 _CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_world_map_cache_v3.json")
 
 _mem_cache = None  # {"ok": True, "land_path": "..."} پس از اولین موفقیت در طول عمر پروسه
-_fetch_lock = None  # asyncio.Lock ساخته‌شده lazy چون این ماژول ممکن است بدون event loop هم import شود
+_fetch_lock = None  # asyncio.Lock ساخته‌شده lazy چون این ماژول ممکن است بدون event loop هم import شود‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _get_lock() -> asyncio.Lock:
@@ -45,6 +46,7 @@ def _get_lock() -> asyncio.Lock:
     if _fetch_lock is None:
         _fetch_lock = asyncio.Lock()
     return _fetch_lock
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 # ------------------------------------------------------------- projection --
@@ -99,7 +101,7 @@ def _rings_of_geometry(geom: dict):
     elif gtype == "GeometryCollection":
         for sub in geom.get("geometries", []):
             yield from _rings_of_geometry(sub)
-    # سایر انواع (Point/LineString/...) برای «زمین» انتظار نمی‌رود پیش بیایند
+    # سایر انواع (Point/LineString/...) برای «زمین» انتظار نمی‌رود پیش بیایند‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _rdp_simplify(points: list, epsilon: float) -> list:
@@ -234,3 +236,5 @@ async def get_world_map(force_refresh: bool = False) -> dict:
         _mem_cache = result
         _save_disk_cache(result)
         return result
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

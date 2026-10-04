@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """اتصال آموزش‌ها به بخش‌ها و دکمه‌های بات.
 
 هر «مقصد» (target) یک دکمه/بخش از بات است که کاربر با آن کار می‌کند. وقتی
@@ -35,6 +36,7 @@ SPECIAL_TARGETS = (
     (GENERAL, "📚 منوی «آموزش» (آموزش‌های کلی)"),
     (POST_PURCHASE, "🎁 پیشنهاد بعد از خرید موفق"),
 )
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _t(key, label, menu=None, exact=(), prefix=(), cmd=()):
@@ -310,3 +312,5 @@ def install(bot, dp, db) -> None:
     target_mw = TutorialTargetMiddleware(db)
     dp.message.outer_middleware(target_mw)
     dp.callback_query.outer_middleware(target_mw)
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

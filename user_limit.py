@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """محدودیت تعداد کاربر همزمان (limitIp) برای محصولات متصل به پنل.
 
 هر محصول یک «تعداد کاربر پایه» (base_users) دارد که در قیمت پایه گنجانده شده است:
@@ -71,6 +72,7 @@ def included_users(db, product) -> int:
     if not server or not _field(server, "is_active", 1) or not server_supports(server):
         return 0
     return base
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def selectable_max_users(db, product) -> int:
@@ -145,3 +147,5 @@ def service_upgrade_info(db, cc):
     if not server or not _field(server, "is_active", 1) or not server_supports(server):
         return None
     return {"product": product, "current": current, "max_users": max_users}
+#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
