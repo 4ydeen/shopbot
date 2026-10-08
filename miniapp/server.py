@@ -96,7 +96,7 @@ from panel_providers import (
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
     SINGLE_INBOUND_PANEL_TYPES, TOKEN_ONLY_PANEL_TYPES,
 )
-from reseller_auto_provision import provision_auto_config, provision_test_config, ProvisionError
+from reseller_auto_provision import provision_auto_config, provision_test_config, is_volume_credit_bot, ProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
 from direct_panel_provision import provision_direct, ProvisionError as DirectProvisionError
 from renewal_engine import execute_renewal, RenewalError
@@ -1115,11 +1115,11 @@ def api_custom_config_info(auth=Depends(get_verified_user)):
         "reseller_credit_gb": reseller_credit,
         "reseller_available": is_reseller and reseller_credit > 0 and bool(reseller_server),
         "crypto_enabled": db.get_setting("crypto_payment_enabled", "0") == "1"
-        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL),
+        and bool(_resolve_plisio_key(db)) and bool(API_BASE_URL) and db.payment_gate_passed(tg_id, "crypto"),
         "abangateway_enabled": db.get_setting("abangateway_payment_enabled", "0") == "1"
-        and bool(_resolve_abangateway_key(db)) and bool(API_BASE_URL),
-        "blupal_enabled": blupal_payment.blupal_payment_available(db),
-        "noapay_enabled": noapay_payment.noapay_payment_available(db),
+        and bool(_resolve_abangateway_key(db)) and bool(API_BASE_URL) and db.payment_gate_passed(tg_id, "abangateway"),
+        "blupal_enabled": blupal_payment.blupal_payment_available(db) and db.payment_gate_passed(tg_id, "blupal"),
+        "noapay_enabled": noapay_payment.noapay_payment_available(db) and db.payment_gate_passed(tg_id, "noapay"),
         "card_to_card_enabled": db.get_setting("card_to_card_enabled", "1") == "1" and db.card_gate_passed(tg_id),
         **_card_info(db, tg_id),
     }
@@ -1435,7 +1435,8 @@ async def api_test_config_claim(payload: TestConfigClaim, auth=Depends(require_j
         if not db.try_reserve_test_slot(tg_id, MAX_TEST_PER_USER):
             raise HTTPException(status_code=400, detail=tr("شما قبلاً کانفیگ تست خود را دریافت کرده‌اید."))
 
-        if is_full_access:
+        use_credit = (not is_full_access) or (await asyncio.to_thread(is_volume_credit_bot, db, not bool(tenant.tenant_id)))
+        if not use_credit:
             try:
                 result = await provision_test_plan(db, plan, user_id=tg_id)
             except TestPlanProvisionError as e:
@@ -2311,7 +2312,7 @@ async def api_order_crypto_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], "crypto", order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], "crypto", order["product_id"], order=order, user_id=order["user_id"])
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2336,7 +2337,7 @@ async def api_wallet_crypto_invoice(body: CryptoWalletInvoiceRequest, auth=Depen
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], "crypto", wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], "crypto", wallet_topup=True, user_id=topup["user_id"])
     result = await _create_crypto_invoice_for(
         db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
         order_name=f"شارژ کیف پول #{body.topup_id}",
@@ -2373,7 +2374,7 @@ async def api_order_abangateway_invoice(order_id: int, auth=Depends(require_join
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], "abangateway", order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], "abangateway", order["product_id"], order=order, user_id=order["user_id"])
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2398,7 +2399,7 @@ async def api_wallet_abangateway_invoice(body: AbanGatewayWalletInvoiceRequest, 
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], "abangateway", wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], "abangateway", wallet_topup=True, user_id=topup["user_id"])
     result = await _create_abangateway_invoice_for(
         db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
         order_name=f"شارژ کیف پول #{body.topup_id}",
@@ -2656,7 +2657,7 @@ async def api_order_blupal_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], "blupal", order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], "blupal", order["product_id"], order=order, user_id=order["user_id"])
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2681,7 +2682,7 @@ async def api_wallet_blupal_invoice(body: BluPalWalletInvoiceRequest, auth=Depen
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], "blupal", wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], "blupal", wallet_topup=True, user_id=topup["user_id"])
     result = await _create_blupal_invoice_for(
         db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
         order_name=f"شارژ کیف پول #{body.topup_id}",
@@ -2930,7 +2931,7 @@ async def api_order_noapay_invoice(order_id: int, auth=Depends(require_joined)):
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], "noapay", order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], "noapay", order["product_id"], order=order, user_id=order["user_id"])
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -2955,7 +2956,7 @@ async def api_wallet_noapay_invoice(body: NoapayWalletInvoiceRequest, auth=Depen
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], "noapay", wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], "noapay", wallet_topup=True, user_id=topup["user_id"])
     result = await _create_noapay_invoice_for(
         db, tenant, tg_id, "wallet_topup", body.topup_id, topup["amount"],
         order_name=f"شارژ کیف پول #{body.topup_id}",
@@ -3041,7 +3042,7 @@ async def api_order_extra_gateway_invoice(order_id: int, gateway: str, auth=Depe
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], gateway, order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], gateway, order["product_id"], order=order, user_id=order["user_id"])
     return await _create_extra_gateway_invoice(
         db, tenant, tg_id, gateway, "order", order_id, order["final_price"], _extra_order_label(db, order),
     )
@@ -3056,7 +3057,7 @@ async def api_wallet_extra_gateway_invoice(gateway: str, body: NoapayWalletInvoi
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], gateway, wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], gateway, wallet_topup=True, user_id=topup["user_id"])
     return await _create_extra_gateway_invoice(
         db, tenant, tg_id, gateway, "wallet_topup", body.topup_id, topup["amount"], f"شارژ کیف پول #{body.topup_id}",
     )
@@ -3435,14 +3436,17 @@ def api_list_public_gateways(auth=Depends(require_joined), amount: int = None, p
     اگر amount/product_id داده شود، همان محدودیت «حداقل مبلغ درگاه» و
     «روش‌های مجاز این محصول» که در چک‌اوت اعمال می‌شود، این‌جا هم برای فیلترکردن
     لیست (پیش از نمایش به کاربر) اعمال می‌شود - دقیقاً مثل payment_choice_kb ربات."""
-    _, db, _ = auth
+    tg_id, db, _ = auth
     rows = db.list_custom_gateways(only_enabled=True)
     out = []
     for r in rows:
         key = f"custom:{r['gateway_key']}"
+        if db.card_method_blocked_for_user(tg_id, key):
+            continue
         if amount is not None or product_id is not None or custom_config or wallet_topup:
             if _payment_method_error(db, amount if amount is not None else 0, key, product_id,
-                                     custom_config=custom_config, wallet_topup=wallet_topup) is not None:
+                                     custom_config=custom_config, wallet_topup=wallet_topup,
+                                     user_id=tg_id) is not None:
                 continue
         out.append({"key": r["gateway_key"], "name": r["name"]})
     return out
@@ -3664,7 +3668,7 @@ async def api_order_custom_gateway_invoice(order_id: int, gateway_key: str, auth
         raise HTTPException(status_code=404, detail=tr("سفارش یافت نشد."))
     if order["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این سفارش قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, order["final_price"], f"custom:{gateway_key}", order["product_id"], order=order)
+    _require_payment_method_allowed(db, order["final_price"], f"custom:{gateway_key}", order["product_id"], order=order, user_id=order["user_id"])
     if order["is_custom_config"]:
         order_label = f"کانفیگ شخصی #{order_id} - {order['custom_username']}"
     else:
@@ -3688,7 +3692,7 @@ async def api_wallet_custom_gateway_invoice(gateway_key: str, body: CustomGatewa
         raise HTTPException(status_code=404, detail=tr("درخواست شارژ یافت نشد."))
     if topup["status"] != "pending":
         raise HTTPException(status_code=400, detail=tr("این درخواست شارژ قبلاً بررسی شده است."))
-    _require_payment_method_allowed(db, topup["amount"], f"custom:{gateway_key}", wallet_topup=True)
+    _require_payment_method_allowed(db, topup["amount"], f"custom:{gateway_key}", wallet_topup=True, user_id=topup["user_id"])
     result = await _create_custom_gateway_invoice_for(
         db, tenant, tg_id, gateway_key, "wallet_topup", body.topup_id, topup["amount"],
         order_name=f"شارژ کیف پول #{body.topup_id}",
@@ -6731,7 +6735,7 @@ def api_admin_list_users(
     auth=Depends(require_full_admin),
 ):
     _, db, _ = auth
-    if status not in ("all", "active", "expired", "blocked"):
+    if status not in ("all", "active", "expired", "blocked", "none"):
         status = "all"
     limit = max(1, min(limit, 100))
     rows, total = db.search_users(query=query.strip(), status_filter=status, limit=limit, offset=offset)
