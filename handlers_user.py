@@ -62,7 +62,7 @@ import report_router
 import tutorial
 import tutorial_hub
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
-from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, ProvisionError
+from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, is_volume_credit_bot, ProvisionError
 from direct_panel_provision import provision_direct, planned_usernames, ProvisionError as DirectProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
 from i18n import set_language, reset_language, language_label, normalize_language, is_language_enabled, tr
@@ -2959,8 +2959,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await message.answer(db.get_text('handlers_user.auto_6aacb1a2', 'شما قبلاً کانفیگ تست خود را دریافت کرده\u200cاید. هر کاربر فقط یک بار مجاز به دریافت کانفیگ تست است.'))
             return
 
-        if not full_access_bot:
-            # نمایندگی سطح محدود: همیشه از پنل اعتباری خودش و اعتبار حجمی‌اش ساخته می‌شود
+        use_credit = (not full_access_bot) or (await asyncio.to_thread(is_volume_credit_bot, db, is_main_bot))
+        if use_credit:
+            # نمایندگی سطح محدود یا VIP: از پنل اعتباری و حجم دریافتی از مدیر ساخته می‌شود
             try:
                 result = await provision_test_config(db, plan, user_id=message.from_user.id)
             except ProvisionError as e:
@@ -5163,6 +5164,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not order or order["status"] != "pending":
             await call.answer(db.get_text("handlers_user.order.not_found", "سفارش معتبر یافت نشد."), show_alert=True)
             return
+        if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], "crypto"):
+            await call.answer(db.get_text('handlers_user.auto_gate_blocked', '⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است.'), show_alert=True)
+            return
         await call.answer(db.get_text("handlers_user.payment.creating_invoice", "در حال ساخت فاکتور..."))
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
         try:
@@ -5187,6 +5191,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
         if not order or order["status"] != "pending":
             await call.answer(db.get_text("handlers_user.order.not_found", "سفارش معتبر یافت نشد."), show_alert=True)
+            return
+        if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], "abangateway"):
+            await call.answer(db.get_text('handlers_user.auto_gate_blocked', '⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است.'), show_alert=True)
             return
         await call.answer(db.get_text("handlers_user.payment.creating_invoice", "در حال ساخت فاکتور..."))
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
@@ -5215,6 +5222,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not order or order["status"] != "pending":
             await call.answer(db.get_text("handlers_user.order.not_found", "سفارش معتبر یافت نشد."), show_alert=True)
             return
+        if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], "blupal"):
+            await call.answer(db.get_text('handlers_user.auto_gate_blocked', '⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است.'), show_alert=True)
+            return
         await call.answer(db.get_text("handlers_user.payment.creating_invoice", "در حال ساخت فاکتور..."))
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
         try:
@@ -5241,6 +5251,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         order = (await asyncio.to_thread(db.get_order, order_id)) if order_id else None
         if not order or order["status"] != "pending":
             await call.answer(db.get_text("handlers_user.order.not_found", "سفارش معتبر یافت نشد."), show_alert=True)
+            return
+        if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], "noapay"):
+            await call.answer(db.get_text('handlers_user.auto_gate_blocked', '⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است.'), show_alert=True)
             return
         await call.answer(db.get_text("handlers_user.payment.creating_invoice", "در حال ساخت فاکتور..."))
         tenant_id = (await asyncio.to_thread(db.get_setting, "miniapp_tenant_id", ""))
@@ -5272,6 +5285,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         gw_row = (await asyncio.to_thread(db.get_custom_gateway, int(call.data.split(":", 1)[1])))
         if not gw_row or not gw_row["enabled"]:
             await call.answer(db.get_text('handlers_user.auto_e29914cb', 'این درگاه در دسترس نیست.'), show_alert=True)
+            return
+        if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], f"custom:{gw_row['gateway_key']}"):
+            await call.answer(db.get_text('handlers_user.auto_gate_blocked', '⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است.'), show_alert=True)
             return
         await call.answer()
         if await _start_customgw_payment(
@@ -5867,7 +5883,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not amount:
             await call.answer(db.get_text('handlers_user.auto_70b436a3', 'درخواست معتبر یافت نشد.'), show_alert=True)
             return
-        err = await _wallet_topup_method_error(amount, "crypto")
+        err = await _wallet_topup_method_error(amount, "crypto", call.from_user.id)
         if err:
             await call.answer(err, show_alert=True)
             return
@@ -5896,7 +5912,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not amount:
             await call.answer(db.get_text('handlers_user.auto_70b436a3', 'درخواست معتبر یافت نشد.'), show_alert=True)
             return
-        err = await _wallet_topup_method_error(amount, "abangateway")
+        err = await _wallet_topup_method_error(amount, "abangateway", call.from_user.id)
         if err:
             await call.answer(err, show_alert=True)
             return
@@ -5927,7 +5943,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not amount:
             await call.answer(db.get_text('handlers_user.auto_70b436a3', 'درخواست معتبر یافت نشد.'), show_alert=True)
             return
-        err = await _wallet_topup_method_error(amount, "blupal")
+        err = await _wallet_topup_method_error(amount, "blupal", call.from_user.id)
         if err:
             await call.answer(err, show_alert=True)
             return
@@ -5958,7 +5974,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not amount:
             await call.answer(db.get_text('handlers_user.auto_70b436a3', 'درخواست معتبر یافت نشد.'), show_alert=True)
             return
-        err = await _wallet_topup_method_error(amount, "noapay")
+        err = await _wallet_topup_method_error(amount, "noapay", call.from_user.id)
         if err:
             await call.answer(err, show_alert=True)
             return
@@ -5993,7 +6009,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if not gw_row or not gw_row["enabled"]:
             await call.answer(db.get_text('handlers_user.auto_e29914cb', 'این درگاه در دسترس نیست.'), show_alert=True)
             return
-        err = await _wallet_topup_method_error(amount, f"custom:{gw_row['key']}")
+        err = await _wallet_topup_method_error(amount, f"custom:{gw_row['key']}", call.from_user.id)
         if err:
             await call.answer(err, show_alert=True)
             return

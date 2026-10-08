@@ -1636,6 +1636,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_card_auto", "📶 کارت‌به‌کارت با تایید خودکار (پیامک بانک)", "adm_card_auto"),
     ("adm_custom_gateways", "💠 درگاه‌های پرداخت سفارشی (فعال/غیرفعال)", "adm_custom_gateways"),
     ("adm_min_amount_settings", "🧮 حداقل مبلغ پرداخت‌ها", "adm_min_amount_settings"),
+    ("adm_pmgate", "🔒 شرط فعال‌سازی درگاه‌ها برای هر کاربر", "adm_pmgate"),
     ("adm_wallet_paymethods", "👛 روش‌های پرداخت شارژ کیف پول", "adm_wallet_paymethods"),
     ("adm_bulk_wallet_deduct", "➖ کاهش گروهی موجودی کیف پول", "adm_bulk_wallet_deduct"),
     ("adm_bulk_wallet_credit", "➕ افزایش گروهی موجودی و اعلان", "adm_bulk_wallet_credit"),
@@ -1737,6 +1738,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_card_auto",
         "adm_custom_gateways",
         "adm_min_amount_settings",
+        "adm_pmgate",
         "adm_wallet_paymethods",
         "adm_cc_paymethods",
         "adm_bulk_wallet_deduct",
@@ -2844,7 +2846,7 @@ def admin_test_menu_kb(db, is_main_bot: bool = True) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(
             text=f"{icon} 🧪 {p['name']}", callback_data=f"adm_tp_view:{p['id']}",
         )])
-    if db.is_full_access_bot(is_main_bot) or not plans:
+    if db.is_full_access_bot(is_main_bot) or not plans or (not is_main_bot and _is_volume_credit_owner(db)):
         rows.append([InlineKeyboardButton(text=tr("➕ افزودن پلن کانفیگ تست جدید"), callback_data="adm_tp_add")])
 
     if db.is_full_access_bot(is_main_bot):
@@ -2887,9 +2889,10 @@ def admin_service_alert_channel_kb(db) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def test_plan_view_kb(db, plan) -> InlineKeyboardMarkup:
+def test_plan_view_kb(db, plan, credit_bot: bool = False) -> InlineKeyboardMarkup:
     pid = plan["id"]
     server = db.get_panel_server(plan["panel_server_id"])
+    panel_cb = "noop" if credit_bot else f"adm_tp_edit_panel:{pid}"
     toggle_text = "🔴 غیرفعال‌سازی" if plan["is_active"] else "🟢 فعال‌سازی"
     vol_text = f"{plan['volume_mb']} مگابایت" if plan["volume_mb"] < 1024 else f"{plan['volume_mb'] / 1024:g} گیگ"
     dur_text = f"{plan['duration_hours']} ساعت" if plan["duration_hours"] < 24 else f"{plan['duration_hours'] / 24:g} روز"
@@ -2897,7 +2900,7 @@ def test_plan_view_kb(db, plan) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr(f"✏️ نام: {plan['name']}"), callback_data=f"adm_tp_edit_name:{pid}")],
         [InlineKeyboardButton(text=tr(f"✏️ پیشوند نام کاربری: {plan['name_prefix']}"), callback_data=f"adm_tp_edit_prefix:{pid}")],
         [InlineKeyboardButton(
-            text=f"{tr('🖥 پنل:')} {server['name'] if server else '—'}", callback_data=f"adm_tp_edit_panel:{pid}",
+            text=f"{tr('🖥 پنل:')} {server['name'] if server else '—'}", callback_data=panel_cb,
         )],
         [InlineKeyboardButton(text=tr(f"📶 حجم: {vol_text}"), callback_data=f"adm_tp_edit_volume:{pid}")],
         [InlineKeyboardButton(text=tr(f"⏳ مدت: {dur_text}"), callback_data=f"adm_tp_edit_duration:{pid}")],
@@ -3884,6 +3887,38 @@ def min_amount_settings_kb(db) -> InlineKeyboardMarkup:
         )])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def pm_gate_methods(db) -> list:
+    """روش‌های پرداختی که شرط فعال‌سازی دارند (همه‌ی روش‌های کاتالوگ جز کیف پول)."""
+    return [m for m in db.get_payment_methods_catalog() if m["key"] != "wallet"]
+
+
+def pm_gate_list_kb(db) -> InlineKeyboardMarkup:
+    """لیست درگاه‌ها با خلاصه‌ی شرط هرکدام؛ callback بر اساس اندیس در pm_gate_methods است."""
+    rows = []
+    for i, m in enumerate(pm_gate_methods(db)):
+        purchases, days = db.get_payment_gate_settings(m["key"])
+        parts = []
+        if purchases:
+            parts.append(f"{purchases} خرید")
+        if days:
+            parts.append(f"{days} روز")
+        summary = " یا ".join(parts) if parts else "بدون شرط"
+        rows.append([InlineKeyboardButton(text=f"{m['label']} · {summary}", callback_data=f"adm_pmgate_m:{i}")])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:finance")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def pm_gate_method_kb(db, idx: int, method_key: str) -> InlineKeyboardMarkup:
+    purchases, days = db.get_payment_gate_settings(method_key)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr(f"🛒 حداقل خرید موفق: {purchases if purchases else 'خاموش'}"),
+                              callback_data=f"adm_pmgate_e:{idx}:p")],
+        [InlineKeyboardButton(text=tr(f"📅 حداقل روز از استارت بات: {days if days else 'خاموش'}"),
+                              callback_data=f"adm_pmgate_e:{idx}:d")],
+        [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_pmgate")],
+    ])
 
 
 def card_gate_kb(db) -> InlineKeyboardMarkup:
