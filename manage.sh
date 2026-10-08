@@ -210,6 +210,22 @@ MSG_FA[install_done]="✅ نصب کامل شد و بات در حال اجراس�
 MSG_EN[install_failed]="⚠️ Bot did not start. To check the error: sudo journalctl -u %s -n 50 --no-pager"
 MSG_FA[install_failed]="⚠️ بات اجرا نشد. برای بررسی خطا: sudo journalctl -u %s -n 50 --no-pager"
 
+MSG_EN[install_header]="Installing ShopVPN"
+MSG_FA[install_header]="نصب ShopVPN"
+MSG_EN[install_fetch]="Downloading project files"
+MSG_FA[install_fetch]="دریافت فایل‌های پروژه"
+MSG_EN[install_python]="Preparing Python environment and packages"
+MSG_FA[install_python]="آماده‌سازی محیط پایتون و نصب پکیج‌ها"
+MSG_EN[install_env]="Configuring bot settings"
+MSG_FA[install_env]="تنظیم اطلاعات بات"
+MSG_EN[install_translation]="Installing local translation engine and language models"
+MSG_FA[install_translation]="نصب موتور ترجمه محلی و مدل‌های زبان"
+MSG_EN[install_service]="Creating and starting the system service"
+MSG_FA[install_service]="ساخت و راه‌اندازی سرویس دائمی"
+MSG_EN[install_done_hint]="Everything is ready. The bot is waking up..."
+MSG_FA[install_done_hint]="همه‌چیز آماده است؛ بات دارد از خواب بیدار می‌شود..."
+
+
 # update_bot / update_miniapp
 MSG_EN[bot_not_installed]="⛔️ Bot not installed yet. Run option 1 (install) first."
 MSG_FA[bot_not_installed]="⛔️ بات هنوز نصب نشده. اول گزینه ۱ (نصب) را بزن."
@@ -759,6 +775,88 @@ pause() {
 }
 
 # ---------------------------------------------------------------------------
+# Friendly live progress UI
+# رابط پیشرفت زنده و دوستانه برای عملیات طولانی
+# ---------------------------------------------------------------------------
+INSTALL_JOKES_FA=(
+    "اوه اوه، پردازنده رو دارم می‌خورم 😅"
+    "یک لحظه... دارم با سرور گپ می‌زنم ☕"
+    "این مرحله قهوه می‌خواد، ولی من هنوز ادامه می‌دم 😎"
+    "نگران نباش؛ هنوز هنگ نکردیم، داریم کار می‌کنیم 👀"
+    "دارم پیچ و مهره‌های سرور رو سفت می‌کنم 🔧"
+    "اینترنت گفت صبر کن؛ منم دارم صبر می‌کنم 😂"
+    "پکیج‌ها دارن صف می‌کشن، یکی‌یکی میان داخل 🚪"
+    "تقریباً رسیدیم... معروفه که «تقریباً» طول می‌کشه 😄"
+)
+INSTALL_JOKES_EN=(
+    "Oh oh, I'm eating the CPU 😅"
+    "One moment... I'm having a chat with the server ☕"
+    "This step needs coffee, but I'm still going 😎"
+    "Don't worry; I'm not frozen, I'm working 👀"
+    "Tightening the server's nuts and bolts 🔧"
+    "The internet said wait, so I'm waiting 😂"
+    "Packages are lining up at the door 🚪"
+    "Almost there... the famous 'almost' 😄"
+)
+
+progress_bar() {
+    local pct="$1" width=28 filled empty
+    filled=$(( pct * width / 100 ))
+    empty=$(( width - filled ))
+    printf '['
+    printf '%*s' "$filled" '' | tr ' ' '#'
+    printf '%*s' "$empty" '' | tr ' ' '-'
+    printf '] %3d%%' "$pct"
+}
+
+# run_step_live <index> <total> <label> <command...>
+# Runs a long command in the background and keeps the terminal visibly alive.
+run_step_live() {
+    local idx="$1" total="$2" label="$3" out status pid started now elapsed pct joke_count joke
+    shift 3
+    out="$(mktemp)"
+    started=$(date +%s)
+    "$@" >"$out" 2>&1 &
+    pid=$!
+    joke_count=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        now=$(date +%s)
+        elapsed=$((now - started))
+        pct=$(( (idx - 1) * 100 / total ))
+        if [ "$UI_LANG" = "fa" ]; then
+            joke="${INSTALL_JOKES_FA[$((joke_count % ${#INSTALL_JOKES_FA[@]}))]}"
+        else
+            joke="${INSTALL_JOKES_EN[$((joke_count % ${#INSTALL_JOKES_EN[@]}))]}"
+        fi
+        printf '\r  %b' "${CYAN}${BOLD}"
+        progress_bar "$pct"
+        printf '%b %s%b · %02ds · %s' "${RESET}" "$label" "${DIM}" "$elapsed" "$joke"
+        printf '%b' "${RESET}"
+        joke_count=$((joke_count + 1))
+        sleep 2
+    done
+
+    wait "$pid"
+    status=$?
+    elapsed=$(( $(date +%s) - started ))
+    if [ "$status" -eq 0 ]; then
+        pct=$(( idx * 100 / total ))
+        printf '\r\033[K  %b' "${CYAN}${BOLD}"
+        progress_bar "$pct"
+        printf '%b %b✓%b %s · %02ds\n' "${RESET}" "${GREEN}${BOLD}" "${RESET}" "$label" "$elapsed"
+    else
+        pct=$(( (idx - 1) * 100 / total ))
+        printf '\r\033[K  %b' "${CYAN}${BOLD}"
+        progress_bar "$pct"
+        printf '%b %b✗%b %s · %02ds\n' "${RESET}" "${RED}${BOLD}" "${RESET}" "$label" "$elapsed"
+        [ -s "$out" ] && tail -8 "$out" | sed "s/^/        ${DIM}/" | sed "s/\$/${RESET}/"
+    fi
+    rm -f "$out"
+    return "$status"
+}
+
+# ---------------------------------------------------------------------------
 # Step-progress UI for multi-step flows (update, etc.)
 # رابط نمایش مرحله‌ای برای عملیات چندمرحله‌ای (آپدیت و ...)
 # ---------------------------------------------------------------------------
@@ -796,26 +894,30 @@ run_step() {
 # Action: full initial install / عملیات: نصب اولیه کامل
 # ---------------------------------------------------------------------------
 install_bot() {
-    echo -e "${CYAN}$(t installing_prereqs)${RESET}"
-    sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
-    timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv > /dev/null
+    local total=6 step=0 failed=0
+    section_header "$(t install_header)"
+    echo -e "  ${DIM}$(t install_done_hint)${RESET}"
+    echo ""
 
+    step=$((step+1))
+    run_step_live "$step" "$total" "$(t installing_prereqs)" \
+        bash -c "sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq && timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv ca-certificates curl > /dev/null" || failed=1
+
+    step=$((step+1))
     if [ -f "$INSTALL_DIR/main.py" ]; then
-        echo -e "${YELLOW}$(t already_installed_pulling)${RESET}"
+        local fetch_label
+        fetch_label="$(t already_installed_pulling)"
     else
-        echo -e "${CYAN}$(t cloning_project)${RESET}"
+        fetch_label="$(t cloning_project)"
     fi
-    fetch_project_code "$INSTALL_DIR"
-    cd "$INSTALL_DIR"
+    run_step_live "$step" "$total" "$fetch_label" fetch_project_code "$INSTALL_DIR" || failed=1
+    cd "$INSTALL_DIR" || return 1
 
-    echo -e "${CYAN}$(t preparing_python)${RESET}"
-    if [ ! -d "venv" ]; then
-        python3 -m venv venv
-    fi
-    source venv/bin/activate
-    pip install -r requirements.txt --quiet
-    deactivate
+    step=$((step+1))
+    run_step_live "$step" "$total" "$(t preparing_python)" \
+        bash -c 'if [ ! -d "venv" ]; then python3 -m venv venv; fi; source venv/bin/activate; pip install -r requirements.txt --quiet; deactivate' || failed=1
 
+    step=$((step+1))
     if [ ! -f "$INSTALL_DIR/.env" ]; then
         echo ""
         echo -e "${YELLOW}${BOLD}$(t enter_bot_info)${RESET}"
@@ -829,15 +931,18 @@ EOF
     else
         echo -e "${GREEN}$(t env_exists)${RESET}"
     fi
+    printf '  %b[ %s ]%b %s\n' "${CYAN}${BOLD}" "—" "${RESET}" "$(t install_env)"
 
-    echo -e "${CYAN}$(t install_translation_runtime)${RESET}"
-    if ! bash "$INSTALL_DIR/setup_local_translation.sh"; then
-        echo -e "${YELLOW}$(t translation_install_incomplete)${RESET}"
-    fi
+    step=$((step+1))
+    run_step_live "$step" "$total" "$(t install_translation)" \
+        bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" || {
+        echo -e "  ${YELLOW}$(t translation_install_incomplete)${RESET}"
+    }
 
-    echo -e "${CYAN}$(t creating_service)${RESET}"
+    step=$((step+1))
     SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-    sudo bash -c "cat > $SERVICE_FILE" <<EOF
+    run_step_live "$step" "$total" "$(t install_service)" bash -c "
+        sudo bash -c 'cat > \"$SERVICE_FILE\"' <<EOF
 [Unit]
 Description=V2Ray Telegram Sales Bot
 After=network.target
@@ -853,15 +958,18 @@ User=$(whoami)
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$SERVICE_NAME" > /dev/null 2>&1
-    sudo systemctl restart "$SERVICE_NAME"
-    sleep 2
+        sudo systemctl daemon-reload
+        sudo systemctl enable '$SERVICE_NAME' >/dev/null 2>&1
+        sudo systemctl restart '$SERVICE_NAME'
+        sleep 2
+    " || failed=1
 
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo -e "${GREEN}${BOLD}$(t install_done)${RESET}"
+    draw_rule
+    if [ "$failed" = "0" ] && systemctl is-active --quiet "$SERVICE_NAME"; then
+        echo -e "  ${GREEN}${BOLD}$(t install_done)${RESET}"
+        echo -e "  ${DIM}$(t install_done_hint)${RESET}"
     else
-        echo -e "${RED}$(t install_failed "$SERVICE_NAME")${RESET}"
+        echo -e "  ${RED}$(t install_failed "$SERVICE_NAME")${RESET}"
     fi
 }
 
@@ -892,30 +1000,30 @@ update_bot() {
     section_header "$(t update_bot_header)"
 
     step=$((step+1))
-    run_step "$step" "$total" "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step_live "$step" "$total" "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
 
     step=$((step+1))
-    run_step "$step" "$total" "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step_live "$step" "$total" "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
 
     step=$((step+1))
-    run_step "$step" "$total" "🌍 Updating local translation runtime/models" bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" || failed=1
+    run_step_live "$step" "$total" "🌍 Updating local translation runtime/models" bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" || failed=1
 
     step=$((step+1))
-    run_step "$step" "$total" "$(t restarting_bot_service)" bash -c "sudo systemctl restart '$SERVICE_NAME' && sleep 2" || failed=1
+    run_step_live "$step" "$total" "$(t restarting_bot_service)" bash -c "sudo systemctl restart '$SERVICE_NAME' && sleep 2" || failed=1
 
     if [ "$has_miniapp" = "1" ]; then
         step=$((step+1))
-        run_step "$step" "$total" "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
+        run_step_live "$step" "$total" "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
     fi
 
     if [ "$has_panel" = "1" ]; then
         step=$((step+1))
-        run_step "$step" "$total" "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
+        run_step_live "$step" "$total" "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
     fi
 
     if [ "$has_api" = "1" ]; then
         step=$((step+1))
-        run_step "$step" "$total" "$(t restarting_api_service)" bash -c "sudo systemctl restart '$API_SERVICE' && sleep 2" || failed=1
+        run_step_live "$step" "$total" "$(t restarting_api_service)" bash -c "sudo systemctl restart '$API_SERVICE' && sleep 2" || failed=1
     fi
 
     draw_rule
@@ -943,9 +1051,9 @@ update_miniapp() {
 
     local failed=0
     section_header "$(t update_miniapp_header)"
-    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
-    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
-    run_step 3 3 "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
+    run_step_live 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step_live 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step_live 3 3 "$(t restarting_miniapp_service)" bash -c "sudo systemctl restart '$MINIAPP_SERVICE' && sleep 2" || failed=1
 
     draw_rule
     if [ "$failed" = "0" ] && systemctl is-active --quiet "$MINIAPP_SERVICE"; then
@@ -1619,8 +1727,8 @@ update_admin_panel() {
 
     local failed=0
     section_header "$(t update_panel_header)"
-    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
-    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step_live 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step_live 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
     run_step 3 3 "$(t restarting_panel_service)" bash -c "sudo systemctl restart '$PANEL_SERVICE' && sleep 2" || failed=1
 
     draw_rule
@@ -2244,8 +2352,8 @@ update_api() {
 
     local failed=0
     section_header "$(t update_api_header)"
-    run_step 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
-    run_step 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
+    run_step_live 1 3 "$(t fetching_latest)" fetch_project_code "$INSTALL_DIR" || failed=1
+    run_step_live 2 3 "$(t updating_packages)" bash -c "source '$INSTALL_DIR/venv/bin/activate' && pip install -r requirements.txt --quiet && deactivate" || failed=1
     run_step 3 3 "$(t restarting_api_service)" bash -c "sudo systemctl restart '$API_SERVICE' && sleep 2" || failed=1
 
     draw_rule

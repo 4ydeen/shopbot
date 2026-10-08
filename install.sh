@@ -16,6 +16,68 @@ export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 export NEEDRESTART_SUSPEND=1
 
+
+# ----------------------------------------------------------------------------
+# رابط پیشرفت زنده: مراحل، درصد، زمان سپری‌شده و پیام‌های دوستانه
+# ----------------------------------------------------------------------------
+JOKES_FA=(
+  "اوه اوه، پردازنده رو دارم می‌خورم 😅"
+  "یک لحظه... دارم با سرور گپ می‌زنم ☕"
+  "نگران نباش؛ هنوز هنگ نکردیم، داریم کار می‌کنیم 👀"
+  "پکیج‌ها دارن صف می‌کشن 🚪"
+  "اینترنت گفت صبر کن؛ منم دارم صبر می‌کنم 😂"
+  "دارم پیچ و مهره‌های سرور رو سفت می‌کنم 🔧"
+)
+JOKES_EN=(
+  "Oh oh, I'm eating the CPU 😅"
+  "One moment... I'm chatting with the server ☕"
+  "Don't worry; I'm not frozen, I'm working 👀"
+  "Packages are lining up at the door 🚪"
+  "The internet said wait, so I'm waiting 😂"
+  "Tightening the server's nuts and bolts 🔧"
+)
+
+progress_bar() {
+  local pct="$1" width=28 filled empty
+  filled=$(( pct * width / 100 )); empty=$(( width - filled ))
+  printf '['
+  printf '%*s' "$filled" '' | tr ' ' '#'
+  printf '%*s' "$empty" '' | tr ' ' '-'
+  printf '] %3d%%' "$pct"
+}
+
+run_stage() {
+  local idx="$1" total="$2" label="$3"; shift 3
+  local log pid start now elapsed joke_count=0 joke pct status
+  log="$(mktemp)"
+  start=$(date +%s)
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    now=$(date +%s); elapsed=$((now-start))
+    pct=$(( (idx-1) * 100 / total ))
+    if [ "${SHOPVPN_UI_LANG:-fa}" = "fa" ]; then
+      joke="${JOKES_FA[$((joke_count % ${#JOKES_FA[@]}))]}"
+    else
+      joke="${JOKES_EN[$((joke_count % ${#JOKES_EN[@]}))]}"
+    fi
+    printf '\r\033[K  '; progress_bar "$pct"
+    printf '  %s · %02ds · %s' "$label" "$elapsed" "$joke"
+    joke_count=$((joke_count+1)); sleep 2
+  done
+  wait "$pid"; status=$?
+  elapsed=$(( $(date +%s)-start ))
+  printf '\r\033[K  '; progress_bar "$((idx*100/total))"
+  if [ "$status" -eq 0 ]; then
+    printf '  ✓ %s · %02ds\n' "$label" "$elapsed"
+  else
+    printf '  ✗ %s · %02ds\n' "$label" "$elapsed"
+    tail -8 "$log" | sed 's/^/      /'
+  fi
+  rm -f "$log"
+  return "$status"
+}
+
 # ============================================================================
 # تنظیمات - این خط را با آدرس مخزن گیت‌هاب خودت جایگزین کن
 # ============================================================================
@@ -25,13 +87,13 @@ SERVICE_NAME="v2raybot"
 
 echo "🚀 شروع نصب/آپدیت بات فروش کانفیگ V2Ray"
 echo "──────────────────────────────────────────"
+echo "نمایش پیشرفت زنده فعال است؛ اگر یک مرحله طول کشید، ترمینال هنگ نکرده است."
+echo ""
 
-# ----------------------------------------------------------------------------
-# ۱. نصب پیش‌نیازهای سیستمی
-# ----------------------------------------------------------------------------
-echo "📦 بررسی و نصب پیش‌نیازها (git, python3, pip, venv)..."
-sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq
-timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv ca-certificates curl > /dev/null
+TOTAL_STEPS=6
+
+# ۱. پیش‌نیازها
+run_stage 1 "$TOTAL_STEPS" "📦 نصب پیش‌نیازهای سیستم" bash -c   "sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get update -qq && timeout 120 sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 apt-get install -y -qq git python3 python3-pip python3-venv ca-certificates curl >/dev/null"
 
 # ----------------------------------------------------------------------------
 # ۲. دریافت یا آپدیت کد از گیت‌هاب
@@ -84,23 +146,24 @@ fetch_project_code() {
     return 0
 }
 
-fetch_project_code
+run_stage 2 "$TOTAL_STEPS" "📥 دریافت/آپدیت پروژه از GitHub" fetch_project_code
 cd "$INSTALL_DIR"
 
 # ----------------------------------------------------------------------------
 # ۳. ساخت virtual environment و نصب پکیج‌ها
 # ----------------------------------------------------------------------------
-echo "🐍 آماده‌سازی محیط پایتون..."
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
-fi
-source venv/bin/activate
-pip install -r requirements.txt --quiet
-deactivate
+run_stage 3 "$TOTAL_STEPS" "🐍 آماده‌سازی Python و نصب پکیج‌ها" bash -c '
+    if [ ! -d "venv" ]; then python3 -m venv venv; fi
+    source venv/bin/activate
+    pip install -r requirements.txt --quiet
+    deactivate
+'
 
 # ----------------------------------------------------------------------------
 # ۴. تنظیم فایل .env (فقط دفعه اول، چون این فایل هیچ‌وقت در گیت نیست)
 # ----------------------------------------------------------------------------
+echo ""
+echo "  [مرحله ۴/$TOTAL_STEPS] 🔑 تنظیم اطلاعات بات"
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo ""
     echo "🔑 فایل .env پیدا نشد. اطلاعات زیر را وارد کن:"
@@ -179,17 +242,12 @@ fi
 # ۵. نصب و راه‌اندازی خودکار موتور ترجمه محلی
 #    کاربر نباید هیچ مدل Argos یا LibreTranslate را دستی نصب کند.
 # ----------------------------------------------------------------------------
-echo "🌍 نصب خودکار موتور ترجمه محلی و مدل‌های زبان..."
-if ! bash "$INSTALL_DIR/setup_local_translation.sh"; then
-    echo "⚠️ نصب موتور ترجمه محلی کامل نشد؛ بات ادامه می‌دهد و در آپدیت بعدی دوباره تلاش می‌کند."
-fi
+run_stage 5 "$TOTAL_STEPS" "🌍 نصب موتور ترجمه و مدل‌های زبان" bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" ||     echo "⚠️ نصب موتور ترجمه کامل نشد؛ بات ادامه می‌دهد و در آپدیت بعدی دوباره تلاش می‌کند."
 
-# ----------------------------------------------------------------------------
-# ۶. ساخت systemd service برای اجرای دائمی و خودکار بعد از ری‌بوت سرور
-# ----------------------------------------------------------------------------
-echo "⚙️ تنظیم سرویس systemd برای اجرای همیشگی بات..."
+# ۶. ساخت و راه‌اندازی systemd
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-sudo bash -c "cat > $SERVICE_FILE" <<EOF
+run_stage 6 "$TOTAL_STEPS" "⚙️ ساخت و راه‌اندازی سرویس دائمی" bash -c "
+sudo bash -c 'cat > "$SERVICE_FILE"' <<EOF
 [Unit]
 Description=V2Ray Telegram Sales Bot
 After=network.target
@@ -205,12 +263,11 @@ User=$(whoami)
 [Install]
 WantedBy=multi-user.target
 EOF
-
 sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME" > /dev/null 2>&1
-sudo systemctl restart "$SERVICE_NAME"
-
+sudo systemctl enable '$SERVICE_NAME' >/dev/null 2>&1
+sudo systemctl restart '$SERVICE_NAME'
 sleep 2
+"
 
 echo ""
 echo "──────────────────────────────────────────"
