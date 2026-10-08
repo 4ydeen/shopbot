@@ -39,8 +39,6 @@ install_system_prereqs() {
   fi
 }
 
-install_system_prereqs
-
 ENV_FILE="$ROOT_DIR/.env"
 touch "$ENV_FILE"
 
@@ -63,6 +61,40 @@ fi
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 has_tty() {
   ( : </dev/tty ) 2>/dev/null
+}
+
+ASK_ONLY=0
+[ "${1:-}" = "--ask" ] && ASK_ONLY=1
+
+ask_enable() {
+  local has_key=0 saved=""
+  if grep -q '^SHOPVPN_TRANSLATION_ENABLE=' "$ENV_FILE"; then
+    has_key=1
+    saved="$(grep -m1 '^SHOPVPN_TRANSLATION_ENABLE=' "$ENV_FILE" | cut -d= -f2- | tr -d ' ')"
+  fi
+  if [ -n "${SHOPVPN_TRANSLATION_ENABLE+x}" ]; then
+    ENABLE="$SHOPVPN_TRANSLATION_ENABLE"
+  elif [ "$has_key" -eq 1 ] && [ "${SHOPVPN_TRANSLATION_CHOOSE:-0}" != "1" ]; then
+    ENABLE="$saved"
+  elif has_tty; then
+    local answer
+    echo "" >/dev/tty
+    if [ "$UI_LANG" = "fa" ]; then
+      printf '[translation] موتور ترجمه محلی (برای زبان‌های غیر از فارسی و انگلیسی) نصب شود؟ [Y/n]: ' >/dev/tty
+    else
+      printf '[translation] Install the local translation engine (for languages other than Persian and English)? [Y/n]: ' >/dev/tty
+    fi
+    read -r answer </dev/tty || answer=""
+    answer="$(echo "$answer" | tr 'A-Z' 'a-z' | tr -d ' ')"
+    case "$answer" in
+      n|no|خیر) ENABLE=0 ;;
+      *) ENABLE=1 ;;
+    esac
+  else
+    ENABLE=1
+  fi
+  case "$ENABLE" in 0|false|no) ENABLE=0 ;; *) ENABLE=1 ;; esac
+  set_env SHOPVPN_TRANSLATION_ENABLE "$ENABLE"
 }
 
 optional_languages() {
@@ -138,8 +170,24 @@ choose_languages() {
   set_env SHOPVPN_TRANSLATION_LANGS "$SELECTED"
 }
 
+ask_enable
+if [ "$ENABLE" != "1" ]; then
+  echo "[translation] Translation engine skipped."
+  exit 0
+fi
+
+if [ "$ASK_ONLY" -eq 1 ]; then
+  command -v python3 >/dev/null 2>&1 || install_system_prereqs
+else
+  install_system_prereqs
+fi
+
 SELECTED=""
 choose_languages
+if [ "$ASK_ONLY" -eq 1 ]; then
+  echo "[translation] Selected languages: ${SELECTED:-none}"
+  exit 0
+fi
 echo "[translation] Selected languages: ${SELECTED:-none}"
 
 if [ ! -x "$PYTHON_BIN" ]; then

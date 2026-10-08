@@ -933,6 +933,7 @@ EOF
     fi
     printf '  %b[ %s ]%b %s\n' "${CYAN}${BOLD}" "—" "${RESET}" "$(t install_env)"
 
+    bash "$INSTALL_DIR/setup_local_translation.sh" --ask || true
     step=$((step+1))
     run_step_live "$step" "$total" "$(t install_translation)" \
         bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" || {

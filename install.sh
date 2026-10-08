@@ -242,6 +242,7 @@ fi
 # ۵. نصب و راه‌اندازی خودکار موتور ترجمه محلی
 #    کاربر نباید هیچ مدل Argos یا LibreTranslate را دستی نصب کند.
 # ----------------------------------------------------------------------------
+bash "$INSTALL_DIR/setup_local_translation.sh" --ask || true
 run_stage 5 "$TOTAL_STEPS" "🌍 نصب موتور ترجمه و مدل‌های زبان" bash -c "bash '$INSTALL_DIR/setup_local_translation.sh'" ||     echo "⚠️ نصب موتور ترجمه کامل نشد؛ بات ادامه می‌دهد و در آپدیت بعدی دوباره تلاش می‌کند."
 
 # ۶. ساخت و راه‌اندازی systemd
