@@ -800,60 +800,65 @@ INSTALL_JOKES_EN=(
 )
 
 progress_bar() {
-    local pct="$1" width=28 filled empty
-    filled=$(( pct * width / 100 ))
-    empty=$(( width - filled ))
-    printf '['
-    printf '%*s' "$filled" '' | tr ' ' '#'
-    printf '%*s' "$empty" '' | tr ' ' '-'
-    printf '] %3d%%' "$pct"
+  local pct="$1" width="${PB_WIDTH:-28}" filled empty
+  filled=$(( pct * width / 100 )); empty=$(( width - filled ))
+  printf '['
+  printf '%*s' "$filled" '' | tr ' ' '#'
+  printf '%*s' "$empty" '' | tr ' ' '-'
+  printf '] %3d%%' "$pct"
 }
 
-# run_step_live <index> <total> <label> <command...>
-# Runs a long command in the background and keeps the terminal visibly alive.
+draw_line() {
+  local pct="$1" mark="$2" text="$3" cols bw rest
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+  if [ "$cols" -lt 70 ]; then bw=12; else bw=28; fi
+  rest=$(( cols - bw - 12 ))
+  [ -n "$mark" ] && rest=$(( rest - 2 ))
+  [ "$rest" -lt 8 ] && rest=8
+  [ "${#text}" -gt "$rest" ] && text="${text:0:$((rest - 1))}…"
+  printf '\r\033[K  %b' "${CYAN}${BOLD}"
+  PB_WIDTH=$bw progress_bar "$pct"
+  printf '%b' "$RESET"
+  [ -n "$mark" ] && printf ' %b' "$mark"
+  printf ' %s' "$text"
+}
+
 run_step_live() {
-    local idx="$1" total="$2" label="$3" out status pid started now elapsed pct joke_count joke
-    shift 3
-    out="$(mktemp)"
-    started=$(date +%s)
-    "$@" >"$out" 2>&1 &
-    pid=$!
-    joke_count=0
-
-    while kill -0 "$pid" 2>/dev/null; do
-        now=$(date +%s)
-        elapsed=$((now - started))
-        pct=$(( (idx - 1) * 100 / total ))
-        if [ "$UI_LANG" = "fa" ]; then
-            joke="${INSTALL_JOKES_FA[$((joke_count % ${#INSTALL_JOKES_FA[@]}))]}"
-        else
-            joke="${INSTALL_JOKES_EN[$((joke_count % ${#INSTALL_JOKES_EN[@]}))]}"
-        fi
-        printf '\r  %b' "${CYAN}${BOLD}"
-        progress_bar "$pct"
-        printf '%b %s%b · %02ds · %s' "${RESET}" "$label" "${DIM}" "$elapsed" "$joke"
-        printf '%b' "${RESET}"
-        joke_count=$((joke_count + 1))
-        sleep 2
-    done
-
-    wait "$pid"
-    status=$?
-    elapsed=$(( $(date +%s) - started ))
-    if [ "$status" -eq 0 ]; then
-        pct=$(( idx * 100 / total ))
-        printf '\r\033[K  %b' "${CYAN}${BOLD}"
-        progress_bar "$pct"
-        printf '%b %b✓%b %s · %02ds\n' "${RESET}" "${GREEN}${BOLD}" "${RESET}" "$label" "$elapsed"
+  local idx="$1" total="$2" label="$3"; shift 3
+  local log pid start_ms now_ms ms elapsed span base pct jokes_n joke status
+  log="$(mktemp)"
+  start_ms=$(( $(date +%s%N) / 1000000 ))
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  base=$(( (idx - 1) * 100 / total ))
+  span=$(( idx * 100 / total - base ))
+  pct=$base
+  while kill -0 "$pid" 2>/dev/null; do
+    now_ms=$(( $(date +%s%N) / 1000000 ))
+    ms=$(( now_ms - start_ms ))
+    elapsed=$(( ms / 1000 ))
+    pct=$(( base + span * 95 * ms / ((ms + 15000) * 100) ))
+    if [ "$UI_LANG" = "fa" ]; then
+      jokes_n=${#INSTALL_JOKES_FA[@]}; joke="${INSTALL_JOKES_FA[$(( ms / 4000 % jokes_n ))]}"
     else
-        pct=$(( (idx - 1) * 100 / total ))
-        printf '\r\033[K  %b' "${CYAN}${BOLD}"
-        progress_bar "$pct"
-        printf '%b %b✗%b %s · %02ds\n' "${RESET}" "${RED}${BOLD}" "${RESET}" "$label" "$elapsed"
-        [ -s "$out" ] && tail -8 "$out" | sed "s/^/        ${DIM}/" | sed "s/\$/${RESET}/"
+      jokes_n=${#INSTALL_JOKES_EN[@]}; joke="${INSTALL_JOKES_EN[$(( ms / 4000 % jokes_n ))]}"
     fi
-    rm -f "$out"
-    return "$status"
+    draw_line "$pct" "" "$label · ${elapsed}s · $joke"
+    sleep 0.25
+  done
+  wait "$pid"; status=$?
+  elapsed=$(( ( $(date +%s%N) / 1000000 - start_ms ) / 1000 ))
+  if [ "$status" -eq 0 ]; then
+    draw_line "$(( idx * 100 / total ))" "${GREEN}${BOLD}✓${RESET}" "$label · ${elapsed}s"
+    printf '\n'
+  else
+    draw_line "$pct" "${RED}${BOLD}✗${RESET}" "$label · ${elapsed}s"
+    printf '\n'
+    [ -s "$log" ] && tail -8 "$log" | sed 's/^/      /'
+  fi
+  rm -f "$log"
+  return "$status"
 }
 
 # ---------------------------------------------------------------------------

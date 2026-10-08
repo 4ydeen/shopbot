@@ -38,7 +38,7 @@ JOKES_EN=(
 )
 
 progress_bar() {
-  local pct="$1" width=28 filled empty
+  local pct="$1" width="${PB_WIDTH:-28}" filled empty
   filled=$(( pct * width / 100 )); empty=$(( width - filled ))
   printf '['
   printf '%*s' "$filled" '' | tr ' ' '#'
@@ -46,33 +46,53 @@ progress_bar() {
   printf '] %3d%%' "$pct"
 }
 
+draw_line() {
+  local pct="$1" mark="$2" text="$3" cols bw rest
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+  if [ "$cols" -lt 70 ]; then bw=12; else bw=28; fi
+  rest=$(( cols - bw - 12 ))
+  [ -n "$mark" ] && rest=$(( rest - 2 ))
+  [ "$rest" -lt 8 ] && rest=8
+  [ "${#text}" -gt "$rest" ] && text="${text:0:$((rest - 1))}…"
+  printf '\r\033[K  '
+  PB_WIDTH=$bw progress_bar "$pct"
+  [ -n "$mark" ] && printf ' %b' "$mark"
+  printf ' %s' "$text"
+}
+
 run_stage() {
   local idx="$1" total="$2" label="$3"; shift 3
-  local log pid start now elapsed joke_count=0 joke pct status
+  local log pid start_ms now_ms ms elapsed span base pct jokes_n joke status
   log="$(mktemp)"
-  start=$(date +%s)
+  start_ms=$(( $(date +%s%N) / 1000000 ))
   "$@" >"$log" 2>&1 &
   pid=$!
+  base=$(( (idx - 1) * 100 / total ))
+  span=$(( idx * 100 / total - base ))
+  pct=$base
   while kill -0 "$pid" 2>/dev/null; do
-    now=$(date +%s); elapsed=$((now-start))
-    pct=$(( (idx-1) * 100 / total ))
+    now_ms=$(( $(date +%s%N) / 1000000 ))
+    ms=$(( now_ms - start_ms ))
+    elapsed=$(( ms / 1000 ))
+    pct=$(( base + span * 95 * ms / ((ms + 15000) * 100) ))
     if [ "${SHOPVPN_UI_LANG:-fa}" = "fa" ]; then
-      joke="${JOKES_FA[$((joke_count % ${#JOKES_FA[@]}))]}"
+      jokes_n=${#JOKES_FA[@]}; joke="${JOKES_FA[$(( ms / 4000 % jokes_n ))]}"
     else
-      joke="${JOKES_EN[$((joke_count % ${#JOKES_EN[@]}))]}"
+      jokes_n=${#JOKES_EN[@]}; joke="${JOKES_EN[$(( ms / 4000 % jokes_n ))]}"
     fi
-    printf '\r\033[K  '; progress_bar "$pct"
-    printf '  %s · %02ds · %s' "$label" "$elapsed" "$joke"
-    joke_count=$((joke_count+1)); sleep 2
+    draw_line "$pct" "" "$label · ${elapsed}s · $joke"
+    sleep 0.25
   done
   wait "$pid"; status=$?
-  elapsed=$(( $(date +%s)-start ))
-  printf '\r\033[K  '; progress_bar "$((idx*100/total))"
+  elapsed=$(( ( $(date +%s%N) / 1000000 - start_ms ) / 1000 ))
   if [ "$status" -eq 0 ]; then
-    printf '  ✓ %s · %02ds\n' "$label" "$elapsed"
+    draw_line "$(( idx * 100 / total ))" "✓" "$label · ${elapsed}s"
+    printf '\n'
   else
-    printf '  ✗ %s · %02ds\n' "$label" "$elapsed"
-    tail -8 "$log" | sed 's/^/      /'
+    draw_line "$pct" "✗" "$label · ${elapsed}s"
+    printf '\n'
+    [ -s "$log" ] && tail -8 "$log" | sed 's/^/      /'
   fi
   rm -f "$log"
   return "$status"
