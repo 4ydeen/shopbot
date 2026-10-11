@@ -8056,6 +8056,19 @@ function bsDragCleanup() {
   BS.drag = null;
 }
 
+function bsSelect(key) {
+  BS.sel = key; bsRenderPhone(); bsRenderInspector();
+  requestAnimationFrame(() => {
+    const s = $('.tg-btn.sel');
+    if (!s || window.innerWidth >= 1000) return;
+    const over = s.getBoundingClientRect().bottom - window.innerHeight * 0.45;
+    if (over <= 0) return;
+    let sc = s.parentElement;
+    while (sc && sc.scrollHeight <= sc.clientHeight + 1) sc = sc.parentElement;
+    (sc || document.scrollingElement).scrollBy({ top: over, behavior: 'smooth' });
+  });
+}
+
 function bsOnPointerDown(e) {
   const btn = e.target.closest('.tg-btn[data-key]');
   if (!btn || (e.pointerType === 'mouse' && e.button !== 0)) return;
@@ -8063,7 +8076,7 @@ function bsOnPointerDown(e) {
   const g = BS.groups[BS.cur];
   const st = { key: btn.dataset.key, btn, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, type: e.pointerType, active: false, timer: null, ghost: null, target: null };
   BS.drag = st;
-  if (g.reorderable && st.type !== 'mouse') st.timer = setTimeout(bsDragStart, 260);
+  if (g.reorderable && st.type !== 'mouse') st.timer = setTimeout(bsDragStart, 380);
   document.addEventListener('pointermove', bsOnMove, { passive: false });
   document.addEventListener('pointerup', bsOnUp);
   document.addEventListener('pointercancel', bsOnCancel);
@@ -8086,9 +8099,19 @@ function bsOnMove(e) {
 
 function bsOnUp(e) {
   const st = BS.drag; if (!st) return;
-  if (!st.active) { bsDragCleanup(); return; }
-  const target = bsHit(e.clientX, e.clientY);
   const key = st.key;
+  const moved = Math.hypot(e.clientX - st.x, e.clientY - st.y);
+  if (!st.active || moved < 10) {
+    const wasTouch = st.type !== 'mouse';
+    bsDragCleanup();
+    if (wasTouch) {
+      BS.suppressClick = true;
+      setTimeout(() => { BS.suppressClick = false; }, 350);
+      bsSelect(key);
+    }
+    return;
+  }
+  const target = bsHit(e.clientX, e.clientY);
   bsDragCleanup();
   BS.suppressClick = true;
   setTimeout(() => { BS.suppressClick = false; }, 350);
@@ -8187,17 +8210,7 @@ function bsWire() {
     const tgBtn = e.target.closest('#bs-stage .tg-btn[data-key]');
     if (tgBtn) {
       if (BS.suppressClick) return;
-      BS.sel = tgBtn.dataset.key; bsRenderPhone(); bsRenderInspector();
-      requestAnimationFrame(() => {
-        const s = $('.tg-btn.sel');
-        if (!s || window.innerWidth >= 1000) return;
-        const over = s.getBoundingClientRect().bottom - window.innerHeight * 0.45;
-        if (over <= 0) return;
-        let sc = s.parentElement;
-        while (sc && sc.scrollHeight <= sc.clientHeight + 1) sc = sc.parentElement;
-        (sc || document.scrollingElement).scrollBy({ top: over, behavior: 'smooth' });
-      });
-      return;
+      bsSelect(tgBtn.dataset.key); return;
     }
     if (e.target.closest('#bs-stage') && !e.target.closest('.bs-modebar, .bs-catdrop') && BS.sel) {
       BS.sel = null; bsRenderPhone(); bsRenderInspector();
