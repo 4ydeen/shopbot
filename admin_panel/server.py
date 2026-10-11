@@ -46,7 +46,6 @@ from pydantic import BaseModel
 from config import DB_PATH, BOT_TOKEN, OWNER_ID, ADMIN_PANEL_SECRET, VAPID_PUBLIC_KEY, resolve_db_path, API_BASE_URL, RESELLER_DBS_DIR
 from database import Database, WEB_ADMIN_PERMISSIONS, MENU_BUTTON_META
 import button_registry
-import keyboards as kb
 import extra_gateway_registry
 import extra_settings_schema
 from admin_panel.security import hash_password, verify_password, create_session_token, verify_session_token
@@ -7065,12 +7064,13 @@ class ButtonItemUpdateBody(BaseModel):
     key: str
     text: Optional[str] = None
     style: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 @app.post("/api/buttons/item")
 def api_buttons_update_item(body: ButtonItemUpdateBody, admin=Depends(require_permission("settings"))):
     try:
-        button_registry.update_item(db, body.group, body.key, text=body.text, style=body.style)
+        button_registry.update_item(db, body.group, body.key, text=body.text, style=body.style, enabled=body.enabled)
     except ValueError as e:
         raise HTTPException(400, str(e))
     db.log_admin_action(
@@ -7100,37 +7100,41 @@ def api_buttons_update_order(body: ButtonOrderUpdateBody, admin=Depends(require_
     return {"ok": True}
 
 
-class AdminButtonMoveBody(BaseModel):
-    key: str
-    source_group: str
-    target_group: str
-    target_index: Optional[int] = None
+class ButtonLayoutBody(BaseModel):
+    group: str
+    order: list[str]
+    breaks: list[str] = []
 
 
-@app.post("/api/buttons/move-admin-item")
-def api_buttons_move_admin_item(body: AdminButtonMoveBody, admin=Depends(require_permission("settings"))):
-    """انتقال دکمه‌ی پنل مدیریت به دسته‌ی دیگر با حفظ کلید callback و عملکرد آن."""
-    categories = {c[0]: list(c[2]) for c in kb.ADMIN_PANEL_CATEGORIES}
-    if not body.source_group.startswith("admin_items__") or not body.target_group.startswith("admin_items__"):
-        raise HTTPException(400, "انتقال بین این دو گروه پشتیبانی نمی‌شود.")
-    source = body.source_group.split("__", 1)[1]
-    target = body.target_group.split("__", 1)[1]
-    all_keys = {key for keys in categories.values() for key in keys}
-    if source not in categories or target not in categories or body.key not in all_keys:
-        raise HTTPException(400, "دکمه یا دسته‌ی مبدا/مقصد معتبر نیست.")
-    current = db.get_setting(f"admin_item_category__{body.key}", "") or next((cat for cat, keys in categories.items() if body.key in keys), "")
-    if current != source:
-        raise HTTPException(409, "محل فعلی دکمه تغییر کرده؛ صفحه را تازه‌سازی کن.")
-    db.set_setting(f"admin_item_category__{body.key}", target)
-    # اگر قبلاً در مقصد ترتیب سفارشی بوده، کلید به انتهای ترتیب مقصد افزوده شود.
-    target_valid = list(dict.fromkeys(categories[target] + [body.key]))
-    target_order = db.get_custom_order(f"admin_items__{target}", target_valid)
-    # ابتدا کلید را از جای قبلی در ترتیب مقصد حذف می‌کنیم تا انتقال تکراری نسازد.
-    target_order = [key for key in target_order if key != body.key]
-    insert_at = len(target_order) if body.target_index is None else max(0, min(int(body.target_index), len(target_order)))
-    target_order.insert(insert_at, body.key)
-    db.set_custom_order(f"admin_items__{target}", target_order, target_valid)
-    db.log_admin_action(admin["id"], "button_move", f"دکمه‌ی «{body.key}» از {source} به {target} منتقل شد (پنل وب - {admin['username']})", "setting", body.key)
+@app.post("/api/buttons/layout")
+def api_buttons_update_layout(body: ButtonLayoutBody, admin=Depends(require_permission("settings"))):
+    try:
+        button_registry.update_layout(db, body.group, body.order, body.breaks)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.log_admin_action(
+        admin["id"], "button_reorder",
+        f"چیدمان گروه «{body.group}» تغییر کرد (پنل وب - {admin['username']})",
+        "setting", body.group,
+    )
+    return {"ok": True}
+
+
+class AdminItemCategoriesBody(BaseModel):
+    overrides: dict[str, str]
+
+
+@app.post("/api/buttons/admin-item-categories")
+def api_buttons_admin_item_categories(body: AdminItemCategoriesBody, admin=Depends(require_permission("settings"))):
+    try:
+        button_registry.set_admin_item_categories(db, body.overrides)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.log_admin_action(
+        admin["id"], "button_reorder",
+        f"دسته‌ی دکمه‌های پنل مدیریت جابجا شد (پنل وب - {admin['username']})",
+        "setting", "admin_item_categories",
+    )
     return {"ok": True}
 
 
