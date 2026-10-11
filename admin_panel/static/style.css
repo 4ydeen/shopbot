@@ -2483,3 +2483,4 @@ body.bs-dragging{ user-select:none; -webkit-user-select:none; cursor:grabbing; }
 }
 @media (min-width:1000px){ .bs-close{ display:none; } }
 @media (max-width:999px){ .tg-btn.sel{ scroll-margin-bottom:56vh; scroll-margin-top:80px; } }
+.bs-insp-save{ width:100%; }

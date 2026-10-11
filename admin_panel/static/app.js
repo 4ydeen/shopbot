@@ -7735,7 +7735,7 @@ function bsScreensHtml() {
   const sectionBtn = (k) => {
     const g = BS.groups[k]; if (!g) return '';
     const dirty = BS.dirty.has(k) || [...BS.edited].some(x => x.startsWith(k + '::'));
-    return `<button type="button" class="bs-screen${k === BS.cur ? ' active' : ''}" data-screen="${esc(k)}">
+    return `<button type="button" class="bs-screen${k === BS.cur ? ' active' : ''}" data-bs-screen="${esc(k)}">
       <span>${esc(bsLabel(g))}</span><small>${g.items.length}</small>${dirty ? '<i class="bs-dot"></i>' : ''}</button>`;
   };
   const user = ['main_menu', 'account_hub', 'svc_detail', 'wallet_menu', 'contact_menu', 'payment_methods', 'buyflow', 'buyflow_confirm'];
@@ -7761,7 +7761,7 @@ function bsFixedRowHtml(r) {
 function bsPhoneHtml(g) {
   const fx = bsFixed(g);
   const isMain = g.key === 'main_menu';
-  const mode = isMain ? BS.mm.mode : 'inline';
+  const mode = isMain ? (BS.mm.mode === 'inline' ? 'inline' : 'reply') : 'inline';
   const rowsHtml = g.rows.map((row, i) =>
     `<div class="tg-row" data-row="${i}">${row.map(k => bsBtnHtml(g, bsItem(g, k))).join('')}</div><div class="tg-gap" data-gap="${i + 1}"></div>`
   ).join('');
@@ -7789,11 +7789,11 @@ function bsModeBarHtml(g) {
     return `
       <div class="bs-modebar">
         <div class="bs-seg">
-          <button type="button" data-mode="reply" class="${BS.mm.mode === 'reply' ? 'active' : ''}">کیبورد پایین</button>
-          <button type="button" data-mode="inline" class="${BS.mm.mode === 'inline' ? 'active' : ''}">شیشه‌ای زیر پیام</button>
+          <button type="button" data-bs-mode="reply" class="${BS.mm.mode === 'reply' ? 'active' : ''}">کیبورد پایین</button>
+          <button type="button" data-bs-mode="inline" class="${BS.mm.mode === 'inline' ? 'active' : ''}">شیشه‌ای زیر پیام</button>
         </div>
-        <label class="bs-switch-row"><span class="switch" data-mm="reply" data-on="${BS.mm.reply ? '1' : '0'}"><i></i></span><span>منوی پایین فعال</span></label>
-        <label class="bs-switch-row"><span class="switch" data-mm="inline" data-on="${BS.mm.inline ? '1' : '0'}"><i></i></span><span>منوی شیشه‌ای فعال</span></label>
+        <label class="bs-switch-row"><span class="switch" data-bs-mm="reply" data-on="${BS.mm.reply ? '1' : '0'}"><i></i></span><span>منوی پایین فعال</span></label>
+        <label class="bs-switch-row"><span class="switch" data-bs-mm="inline" data-on="${BS.mm.inline ? '1' : '0'}"><i></i></span><span>منوی شیشه‌ای فعال</span></label>
       </div>`;
   }
   if (bsIsAdminItems(g)) {
@@ -7830,23 +7830,23 @@ function bsInspectorHtml(g) {
   const ci = row.indexOf(it.key);
   const swatches = it.has_style ? `
     <div class="bs-field"><span>رنگ دکمه</span>
-      <div class="bs-swatches">${BS.styleOptions.map(o => `<button type="button" class="bs-sw st-${esc(o.value)}${(it.style || '') === o.value ? ' on' : ''}" data-style="${esc(o.value)}" title="${esc(BS_STYLE_LABEL[o.value] || o.label)}"></button>`).join('')}</div>
+      <div class="bs-swatches">${BS.styleOptions.map(o => `<button type="button" class="bs-sw st-${esc(o.value)}${(it.style || '') === o.value ? ' on' : ''}" data-bs-style="${esc(o.value)}" title="${esc(BS_STYLE_LABEL[o.value] || o.label)}"></button>`).join('')}</div>
     </div>` : '';
   const text = it.has_text ? `
     <label class="bs-field"><span>متن دکمه</span>
       <input class="input" id="bs-text" type="text" value="${esc(it.text || '')}" placeholder="متن دکمه"></label>` : '';
   const toggle = it.togglable ? `
     <div class="bs-field bs-inline"><span>نمایش در ربات</span>
-      <span class="switch" data-act="toggle" data-on="${it.enabled ? '1' : '0'}"><i></i></span></div>` : '';
+      <span class="switch" data-bs-act="toggle" data-on="${it.enabled ? '1' : '0'}"><i></i></span></div>` : '';
   const arrows = g.reorderable ? `
     <div class="bs-field"><span>جای دکمه</span>
       <div class="bs-arrows">
-        <button type="button" class="btn btn-sm" data-act="up" title="بالاتر">⬆</button>
-        <button type="button" class="btn btn-sm" data-act="down" title="پایین‌تر">⬇</button>
+        <button type="button" class="btn btn-sm" data-bs-act="up" title="بالاتر">⬆</button>
+        <button type="button" class="btn btn-sm" data-bs-act="down" title="پایین‌تر">⬇</button>
         ${g.rowsEditable ? `
-        <button type="button" class="btn btn-sm" data-act="left" ${ci === 0 ? 'disabled' : ''} title="چپ">⬅</button>
-        <button type="button" class="btn btn-sm" data-act="right" ${ci === row.length - 1 ? 'disabled' : ''} title="راست">➡</button>
-        <button type="button" class="btn btn-sm" data-act="join" ${ri === 0 || g.rows[ri - 1].length >= BS_MAX_ROW ? 'disabled' : ''}>↩ بچسبان به ردیف بالا</button>` : ''}
+        <button type="button" class="btn btn-sm" data-bs-act="left" ${ci === 0 ? 'disabled' : ''} title="چپ">⬅</button>
+        <button type="button" class="btn btn-sm" data-bs-act="right" ${ci === row.length - 1 ? 'disabled' : ''} title="راست">➡</button>
+        <button type="button" class="btn btn-sm" data-bs-act="join" ${ri === 0 || g.rows[ri - 1].length >= BS_MAX_ROW ? 'disabled' : ''}>↩ بچسبان به ردیف بالا</button>` : ''}
       </div>
     </div>` : '';
   const catSel = bsIsAdminItems(g) ? `
@@ -7856,9 +7856,10 @@ function bsInspectorHtml(g) {
       </select></label>` : '';
   return `
     <div class="bs-insp-head"><b dir="auto">${esc(it.label)}</b><code>${esc(it.key)}</code>
-      <button type="button" class="btn btn-ghost btn-sm bs-close" data-act="close" title="بستن">✕</button></div>
+      <button type="button" class="btn btn-ghost btn-sm bs-close" data-bs-act="close" title="بستن">✕</button></div>
     ${text}${swatches}${toggle}${arrows}${catSel}
-    ${!it.has_text && !it.has_style && !it.togglable ? '<p class="card-sub">این دکمه متن/رنگ قابل ویرایش ندارد.</p>' : ''}`;
+    ${!it.has_text && !it.has_style && !it.togglable ? '<p class="card-sub">این دکمه متن/رنگ قابل ویرایش ندارد.</p>' : ''}
+    <button type="button" class="btn btn-primary bs-insp-save" data-bs-act="save" ${bsChangeCount() ? '' : 'disabled'}>ذخیره تغییرات</button>`;
 }
 
 function bsRenderPhone() {
@@ -8184,35 +8185,36 @@ function bsWire() {
   root.addEventListener('pointerdown', (e) => { if (e.target.closest('#bs-stage')) bsOnPointerDown(e); });
   root.addEventListener('contextmenu', (e) => { if (e.target.closest('.tg-btn')) e.preventDefault(); });
   root.addEventListener('click', async (e) => {
-    const screen = e.target.closest('[data-screen]');
-    if (screen) { BS.cur = screen.dataset.screen; BS.sel = null; bsRefresh(); return; }
-    if (e.target.closest('#bs-save, #bs-save2')) return bsSaveAll();
-    if (e.target.closest('#bs-reload')) { await bsLoad(); bsRefresh(); toast('تغییرات ذخیره‌نشده برگردانده شد.'); return; }
-    const mode = e.target.closest('[data-mode]');
-    if (mode) { BS.mm.mode = mode.dataset.mode; bsRenderPhone(); return; }
-    const mmSw = e.target.closest('[data-mm]');
+    const q = (sel) => { const el = e.target.closest(sel); return el && root.contains(el) ? el : null; };
+    const screen = q('[data-bs-screen]');
+    if (screen) { BS.cur = screen.dataset.bsScreen; BS.sel = null; bsRefresh(); return; }
+    if (q('#bs-save, #bs-save2')) return bsSaveAll();
+    if (q('#bs-reload')) { await bsLoad(); bsRefresh(); toast('تغییرات ذخیره‌نشده برگردانده شد.'); return; }
+    const mode = q('[data-bs-mode]');
+    if (mode) { BS.mm.mode = mode.dataset.bsMode; bsRenderPhone(); return; }
+    const mmSw = q('[data-bs-mm]');
     if (mmSw) {
-      const k = mmSw.dataset.mm; BS.mm[k] = !BS.mm[k]; BS.mm.dirty = true;
+      const k = mmSw.dataset.bsMm; BS.mm[k] = !BS.mm[k]; BS.mm.dirty = true;
       if (!BS.mm.reply && !BS.mm.inline) { BS.mm[k] = true; toast('حداقل یکی از دو منو باید فعال بمونه.', true); }
       if (BS.mm.mode === 'reply' && !BS.mm.reply && BS.mm.inline) BS.mm.mode = 'inline';
       if (BS.mm.mode === 'inline' && !BS.mm.inline && BS.mm.reply) BS.mm.mode = 'reply';
       bsRefresh(); return;
     }
-    const cat = e.target.closest('.bs-cat');
+    const cat = q('.bs-cat');
     if (cat && BS.sel) { bsMoveToCat(BS.sel, cat.dataset.dropCat); bsRefresh(); return; }
-    const sw = e.target.closest('.bs-sw');
+    const sw = q('.bs-sw');
     if (sw && BS.sel) {
-      const g = BS.groups[BS.cur]; bsItem(g, BS.sel).style = sw.dataset.style; bsMarkEdited(g, BS.sel);
+      const g = BS.groups[BS.cur]; bsItem(g, BS.sel).style = sw.dataset.bsStyle; bsMarkEdited(g, BS.sel);
       bsRenderTop(); bsRenderScreens(); bsRenderPhone(); bsRenderInspector(); return;
     }
-    const act = e.target.closest('[data-act]');
-    if (act) { bsAction(act.dataset.act); return; }
-    const tgBtn = e.target.closest('#bs-stage .tg-btn[data-key]');
+    const act = q('[data-bs-act]');
+    if (act) { if (act.dataset.bsAct === 'save') return bsSaveAll(); bsAction(act.dataset.bsAct); return; }
+    const tgBtn = q('#bs-stage .tg-btn[data-key]');
     if (tgBtn) {
       if (BS.suppressClick) return;
       bsSelect(tgBtn.dataset.key); return;
     }
-    if (e.target.closest('#bs-stage') && !e.target.closest('.bs-modebar, .bs-catdrop') && BS.sel) {
+    if (q('#bs-stage') && !q('.bs-modebar, .bs-catdrop') && BS.sel) {
       BS.sel = null; bsRenderPhone(); bsRenderInspector();
     }
   });
@@ -8221,6 +8223,7 @@ function bsWire() {
       const g = BS.groups[BS.cur];
       bsItem(g, BS.sel).text = e.target.value; bsMarkEdited(g, BS.sel);
       bsRenderTop(); bsRenderScreens(); bsRenderPhone();
+      const sv = $('.bs-insp-save'); if (sv) sv.disabled = false;
     }
   });
   root.addEventListener('change', (e) => {
