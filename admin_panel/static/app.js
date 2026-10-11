@@ -7678,6 +7678,8 @@ function btnRowHtml(group, item, idx, rowNumbers) {
   const breakBtn = (supportsBreak && idx > 0)
     ? `<button type="button" class="btn btn-sm ${joined ? 'btn-primary' : 'btn-ghost'}" data-break-group="${esc(group.key)}" data-break-idx="${idx}" title="کنار دکمه‌ی قبلی یا در ردیف جدید">${joined ? '↔ کنار قبلی' : '⤵ ردیف جدید'}</button>`
     : '';
+  const canMoveAcross = group.key.startsWith('admin_items__');
+  const moveControl = canMoveAcross ? `<span class="btn-move-control"><select class="input btn-move-target" aria-label="انتقال به دسته" data-source="${esc(group.key)}" data-key="${esc(item.key)}"><option value="">انتقال به…</option>${BTN_GROUPS.filter(g => g.key.startsWith('admin_items__') && g.key !== group.key).map(g => `<option value="${esc(g.key)}">${esc(g.label.replace('پنل مدیریت — ',''))}</option>`).join('')}</select><button type="button" class="btn btn-sm btn-ghost" data-move-key="${esc(item.key)}" data-move-source="${esc(group.key)}">انتقال</button></span>` : '';
   return `
     <div class="menu-order-row${joined ? ' menu-order-joined' : ''}" data-group="${esc(group.key)}" data-idx="${idx}" data-key="${esc(item.key)}">
       ${drag}
@@ -7688,6 +7690,7 @@ function btnRowHtml(group, item, idx, rowNumbers) {
       ${btnTextInputHtml(item, group.key)}
       ${btnStyleSelectHtml(item, group.key)}
       ${breakBtn}
+      ${moveControl}
     </div>`;
 }
 
@@ -7708,12 +7711,14 @@ function btnGroupCardHtml(group) {
 function onBtnDragStart(e) {
   e.preventDefault();
   const groupKey = e.currentTarget.dataset.group;
-  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
-  const rows = $$('.menu-order-row', list);
+  const sourceGroup = BTN_GROUPS.find(g => g.key === groupKey);
+  const sourceList = document.querySelector(`[data-group-list="${groupKey}"]`);
+  const rows = $$('.menu-order-row', sourceList);
   const startIdx = Number(e.currentTarget.dataset.idx);
   const row = rows[startIdx];
+  if (!sourceGroup || !row) return;
   row.classList.add('dragging');
-  btnDragState = { groupKey, startIdx, currentIdx: startIdx };
+  btnDragState = { groupKey, startIdx, currentIdx: startIdx, targetGroup: groupKey, targetIdx: startIdx };
 
   const onContextMenu = (ctxEvt) => ctxEvt.preventDefault();
   document.body.classList.add('menu-order-dragging-lock');
@@ -7724,30 +7729,69 @@ function onBtnDragStart(e) {
     moveEvt.preventDefault();
     const target = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
     const overRow = target && target.closest('.menu-order-row');
-    rows.forEach(r => r.classList.remove('drag-over'));
-    if (overRow && overRow !== row && overRow.dataset.group === groupKey) {
+    const overList = target && target.closest('[data-group-list]');
+    const targetGroupKey = overRow?.dataset.group || overList?.dataset.groupList || '';
+    const targetGroup = BTN_GROUPS.find(g => g.key === targetGroupKey);
+    document.querySelectorAll('.menu-order-row.drag-over').forEach(r => r.classList.remove('drag-over'));
+    document.querySelectorAll('[data-group-list].drag-over-list').forEach(l => l.classList.remove('drag-over-list'));
+
+    // انتقال بین دسته‌های پنل مدیریت، همراه با همان کلید callback/عملکرد.
+    // سایر گروه‌ها جایگاه‌های معنایی ثابتی دارند و با انتقال آزاد نمی‌شکنند.
+    const adminToAdmin = groupKey.startsWith('admin_items__') && targetGroupKey.startsWith('admin_items__');
+    if (targetGroup && targetGroup.reorderable && targetGroupKey === groupKey && overRow && overRow !== row) {
       overRow.classList.add('drag-over');
-      btnDragState.currentIdx = Number(overRow.dataset.idx);
+      btnDragState.targetGroup = groupKey;
+      btnDragState.targetIdx = Number(overRow.dataset.idx);
+    } else if (adminToAdmin && targetGroupKey !== groupKey && (overRow || overList)) {
+      if (overRow) {
+        overRow.classList.add('drag-over');
+        btnDragState.targetIdx = Number(overRow.dataset.idx);
+      } else {
+        overList.classList.add('drag-over-list');
+        btnDragState.targetIdx = targetGroup.items.length;
+      }
+      btnDragState.targetGroup = targetGroupKey;
     }
   };
-  const onUp = () => {
+  const onUp = async () => {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
     document.removeEventListener('contextmenu', onContextMenu);
     document.body.classList.remove('menu-order-dragging-lock');
-    if (btnDragState && btnDragState.currentIdx !== btnDragState.startIdx) {
-      const group = BTN_GROUPS.find(g => g.key === groupKey);
-      const { startIdx: s, currentIdx: c } = btnDragState;
-      const [moved] = group.items.splice(s, 1);
-      group.items.splice(c, 0, moved);
-    }
+    const state = btnDragState;
     btnDragState = null;
-    renderButtonGroupList(groupKey);
+    if (!state) return;
+    try {
+      if (state.targetGroup && state.targetGroup !== groupKey && groupKey.startsWith('admin_items__') && state.targetGroup.startsWith('admin_items__')) {
+        const item = sourceGroup.items[startIdx];
+        if (!item) return;
+        if (!confirm(`«${item.text || item.label}» همراه با عملکرد اصلی به بخش انتخاب‌شده منتقل شود؟`)) {
+          renderButtonGroupList(groupKey);
+          return;
+        }
+        await apiPost('/buttons/move-admin-item', {
+          key: item.key,
+          source_group: groupKey,
+          target_group: state.targetGroup,
+          target_index: state.targetIdx,
+        });
+        toast('دکمه همراه با عملکرد اصلی منتقل شد.');
+        await renderButtons();
+      } else if (state.targetGroup === groupKey && state.targetIdx !== startIdx) {
+        const [moved] = sourceGroup.items.splice(startIdx, 1);
+        sourceGroup.items.splice(state.targetIdx, 0, moved);
+        renderButtonGroupList(groupKey);
+      } else {
+        renderButtonGroupList(groupKey);
+      }
+    } catch (err) {
+      handleErr(err);
+      renderButtonGroupList(groupKey);
+    }
   };
   document.addEventListener('pointermove', onMove, { passive: false });
   document.addEventListener('pointerup', onUp);
 }
-
 function renderButtonGroupList(groupKey) {
   const group = BTN_GROUPS.find(g => g.key === groupKey);
   const list = document.querySelector(`[data-group-list="${groupKey}"]`);
@@ -7777,6 +7821,20 @@ function wireButtonGroupList(groupKey) {
     if (!item) return;
     item.enabled = !item.enabled;
     renderButtonGroupList(group.key);
+  }));
+  $$('[data-move-key]', list).forEach(b => b.addEventListener('click', async () => {
+    const source_group = b.dataset.moveSource;
+    const row = b.closest('.menu-order-row');
+    const target = row && $('.btn-move-target', row);
+    const target_group = target && target.value;
+    if (!target_group) { toast('اول دسته‌ی مقصد را انتخاب کن.'); return; }
+    if (!confirm('این دکمه همراه با عملکرد اصلی‌اش به دسته‌ی انتخاب‌شده منتقل شود؟')) return;
+    b.disabled = true;
+    try {
+      await apiPost('/buttons/move-admin-item', { key: b.dataset.moveKey, source_group, target_group });
+      toast('دکمه با عملکرد اصلی منتقل شد.');
+      await renderButtons();
+    } catch (e) { handleErr(e); b.disabled = false; }
   }));
   $$('[data-break-group]', list).forEach(b => b.addEventListener('click', () => {
     const group = BTN_GROUPS.find(g => g.key === b.dataset.breakGroup);
@@ -7854,11 +7912,15 @@ async function renderButtons() {
   const [registry, menuOrder] = await Promise.all([apiGet('/buttons'), apiGet('/settings/menu-order')]);
   BTN_REGISTRY = registry;
   BTN_GROUPS = [buildMainMenuGroup(menuOrder), ...BTN_REGISTRY.groups];
+  const main = BTN_GROUPS[0];
+  const preview = main.items.map((it, idx) => `${idx > 0 && it.break_before !== false ? '<span class="bot-preview-break"></span>' : ''}<span class="bot-preview-key" style="${it.style === 'primary' ? 'border-color:#3390ec;background:#e7f3ff' : it.style === 'success' ? 'border-color:#31a24c;background:#e9f8ed' : it.style === 'danger' ? 'border-color:#e05252;background:#fff0f0' : ''}">${esc(it.text || it.label)}</span>`).join('');
   const html = `
-    <div class="card" style="margin-bottom:18px">
-      <span class="card-sub">متن، رنگ، ترتیب و فعال/غیرفعال بودن هر دکمه‌ی بات (منوی اصلی، پنل مدیریت، مسیر خرید، حساب کاربری من، روش‌های پرداخت و درگاه‌های سفارشی) از همین‌جا قابل تغییر است. رنگ فقط بین حالت‌های پیش‌فرض/آبی/سبز/قرمز قابل انتخابه، چون محدودیت خود تلگرامه.</span>
+    <div class="card bot-menu-editor-hero" style="margin-bottom:18px;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0 0 6px">ویرایشگر گرافیکی منوی بات</h2><span class="card-sub">چیدمان، ترتیب و انتقال دکمه‌ها از یک محیط واحد؛ تغییرات هر بخش با دکمه‌ی ذخیره‌ی همان بخش ثبت می‌شود.</span></div><span class="chip">LIVE PREVIEW</span></div>
+      <div class="bot-menu-preview-wrap"><div class="bot-menu-preview-top"><span>●</span><b>پیش‌نمایش منوی تلگرام</b><small>SHOP VPN BOT</small></div><div class="bot-menu-preview">${preview || '<span class="card-sub">منوی اصلی خالی است</span>'}</div><div class="bot-menu-preview-footer">پیش‌نمایش منوی اصلی · ترتیب و ردیف‌ها</div></div>
+      <div class="bot-menu-editor-hint">⠿ برای جابه‌جایی داخل هر بخش بکش و رها کن. برای انتقال عملکردی بین دسته‌های پنل مدیریت، مقصد را از کنار دکمه انتخاب کن.</div>
     </div>
-    ${BTN_GROUPS.map(g => btnGroupCardHtml(g)).join('')}`;
+    <div class="bot-menu-groups-grid">${BTN_GROUPS.map(g => btnGroupCardHtml(g)).join('')}</div>`;
   setContent(html);
   BTN_GROUPS.forEach(g => wireButtonGroupList(g.key));
   $$('[data-save-group]', content()).forEach(b => b.addEventListener('click', () => saveButtonGroup(b.dataset.saveGroup)));
