@@ -3489,10 +3489,16 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             await state.clear()
             await call.answer(tr("این درخواست منقضی شده است؛ دوباره از «افزودن حساب» شروع کنید."), show_alert=True)
             return
-        new_id = await asyncio.to_thread(
-            db.link_existing_custom_config, user_id, cand["server_id"], cand["username"],
-            cand["volume_gb"], cand["duration_days"], cand["sub_url"], cand["expires_at"],
-        )
+        if cand.get("claim_id"):
+            new_id = await asyncio.to_thread(
+                db.transfer_reseller_custom_config, cand["claim_id"], cand["claim_from"], user_id,
+            )
+            new_id = cand["claim_id"] if new_id else 0
+        else:
+            new_id = await asyncio.to_thread(
+                db.link_existing_custom_config, user_id, cand["server_id"], cand["username"],
+                cand["volume_gb"], cand["duration_days"], cand["sub_url"], cand["expires_at"],
+            )
         await state.clear()
         if not new_id:
             await call.answer(tr("ℹ️ این کانفیگ قبلاً ثبت شده است."), show_alert=True)
