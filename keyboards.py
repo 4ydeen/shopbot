@@ -1920,11 +1920,14 @@ def admin_category_kb(db, is_main_bot: bool, cat_key: str) -> InlineKeyboardMark
     طولانی تک‌ستونه می‌شن) + بازگشت. ترتیب آیتم‌ها و متن هرکدام از تب
     «دکمه‌ها»ی پنل وب قابل کاستوم‌سازی است."""
     default_item_keys = next((items for key, _, items in ADMIN_PANEL_CATEGORIES if key == cat_key), [])
-    item_keys = db.get_custom_order(f"admin_items__{cat_key}", default_item_keys)
+    all_item_keys = list(dict.fromkeys(key for _cat, _label, keys in ADMIN_PANEL_CATEGORIES for key in keys))
+    effective_defaults = [key for key in default_item_keys if db.get_setting(f"admin_item_category__{key}", cat_key) == cat_key]
+    effective_defaults += [key for key in all_item_keys if db.get_setting(f"admin_item_category__{key}", "") == cat_key and key not in effective_defaults]
+    item_keys = db.get_custom_order(f"admin_items__{cat_key}", effective_defaults)
     rows = []
     current_row = []
     for key in item_keys:
-        if key not in default_item_keys or not _is_item_visible(db, key, is_main_bot):
+        if key not in effective_defaults or not _is_item_visible(db, key, is_main_bot):
             continue
         label, callback_data = _admin_item_label_and_cb(key)
         if key in _EXTRA_PANEL_ITEM_LABELS:

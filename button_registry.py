@@ -61,11 +61,14 @@ def build_registry(db) -> dict:
     })
 
     # -------------------------------------------------- پنل مدیریت: آیتم‌های هر دسته‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
+    all_admin_item_keys = {key for _cat, _label, keys in kb.ADMIN_PANEL_CATEGORIES for key in keys}
     for cat_key, cat_label, default_item_keys in kb.ADMIN_PANEL_CATEGORIES:
-        order = db.get_custom_order(f"admin_items__{cat_key}", default_item_keys)
+        effective_defaults = [key for key in default_item_keys if db.get_setting(f"admin_item_category__{key}", cat_key) == cat_key]
+        effective_defaults += [key for key in all_admin_item_keys if db.get_setting(f"admin_item_category__{key}", "") == cat_key and key not in effective_defaults]
+        order = db.get_custom_order(f"admin_items__{cat_key}", effective_defaults)
         items = []
         for key in order:
-            if key not in default_item_keys or key in kb._EXTRA_PANEL_ITEM_LABELS:
+            if key not in effective_defaults or key in kb._EXTRA_PANEL_ITEM_LABELS:
                 continue
             label, _cb = kb._admin_item_label_and_cb(key)
             items.append({
@@ -74,11 +77,12 @@ def build_registry(db) -> dict:
                 "style": db.get_setting(f"{key}_style", ""),
                 "row_break_before": None,
             })
-        if items:
-            groups.append({
-                "key": f"admin_items__{cat_key}", "label": f"پنل مدیریت — {cat_label}",
-                "reorderable": True, "supports_row_break": False, "items": items,
-            })
+        # حتی دسته‌ی خالی هم باید در ویرایشگر بماند تا بتوان دکمه‌ای را
+        # با Drag & Drop یا گزینه‌ی انتقال به آن برگرداند.
+        groups.append({
+            "key": f"admin_items__{cat_key}", "label": f"پنل مدیریت — {cat_label}",
+            "reorderable": True, "supports_row_break": False, "items": items,
+        })
 
     # ---------------------------------------------------------------- مسیر خرید
     bf_items = []
@@ -173,7 +177,9 @@ def _group_valid_keys(db, group: str):
         return [c[0] for c in kb.ADMIN_PANEL_CATEGORIES]
     if group.startswith("admin_items__"):
         cat_key = group.split("__", 1)[1]
-        return next((items for k, _, items in kb.ADMIN_PANEL_CATEGORIES if k == cat_key), [])
+        if cat_key not in {k for k, _, _ in kb.ADMIN_PANEL_CATEGORIES}:
+            return []
+        return list(dict.fromkeys(key for _k, _label, items in kb.ADMIN_PANEL_CATEGORIES for key in items))
     if group == "buyflow":
         return list(dbmod.BUYFLOW_META.keys()) + list(dbmod.BUYFLOW_STYLE_ONLY_META.keys())
     if group == "buyflow_confirm":
