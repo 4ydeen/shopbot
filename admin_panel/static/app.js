@@ -7631,299 +7631,605 @@ async function saveMainMenuDisplay() {
   }
 }
 
-/* ================================================== bot buttons tab === */
-// تب مستقل «دکمه‌های ربات»: کاستوم‌سازی متن/رنگ/ترتیب همه‌ی دکمه‌های بات،
-// از جمله منوی اصلی (پایین/شیشه‌ای) که قبلاً در تب «تنظیمات و برندینگ» بود
-// و برای یکپارچه‌سازی چیدمان دکمه‌ها به یک محل، به اینجا منتقل شد.
-// ساختار داده‌ی گروه‌های عمومی از GET /api/buttons می‌آید؛ گروه منوی اصلی
-// جداگانه از GET /api/settings/menu-order خوانده و به همان لیست گروه‌ها
-// اضافه می‌شود - هر گروه با یک کارت مستقل و با همان استایل قبلی رندر می‌شود.
-let BTN_REGISTRY = null; // { groups: [...], style_options: [...] }  (فقط گروه‌های عمومی)
-let BTN_GROUPS = [];     // منوی اصلی + BTN_REGISTRY.groups - همان‌چیزی که رندر می‌شود
-let btnDragState = null;
+/* ================================================== bot buttons studio === */
+// استودیوی گرافیکی «دکمه‌های ربات»: یک گوشی تلگرام‌مانند که دقیقاً همان کیبوردی را
+// نشان می‌دهد که کاربر/ادمین در ربات می‌بیند. دکمه‌ها با نگه‌داشتن و کشیدن (موس و
+// لمس) بین ردیف‌ها جابه‌جا و کنار هم/زیر هم چیده می‌شوند؛ دکمه‌های پنل مدیریت را
+// می‌شود روی یکی از دسته‌ها رها کرد تا به آن دسته منتقل شوند.
+const BS_MAX_ROW = 4;
+const BS = {
+  groups: {}, order: [], cur: 'main_menu', sel: null,
+  dirty: new Set(), edited: new Set(),
+  mm: { reply: true, inline: false, columns: 1, mode: 'reply', dirty: false },
+  styleOptions: [], adminCats: [], drag: null, suppressClick: false,
+};
+const BS_SHORT = {
+  main_menu: '🏠 منوی اصلی', account_hub: '🧾 حساب کاربری من', payment_methods: '💳 روش‌های پرداخت',
+  svc_detail: '📦 صفحه‌ی سرویس', wallet_menu: '👛 کیف پول', contact_menu: '📞 ارتباط با پشتیبانی',
+  buyflow: '🛒 مسیر خرید: متن/رنگ', buyflow_confirm: '🛒 مسیر خرید: ترتیب', admin_categories: '🔧 دسته‌های پنل مدیریت',
+};
+const BS_STYLE_LABEL = { '': 'پیش‌فرض', primary: 'آبی', success: 'سبز', danger: 'قرمز' };
 
-function btnStyleSelectHtml(item, groupKey) {
-  if (!item.has_style) return '';
-  const opts = (BTN_REGISTRY.style_options || []).map(o =>
-    `<option value="${esc(o.value)}" ${o.value === (item.style || '') ? 'selected' : ''}>${esc(o.label)}</option>`
-  ).join('');
-  return `<select class="input btn-style-select" style="max-width:130px" data-group="${esc(groupKey)}" data-key="${esc(item.key)}">${opts}</select>`;
+function bsLabel(g) { return BS_SHORT[g.key] || g.category_label || g.label; }
+function bsIsAdminItems(g) { return g.key.startsWith('admin_items__'); }
+function bsFlatOrder(g) { return g.rows.flat(); }
+function bsBreaks(g) { return g.rows.slice(1).map(r => r[0]); }
+function bsItem(g, key) { return g.items.find(i => i.key === key); }
+function bsId(g, key) { return g.key + '::' + key; }
+
+function bsFixed(g) {
+  if (g.key === 'main_menu') return { bubble: '🏠 به ربات خوش آمدید', top: [], bottom: [] };
+  if (g.key === 'admin_categories') return { bubble: '🔧 پنل مدیریت:', top: [], bottom: [['⬅️ بازگشت']] };
+  if (bsIsAdminItems(g)) return { bubble: `${g.category_label}:`, top: [], bottom: [['⬅️ بازگشت به پنل مدیریت']] };
+  if (g.key === 'account_hub') return { bubble: '🧾 حساب کاربری من', top: [], bottom: [['🌐 زبان / Language'], ['⬅️ بازگشت به منوی اصلی']] };
+  if (g.key === 'svc_detail') return { bubble: '📦 جزئیات سرویس', top: [], bottom: [['⬅️ بازگشت به لیست']] };
+  if (g.key === 'wallet_menu') return { bubble: '👛 کیف پول', top: [], bottom: [] };
+  if (g.key === 'contact_menu') return { bubble: '📞 ارتباط با پشتیبانی', top: [], bottom: [['❌ انصراف']] };
+  if (g.key === 'payment_methods') return { bubble: '💳 روش پرداخت را انتخاب کنید:', top: [], bottom: [['❌ انصراف']] };
+  if (g.key === 'buyflow_confirm') return { bubble: '🛒 تأیید خرید', top: [['➖', '🔢 تعداد: 1', '➕']], bottom: [['⬅️ بازگشت']] };
+  return { bubble: '🛒 مسیر خرید', top: [], bottom: [] };
 }
 
-function btnTextInputHtml(item, groupKey) {
-  if (!item.has_text) return '';
-  return `<input class="input btn-text-input" style="flex:1;min-width:160px" type="text" value="${esc(item.text || '')}" data-group="${esc(groupKey)}" data-key="${esc(item.key)}" placeholder="متن دکمه">`;
-}
-
-// شماره‌ی ردیف هر آیتم برای گروه‌هایی که چیدمان ردیف (کنار هم/ردیف جدا) دارند
-// - عیناً همان منطق قبلیِ «چیدمان دکمه‌های منوی ربات».
-function computeGroupRowNumbers(group) {
-  let row = 0;
-  return group.items.map((it, idx) => {
-    if (idx === 0 || it.break_before !== false) row++;
-    return row;
+function bsMainGroup(items) {
+  const g = {
+    key: 'main_menu', label: 'منوی اصلی ربات', reorderable: true, supports_row_break: true, items,
+    note: 'ترتیب، چیدمان ردیف‌ها، فعال/غیرفعال بودن، متن و رنگ دکمه‌های منوی اصلی.',
+  };
+  const custom = items.some(i => i.break_before !== null && i.break_before !== undefined);
+  const rows = [];
+  items.forEach((it, idx) => {
+    if (!rows.length) { rows.push([it.key]); return; }
+    const newRow = custom ? it.break_before !== false : (rows[rows.length - 1].length >= BS.mm.columns);
+    if (newRow) rows.push([it.key]); else rows[rows.length - 1].push(it.key);
   });
+  g.rows = rows;
+  return g;
 }
 
-function btnRowHtml(group, item, idx, rowNumbers) {
-  const drag = group.reorderable
-    ? `<span class="menu-order-drag-handle" data-group="${esc(group.key)}" data-idx="${idx}">⠿</span>`
-    : `<span style="width:20px;display:inline-block"></span>`;
-  const supportsBreak = !!group.supports_row_break;
-  const joined = supportsBreak && idx > 0 && item.break_before === false;
-  const rowChip = supportsBreak ? `<span class="chip" style="opacity:.7">ردیف ${rowNumbers[idx]}</span>` : '';
-  const toggle = item.togglable
-    ? `<span class="switch" data-toggle-group="${esc(group.key)}" data-toggle-idx="${idx}" data-on="${item.enabled ? '1' : '0'}" title="فعال/غیرفعال" style="margin:0 4px"><i></i></span>`
-    : '';
-  const breakBtn = (supportsBreak && idx > 0)
-    ? `<button type="button" class="btn btn-sm ${joined ? 'btn-primary' : 'btn-ghost'}" data-break-group="${esc(group.key)}" data-break-idx="${idx}" title="کنار دکمه‌ی قبلی یا در ردیف جدید">${joined ? '↔ کنار قبلی' : '⤵ ردیف جدید'}</button>`
-    : '';
-  const canMoveAcross = group.key.startsWith('admin_items__');
-  const moveControl = canMoveAcross ? `<span class="btn-move-control"><select class="input btn-move-target" aria-label="انتقال به دسته" data-source="${esc(group.key)}" data-key="${esc(item.key)}"><option value="">انتقال به…</option>${BTN_GROUPS.filter(g => g.key.startsWith('admin_items__') && g.key !== group.key).map(g => `<option value="${esc(g.key)}">${esc(g.label.replace('پنل مدیریت — ',''))}</option>`).join('')}</select><button type="button" class="btn btn-sm btn-ghost" data-move-key="${esc(item.key)}" data-move-source="${esc(group.key)}">انتقال</button></span>` : '';
-  return `
-    <div class="menu-order-row${joined ? ' menu-order-joined' : ''}" data-group="${esc(group.key)}" data-idx="${idx}" data-key="${esc(item.key)}">
-      ${drag}
-      ${rowChip}
-      <span class="menu-order-label" style="flex:none;min-width:120px">${esc(item.label)}${item.admin_only ? ' <span class="card-sub">(فقط ادمین)</span>' : ''}</span>
-      ${item.togglable && item.enabled === false ? '<span class="chip" style="color:var(--rose)">غیرفعال</span>' : ''}
-      ${toggle}
-      ${btnTextInputHtml(item, group.key)}
-      ${btnStyleSelectHtml(item, group.key)}
-      ${breakBtn}
-      ${moveControl}
-    </div>`;
+function bsNormalize(g) {
+  const keys = g.items.map(i => i.key);
+  if (!g.rows) g.rows = keys.map(k => [k]);
+  g.rows = g.rows.map(r => r.filter(k => keys.includes(k))).filter(r => r.length);
+  keys.forEach(k => { if (!g.rows.some(r => r.includes(k))) g.rows.push([k]); });
+  g.rowsEditable = !!g.supports_row_break && g.reorderable;
+  g.items.forEach(it => { if (it.enabled === undefined && it.togglable) it.enabled = true; });
 }
 
-function btnGroupCardHtml(group) {
-  const rowNumbers = group.supports_row_break ? computeGroupRowNumbers(group) : [];
-  const rows = group.items.map((item, idx) => btnRowHtml(group, item, idx, rowNumbers)).join('');
+async function bsLoad() {
+  const [registry, menu, mm] = await Promise.all([apiGet('/buttons'), apiGet('/settings/menu-order'), apiGet('/settings/main-menu-display')]);
+  BS.styleOptions = registry.style_options || [];
+  BS.adminCats = registry.admin_categories || [];
+  BS.mm = { reply: !!mm.reply_enabled, inline: !!mm.inline_enabled, columns: mm.columns || 1, mode: mm.reply_enabled || !mm.inline_enabled ? 'reply' : 'inline', dirty: false };
+  const list = [bsMainGroup(menu), ...registry.groups];
+  BS.groups = {}; BS.order = [];
+  list.forEach(g => { bsNormalize(g); BS.groups[g.key] = g; BS.order.push(g.key); });
+  BS.dirty.clear(); BS.edited.clear();
+  if (!BS.groups[BS.cur]) BS.cur = 'main_menu';
+  BS.sel = null;
+}
+
+function bsChangeCount() {
+  const editedGroups = new Set([...BS.edited].map(x => x.split('::')[0]));
+  const groups = new Set([...BS.dirty, ...editedGroups]);
+  return groups.size + (BS.mm.dirty ? 1 : 0);
+}
+
+/* ---------------------------------------------------------------- render -- */
+function bsTopHtml() {
+  const n = bsChangeCount();
   return `
-    <div class="card" style="margin-bottom:18px" data-group-card="${esc(group.key)}">
-      <div class="card-head">
-        <h3>${esc(group.label)}</h3>
-        <button class="btn btn-primary btn-sm" data-save-group="${esc(group.key)}">ذخیره</button>
+    <div class="bs-top">
+      <div>
+        <h3>استودیوی چیدمان دکمه‌های ربات</h3>
+        <span class="card-sub">دکمه رو لمس کن تا ویرایشش کنی؛ نگه دار و بکش تا جابه‌جا شه.</span>
       </div>
-      ${group.note ? `<span class="card-sub">${esc(group.note)}</span>` : ''}
-      <div class="menu-order-list" data-group-list="${esc(group.key)}" style="margin-top:12px">${rows || '<div class="empty-state">آیتمی نیست</div>'}</div>
+      <div class="bs-top-actions">
+        <span class="chip bs-unsaved" ${n ? '' : 'hidden'}>${n} صفحه تغییر ذخیره‌نشده</span>
+        <button class="btn btn-ghost btn-sm" id="bs-reload" ${n ? '' : 'disabled'}>بازگردانی</button>
+        <button class="btn btn-primary btn-sm" id="bs-save" ${n ? '' : 'disabled'}>ذخیره همه</button>
+      </div>
     </div>`;
 }
 
-function onBtnDragStart(e) {
+function bsScreensHtml() {
+  const sectionBtn = (k) => {
+    const g = BS.groups[k]; if (!g) return '';
+    const dirty = BS.dirty.has(k) || [...BS.edited].some(x => x.startsWith(k + '::'));
+    return `<button type="button" class="bs-screen${k === BS.cur ? ' active' : ''}" data-screen="${esc(k)}">
+      <span>${esc(bsLabel(g))}</span><small>${g.items.length}</small>${dirty ? '<i class="bs-dot"></i>' : ''}</button>`;
+  };
+  const user = ['main_menu', 'account_hub', 'svc_detail', 'wallet_menu', 'contact_menu', 'payment_methods', 'buyflow', 'buyflow_confirm'];
+  const adm = ['admin_categories', ...BS.order.filter(k => k.startsWith('admin_items__'))];
+  return `
+    <div class="bs-screens-title">منوی کاربران</div>
+    <div class="bs-screens-list">${user.map(sectionBtn).join('')}</div>
+    <div class="bs-screens-title">پنل مدیریت (ادمین)</div>
+    <div class="bs-screens-list">${adm.map(sectionBtn).join('')}</div>`;
+}
+
+function bsBtnHtml(g, it) {
+  const text = it.has_text ? (it.text || it.label) : it.label;
+  const off = it.togglable && it.enabled === false;
+  return `<button type="button" class="tg-btn st-${esc(it.style || '')}${BS.sel === it.key ? ' sel' : ''}${off ? ' off' : ''}${g.reorderable ? ' can-drag' : ''}" data-key="${esc(it.key)}">
+    <span dir="auto">${esc(text)}</span>${off ? '<i class="tg-badge">خاموش</i>' : ''}${it.admin_only ? '<i class="tg-badge adm">ادمین</i>' : ''}</button>`;
+}
+
+function bsFixedRowHtml(r) {
+  return `<div class="tg-row tg-fixed">${r.map(t => `<span class="tg-btn tg-static"><span dir="auto">${esc(t)}</span></span>`).join('')}</div>`;
+}
+
+function bsPhoneHtml(g) {
+  const fx = bsFixed(g);
+  const isMain = g.key === 'main_menu';
+  const mode = isMain ? BS.mm.mode : 'inline';
+  const rowsHtml = g.rows.map((row, i) =>
+    `<div class="tg-row" data-row="${i}">${row.map(k => bsBtnHtml(g, bsItem(g, k))).join('')}</div><div class="tg-gap" data-gap="${i + 1}"></div>`
+  ).join('');
+  const kb = `
+    <div class="tg-kb tg-kb-${mode}" id="tg-kb">
+      ${(fx.top || []).map(bsFixedRowHtml).join('')}
+      <div class="tg-gap${g.rows.length ? '' : ' big'}" data-gap="0"></div>
+      ${g.rows.length ? rowsHtml : '<div class="tg-empty">دکمه‌ای اینجا نیست؛ یکی رو بکش و رها کن</div>'}
+      ${(fx.bottom || []).map(bsFixedRowHtml).join('')}
+    </div>`;
+  const bubble = `<div class="tg-bubble" dir="auto">${esc(fx.bubble)}</div>`;
+  return `
+    <div class="tg-phone">
+      <div class="tg-head"><span class="tg-avatar">🤖</span><div><b>ربات شما</b><small>bot</small></div></div>
+      <div class="tg-chat">
+        ${bubble}
+        ${mode === 'inline' ? kb : ''}
+      </div>
+      ${mode === 'reply' ? `<div class="tg-reply-wrap">${kb}</div>` : '<div class="tg-input">پیام بنویس…</div>'}
+    </div>`;
+}
+
+function bsModeBarHtml(g) {
+  if (g.key === 'main_menu') {
+    return `
+      <div class="bs-modebar">
+        <div class="bs-seg">
+          <button type="button" data-mode="reply" class="${BS.mm.mode === 'reply' ? 'active' : ''}">کیبورد پایین</button>
+          <button type="button" data-mode="inline" class="${BS.mm.mode === 'inline' ? 'active' : ''}">شیشه‌ای زیر پیام</button>
+        </div>
+        <label class="bs-switch-row"><span class="switch" data-mm="reply" data-on="${BS.mm.reply ? '1' : '0'}"><i></i></span><span>منوی پایین فعال</span></label>
+        <label class="bs-switch-row"><span class="switch" data-mm="inline" data-on="${BS.mm.inline ? '1' : '0'}"><i></i></span><span>منوی شیشه‌ای فعال</span></label>
+      </div>`;
+  }
+  if (bsIsAdminItems(g)) {
+    const chips = BS.adminCats.filter(c => c.key !== g.category).map(c =>
+      `<button type="button" class="bs-cat" data-drop-cat="${esc(c.key)}"><span dir="auto">${esc(c.label)}</span></button>`).join('');
+    return `
+      <div class="bs-catdrop">
+        <div class="bs-catdrop-title">برای انتقال به دسته‌ی دیگر، دکمه رو بکش روی یکی از این‌ها:</div>
+        <div class="bs-catdrop-list">${chips}</div>
+      </div>`;
+  }
+  if (g.note) return `<div class="bs-note card-sub">${esc(g.note)}</div>`;
+  return '';
+}
+
+function bsInspectorHtml(g) {
+  const it = BS.sel && bsItem(g, BS.sel);
+  if (!it) {
+    return `
+      <div class="bs-insp-empty">
+        <div class="bs-insp-ico">👆</div>
+        <b>یک دکمه رو انتخاب کن</b>
+        <p class="card-sub">لمس کن تا متن، رنگ و وضعیتش رو ویرایش کنی. برای جابه‌جایی، دکمه رو نگه دار و بکش:</p>
+        <ul class="bs-legend">
+          <li><i class="lg lg-v"></i> وسط یک ردیف رها کنی ← کنار بقیه‌ی دکمه‌ها می‌شینه</li>
+          <li><i class="lg lg-h"></i> بین دو ردیف رها کنی ← ردیف جدید می‌سازه</li>
+          ${bsIsAdminItems(g) ? '<li><i class="lg lg-c"></i> روی یک دسته رها کنی ← به آن دسته منتقل می‌شه</li>' : ''}
+        </ul>
+        ${g.reorderable ? '' : '<p class="card-sub">جای دکمه‌های این صفحه ثابته؛ فقط متن و رنگشون قابل تغییره.</p>'}
+      </div>`;
+  }
+  const ri = g.rows.findIndex(r => r.includes(it.key));
+  const row = g.rows[ri];
+  const ci = row.indexOf(it.key);
+  const swatches = it.has_style ? `
+    <div class="bs-field"><span>رنگ دکمه</span>
+      <div class="bs-swatches">${BS.styleOptions.map(o => `<button type="button" class="bs-sw st-${esc(o.value)}${(it.style || '') === o.value ? ' on' : ''}" data-style="${esc(o.value)}" title="${esc(BS_STYLE_LABEL[o.value] || o.label)}"></button>`).join('')}</div>
+    </div>` : '';
+  const text = it.has_text ? `
+    <label class="bs-field"><span>متن دکمه</span>
+      <input class="input" id="bs-text" type="text" value="${esc(it.text || '')}" placeholder="متن دکمه"></label>` : '';
+  const toggle = it.togglable ? `
+    <div class="bs-field bs-inline"><span>نمایش در ربات</span>
+      <span class="switch" data-act="toggle" data-on="${it.enabled ? '1' : '0'}"><i></i></span></div>` : '';
+  const arrows = g.reorderable ? `
+    <div class="bs-field"><span>جای دکمه</span>
+      <div class="bs-arrows">
+        <button type="button" class="btn btn-sm" data-act="up" title="بالاتر">⬆</button>
+        <button type="button" class="btn btn-sm" data-act="down" title="پایین‌تر">⬇</button>
+        ${g.rowsEditable ? `
+        <button type="button" class="btn btn-sm" data-act="left" ${ci === 0 ? 'disabled' : ''} title="چپ">⬅</button>
+        <button type="button" class="btn btn-sm" data-act="right" ${ci === row.length - 1 ? 'disabled' : ''} title="راست">➡</button>
+        <button type="button" class="btn btn-sm" data-act="join" ${ri === 0 || g.rows[ri - 1].length >= BS_MAX_ROW ? 'disabled' : ''}>↩ بچسبان به ردیف بالا</button>` : ''}
+      </div>
+    </div>` : '';
+  const catSel = bsIsAdminItems(g) ? `
+    <label class="bs-field"><span>انتقال به دسته</span>
+      <select class="input" id="bs-cat"><option value="">— انتخاب کن —</option>
+        ${BS.adminCats.filter(c => c.key !== g.category).map(c => `<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}
+      </select></label>` : '';
+  return `
+    <div class="bs-insp-head"><b dir="auto">${esc(it.label)}</b><code>${esc(it.key)}</code>
+      <button type="button" class="btn btn-ghost btn-sm bs-close" data-act="close" title="بستن">✕</button></div>
+    ${text}${swatches}${toggle}${arrows}${catSel}
+    ${!it.has_text && !it.has_style && !it.togglable ? '<p class="card-sub">این دکمه متن/رنگ قابل ویرایش ندارد.</p>' : ''}`;
+}
+
+function bsRenderPhone() {
+  const g = BS.groups[BS.cur];
+  $('#bs-stage-body').innerHTML = bsModeBarHtml(g) + bsPhoneHtml(g);
+}
+function bsRenderInspector() {
+  const el = $('#bs-inspector');
+  el.innerHTML = bsInspectorHtml(BS.groups[BS.cur]);
+  el.classList.toggle('sheet', !!BS.sel);
+  $('#bs-root').classList.toggle('has-sel', !!BS.sel);
+}
+function bsRenderTop() {
+  $('#bs-top').innerHTML = bsTopHtml();
+  const n = bsChangeCount();
+  $('#bs-bottom').innerHTML = n
+    ? `<div class="card bs-savecard"><span>${n} صفحه تغییر ذخیره‌نشده</span><button class="btn btn-primary btn-sm" id="bs-save2">ذخیره همه</button></div>`
+    : '';
+}
+function bsRenderScreens() { $('#bs-screens').innerHTML = bsScreensHtml(); }
+function bsRefresh() { bsRenderTop(); bsRenderScreens(); bsRenderPhone(); bsRenderInspector(); }
+
+/* ------------------------------------------------------------- mutations -- */
+function bsMarkDirty(gk) { BS.dirty.add(gk); }
+function bsMarkEdited(g, key) { BS.edited.add(bsId(g, key)); }
+
+function bsMoveToCat(key, cat) {
+  const from = BS.groups[BS.cur];
+  const to = BS.groups['admin_items__' + cat];
+  if (!to || to === from) return;
+  const idx = from.items.findIndex(i => i.key === key);
+  if (idx < 0) return;
+  const [it] = from.items.splice(idx, 1);
+  from.rows = from.rows.map(r => r.filter(k => k !== key)).filter(r => r.length);
+  to.items.push(it);
+  to.rows.push([key]);
+  const oldId = bsId(from, key);
+  if (BS.edited.has(oldId)) { BS.edited.delete(oldId); BS.edited.add(bsId(to, key)); }
+  bsMarkDirty(from.key); bsMarkDirty(to.key);
+  BS.sel = null;
+  toast(`«${it.text || it.label}» به «${to.category_label}» منتقل شد؛ آخر لیستش قرار گرفت.`);
+}
+
+function bsApplyDrop(key, t) {
+  const g = BS.groups[BS.cur];
+  if (!t) return;
+  if (t.type === 'cat') { bsMoveToCat(key, t.cat); bsRefresh(); return; }
+  if (t.type === 'row' && g.rows[t.row].filter(k => k !== key).length >= BS_MAX_ROW) {
+    toast(`هر ردیف حداکثر ${BS_MAX_ROW} دکمه می‌تونه داشته باشه.`); return;
+  }
+  const before = JSON.stringify(g.rows);
+  const rows = g.rows.map(r => r.slice());
+  const oldRow = rows.find(r => r.includes(key));
+  if (t.type === 'newrow') {
+    rows.splice(t.index, 0, [key]);
+    oldRow.splice(oldRow.indexOf(key), 1);
+  } else {
+    oldRow.splice(oldRow.indexOf(key), 1);
+    rows[t.row].splice(t.index, 0, key);
+  }
+  g.rows = rows.filter(r => r.length);
+  if (JSON.stringify(g.rows) !== before) bsMarkDirty(g.key);
+  bsRefresh();
+}
+
+function bsAction(act) {
+  if (act === 'close') { BS.sel = null; bsRefresh(); return; }
+  const g = BS.groups[BS.cur];
+  const key = BS.sel; if (!key) return;
+  const it = bsItem(g, key);
+  const ri = g.rows.findIndex(r => r.includes(key));
+  const row = g.rows[ri];
+  const ci = row.indexOf(key);
+  const before = JSON.stringify(g.rows);
+  if (act === 'toggle') {
+    it.enabled = !it.enabled; bsMarkEdited(g, key);
+  } else if (act === 'left' && ci > 0) {
+    [row[ci - 1], row[ci]] = [row[ci], row[ci - 1]];
+  } else if (act === 'right' && ci < row.length - 1) {
+    [row[ci + 1], row[ci]] = [row[ci], row[ci + 1]];
+  } else if (act === 'up') {
+    if (row.length > 1 && g.rowsEditable) { row.splice(ci, 1); g.rows.splice(ri, 0, [key]); }
+    else if (ri > 0) { [g.rows[ri - 1], g.rows[ri]] = [g.rows[ri], g.rows[ri - 1]]; }
+  } else if (act === 'down') {
+    if (row.length > 1 && g.rowsEditable) { row.splice(ci, 1); g.rows.splice(ri + 1, 0, [key]); }
+    else if (ri < g.rows.length - 1) { [g.rows[ri + 1], g.rows[ri]] = [g.rows[ri], g.rows[ri + 1]]; }
+  } else if (act === 'join' && ri > 0 && g.rows[ri - 1].length < BS_MAX_ROW) {
+    row.splice(ci, 1);
+    g.rows[ri - 1].push(key);
+    g.rows = g.rows.filter(r => r.length);
+  }
+  if (JSON.stringify(g.rows) !== before) bsMarkDirty(g.key);
+  bsRefresh();
+}
+
+/* ------------------------------------------------------------------ drag -- */
+function bsBlockTouch(e) { if (BS.drag && BS.drag.active) e.preventDefault(); }
+
+function bsHit(x, y) {
+  const g = BS.groups[BS.cur];
+  const el = document.elementFromPoint(x, y);
+  const catEl = el && el.closest('[data-drop-cat]');
+  if (catEl && bsIsAdminItems(g)) return { type: 'cat', cat: catEl.dataset.dropCat, el: catEl };
+  const kb = $('#tg-kb'); const phone = $('.tg-phone');
+  if (!kb || !phone) return null;
+  const pr = phone.getBoundingClientRect();
+  if (x < pr.left - 30 || x > pr.right + 30 || y < pr.top - 30 || y > pr.bottom + 30) return null;
+  const rowEls = $$('.tg-row[data-row]', kb);
+  if (!rowEls.length) return { type: 'newrow', index: 0 };
+  const rects = rowEls.map(r => r.getBoundingClientRect());
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i];
+    if (y >= r.top && y <= r.bottom) {
+      if (!g.rowsEditable) return { type: 'newrow', index: y < (r.top + r.bottom) / 2 ? i : i + 1 };
+      if (y < r.top + r.height * 0.22) return { type: 'newrow', index: i };
+      if (y > r.bottom - r.height * 0.22) return { type: 'newrow', index: i + 1 };
+      const btns = $$('.tg-btn', rowEls[i]).filter(b => b.dataset.key !== BS.drag.key);
+      let idx = 0;
+      btns.forEach(b => { const br = b.getBoundingClientRect(); if (x > br.left + br.width / 2) idx++; });
+      return { type: 'row', row: i, index: idx };
+    }
+  }
+  if (y < rects[0].top) return { type: 'newrow', index: 0 };
+  if (y > rects[rects.length - 1].bottom) return { type: 'newrow', index: rects.length };
+  for (let i = 0; i < rects.length - 1; i++) {
+    if (y > rects[i].bottom && y < rects[i + 1].top) return { type: 'newrow', index: i + 1 };
+  }
+  return null;
+}
+
+function bsShowIndicator(t) {
+  const kb = $('#tg-kb'); if (!kb) return;
+  let ind = $('#bs-ind');
+  if (!ind) { ind = document.createElement('div'); ind.id = 'bs-ind'; kb.appendChild(ind); }
+  $$('[data-drop-cat]').forEach(c => c.classList.remove('hot'));
+  if (!t) { ind.style.display = 'none'; return; }
+  if (t.type === 'cat') { t.el.classList.add('hot'); ind.style.display = 'none'; return; }
+  const g = BS.groups[BS.cur];
+  const kr = kb.getBoundingClientRect();
+  const rowEls = $$('.tg-row[data-row]', kb);
+  const full = t.type === 'row' && g.rows[t.row].filter(k => k !== BS.drag.key).length >= BS_MAX_ROW;
+  ind.className = (full ? 'bad ' : '') + (t.type === 'newrow' ? 'h' : 'v');
+  if (t.type === 'newrow') {
+    let y;
+    if (!rowEls.length) y = 24;
+    else if (t.index === 0) y = rowEls[0].getBoundingClientRect().top - kr.top - 4;
+    else if (t.index >= rowEls.length) y = rowEls[rowEls.length - 1].getBoundingClientRect().bottom - kr.top + 4;
+    else y = (rowEls[t.index - 1].getBoundingClientRect().bottom + rowEls[t.index].getBoundingClientRect().top) / 2 - kr.top;
+    ind.style.cssText = `display:block;left:6px;right:6px;top:${y - 2}px;height:4px`;
+  } else {
+    const rowEl = rowEls[t.row]; const rr = rowEl.getBoundingClientRect();
+    const btns = $$('.tg-btn', rowEl).filter(b => b.dataset.key !== BS.drag.key);
+    let x;
+    if (!btns.length) x = rr.left + rr.width / 2;
+    else if (t.index === 0) x = btns[0].getBoundingClientRect().left - 3;
+    else if (t.index >= btns.length) x = btns[btns.length - 1].getBoundingClientRect().right + 3;
+    else x = (btns[t.index - 1].getBoundingClientRect().right + btns[t.index].getBoundingClientRect().left) / 2;
+    ind.style.cssText = `display:block;left:${x - kr.left - 2}px;top:${rr.top - kr.top}px;width:4px;height:${rr.height}px`;
+  }
+}
+
+function bsGhostMove(x, y) {
+  const gh = BS.drag && BS.drag.ghost; if (!gh) return;
+  gh.style.left = (x - gh.offsetWidth / 2) + 'px';
+  gh.style.top = (y - gh.offsetHeight / 2) + 'px';
+}
+
+function bsDragStart() {
+  const st = BS.drag; if (!st || st.active) return;
+  st.active = true;
+  clearTimeout(st.timer);
+  const gh = st.btn.cloneNode(true);
+  gh.classList.add('tg-ghost');
+  gh.style.width = st.btn.offsetWidth + 'px';
+  document.body.appendChild(gh);
+  st.ghost = gh;
+  st.btn.classList.add('drag-src');
+  document.body.classList.add('bs-dragging');
+  document.addEventListener('touchmove', bsBlockTouch, { passive: false });
+  bsGhostMove(st.lx ?? st.x, st.ly ?? st.y);
+  if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+}
+
+function bsDragCleanup() {
+  const st = BS.drag;
+  if (st) { clearTimeout(st.timer); if (st.ghost) st.ghost.remove(); }
+  document.removeEventListener('pointermove', bsOnMove);
+  document.removeEventListener('pointerup', bsOnUp);
+  document.removeEventListener('pointercancel', bsOnCancel);
+  document.removeEventListener('touchmove', bsBlockTouch);
+  document.body.classList.remove('bs-dragging');
+  $('#bs-ind')?.remove();
+  $$('[data-drop-cat]').forEach(c => c.classList.remove('hot'));
+  $$('.drag-src').forEach(b => b.classList.remove('drag-src'));
+  BS.drag = null;
+}
+
+function bsOnPointerDown(e) {
+  const btn = e.target.closest('.tg-btn[data-key]');
+  if (!btn || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (BS.drag) bsDragCleanup();
+  const g = BS.groups[BS.cur];
+  const st = { key: btn.dataset.key, btn, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, type: e.pointerType, active: false, timer: null, ghost: null, target: null };
+  BS.drag = st;
+  if (g.reorderable && st.type !== 'mouse') st.timer = setTimeout(bsDragStart, 260);
+  document.addEventListener('pointermove', bsOnMove, { passive: false });
+  document.addEventListener('pointerup', bsOnUp);
+  document.addEventListener('pointercancel', bsOnCancel);
+}
+
+function bsOnMove(e) {
+  const st = BS.drag; if (!st) return;
+  st.lx = e.clientX; st.ly = e.clientY;
+  if (!st.active) {
+    const dist = Math.hypot(e.clientX - st.x, e.clientY - st.y);
+    if (st.type === 'mouse') { if (dist > 5 && BS.groups[BS.cur].reorderable) bsDragStart(); }
+    else if (dist > 10) bsDragCleanup();
+    return;
+  }
   e.preventDefault();
-  const groupKey = e.currentTarget.dataset.group;
-  const sourceGroup = BTN_GROUPS.find(g => g.key === groupKey);
-  const sourceList = document.querySelector(`[data-group-list="${groupKey}"]`);
-  const rows = $$('.menu-order-row', sourceList);
-  const startIdx = Number(e.currentTarget.dataset.idx);
-  const row = rows[startIdx];
-  if (!sourceGroup || !row) return;
-  row.classList.add('dragging');
-  btnDragState = { groupKey, startIdx, currentIdx: startIdx, targetGroup: groupKey, targetIdx: startIdx };
-
-  const onContextMenu = (ctxEvt) => ctxEvt.preventDefault();
-  document.body.classList.add('menu-order-dragging-lock');
-  document.addEventListener('contextmenu', onContextMenu);
-
-  const onMove = (moveEvt) => {
-    if (!btnDragState) return;
-    moveEvt.preventDefault();
-    const target = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
-    const overRow = target && target.closest('.menu-order-row');
-    const overList = target && target.closest('[data-group-list]');
-    const targetGroupKey = overRow?.dataset.group || overList?.dataset.groupList || '';
-    const targetGroup = BTN_GROUPS.find(g => g.key === targetGroupKey);
-    document.querySelectorAll('.menu-order-row.drag-over').forEach(r => r.classList.remove('drag-over'));
-    document.querySelectorAll('[data-group-list].drag-over-list').forEach(l => l.classList.remove('drag-over-list'));
-
-    // انتقال بین دسته‌های پنل مدیریت، همراه با همان کلید callback/عملکرد.
-    // سایر گروه‌ها جایگاه‌های معنایی ثابتی دارند و با انتقال آزاد نمی‌شکنند.
-    const adminToAdmin = groupKey.startsWith('admin_items__') && targetGroupKey.startsWith('admin_items__');
-    if (targetGroup && targetGroup.reorderable && targetGroupKey === groupKey && overRow && overRow !== row) {
-      overRow.classList.add('drag-over');
-      btnDragState.targetGroup = groupKey;
-      btnDragState.targetIdx = Number(overRow.dataset.idx);
-    } else if (adminToAdmin && targetGroupKey !== groupKey && (overRow || overList)) {
-      if (overRow) {
-        overRow.classList.add('drag-over');
-        btnDragState.targetIdx = Number(overRow.dataset.idx);
-      } else {
-        overList.classList.add('drag-over-list');
-        btnDragState.targetIdx = targetGroup.items.length;
-      }
-      btnDragState.targetGroup = targetGroupKey;
-    }
-  };
-  const onUp = async () => {
-    document.removeEventListener('pointermove', onMove);
-    document.removeEventListener('pointerup', onUp);
-    document.removeEventListener('contextmenu', onContextMenu);
-    document.body.classList.remove('menu-order-dragging-lock');
-    const state = btnDragState;
-    btnDragState = null;
-    if (!state) return;
-    try {
-      if (state.targetGroup && state.targetGroup !== groupKey && groupKey.startsWith('admin_items__') && state.targetGroup.startsWith('admin_items__')) {
-        const item = sourceGroup.items[startIdx];
-        if (!item) return;
-        if (!confirm(`«${item.text || item.label}» همراه با عملکرد اصلی به بخش انتخاب‌شده منتقل شود؟`)) {
-          renderButtonGroupList(groupKey);
-          return;
-        }
-        await apiPost('/buttons/move-admin-item', {
-          key: item.key,
-          source_group: groupKey,
-          target_group: state.targetGroup,
-          target_index: state.targetIdx,
-        });
-        toast('دکمه همراه با عملکرد اصلی منتقل شد.');
-        await renderButtons();
-      } else if (state.targetGroup === groupKey && state.targetIdx !== startIdx) {
-        const [moved] = sourceGroup.items.splice(startIdx, 1);
-        sourceGroup.items.splice(state.targetIdx, 0, moved);
-        renderButtonGroupList(groupKey);
-      } else {
-        renderButtonGroupList(groupKey);
-      }
-    } catch (err) {
-      handleErr(err);
-      renderButtonGroupList(groupKey);
-    }
-  };
-  document.addEventListener('pointermove', onMove, { passive: false });
-  document.addEventListener('pointerup', onUp);
-}
-function renderButtonGroupList(groupKey) {
-  const group = BTN_GROUPS.find(g => g.key === groupKey);
-  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
-  if (!group || !list) return;
-  const rowNumbers = group.supports_row_break ? computeGroupRowNumbers(group) : [];
-  list.innerHTML = group.items.map((item, idx) => btnRowHtml(group, item, idx, rowNumbers)).join('');
-  wireButtonGroupList(groupKey);
+  bsGhostMove(e.clientX, e.clientY);
+  st.target = bsHit(e.clientX, e.clientY);
+  bsShowIndicator(st.target);
 }
 
-function wireButtonGroupList(groupKey) {
-  const list = document.querySelector(`[data-group-list="${groupKey}"]`);
-  if (!list) return;
-  $$('.menu-order-drag-handle', list).forEach(h => h.addEventListener('pointerdown', onBtnDragStart));
-  $$('.btn-text-input', list).forEach(inp => inp.addEventListener('input', () => {
-    const group = BTN_GROUPS.find(g => g.key === inp.dataset.group);
-    const item = group.items.find(i => i.key === inp.dataset.key);
-    if (item) item.text = inp.value;
-  }));
-  $$('.btn-style-select', list).forEach(sel => sel.addEventListener('change', () => {
-    const group = BTN_GROUPS.find(g => g.key === sel.dataset.group);
-    const item = group.items.find(i => i.key === sel.dataset.key);
-    if (item) item.style = sel.value;
-  }));
-  $$('[data-toggle-group]', list).forEach(sw => sw.addEventListener('click', () => {
-    const group = BTN_GROUPS.find(g => g.key === sw.dataset.toggleGroup);
-    const item = group && group.items[Number(sw.dataset.toggleIdx)];
-    if (!item) return;
-    item.enabled = !item.enabled;
-    renderButtonGroupList(group.key);
-  }));
-  $$('[data-move-key]', list).forEach(b => b.addEventListener('click', async () => {
-    const source_group = b.dataset.moveSource;
-    const row = b.closest('.menu-order-row');
-    const target = row && $('.btn-move-target', row);
-    const target_group = target && target.value;
-    if (!target_group) { toast('اول دسته‌ی مقصد را انتخاب کن.'); return; }
-    if (!confirm('این دکمه همراه با عملکرد اصلی‌اش به دسته‌ی انتخاب‌شده منتقل شود؟')) return;
-    b.disabled = true;
-    try {
-      await apiPost('/buttons/move-admin-item', { key: b.dataset.moveKey, source_group, target_group });
-      toast('دکمه با عملکرد اصلی منتقل شد.');
-      await renderButtons();
-    } catch (e) { handleErr(e); b.disabled = false; }
-  }));
-  $$('[data-break-group]', list).forEach(b => b.addEventListener('click', () => {
-    const group = BTN_GROUPS.find(g => g.key === b.dataset.breakGroup);
-    const idx = Number(b.dataset.breakIdx);
-    const item = group && group.items[idx];
-    if (!item || idx === 0) return;
-    // اگر break_before تا حالا مشخص نشده بود (چیدمان قدیمی ستون‌ثابت)، اولین
-    // کلیک یعنی «بچسبان به قبلی»؛ بعد از این لحظه چیدمان آزاد رسماً شروع شده.
-    item.break_before = item.break_before === false ? true : false;
-    group._customLayoutTouched = true;
-    renderButtonGroupList(group.key);
-  }));
+function bsOnUp(e) {
+  const st = BS.drag; if (!st) return;
+  if (!st.active) { bsDragCleanup(); return; }
+  const target = bsHit(e.clientX, e.clientY);
+  const key = st.key;
+  bsDragCleanup();
+  BS.suppressClick = true;
+  setTimeout(() => { BS.suppressClick = false; }, 350);
+  bsApplyDrop(key, target);
 }
 
-async function saveButtonGroup(groupKey) {
-  const group = BTN_GROUPS.find(g => g.key === groupKey);
-  const btn = document.querySelector(`[data-save-group="${groupKey}"]`);
-  if (!group || !btn) return;
-  btn.disabled = true;
-  const prevTxt = btn.textContent; btn.textContent = 'در حال ذخیره...';
+function bsOnCancel() { bsDragCleanup(); }
+
+/* ------------------------------------------------------------------ save -- */
+async function bsSaveAll() {
+  const btns = $$('#bs-save, #bs-save2');
+  const btn = btns[0];
+  for (const gk of BS.order) {
+    const g = BS.groups[gk];
+    const bad = g.items.find(i => BS.edited.has(bsId(g, i.key)) && i.has_text && !(i.text || '').trim());
+    if (bad) { toast(`متن دکمه‌ی «${bad.label}» نمی‌تونه خالی باشه.`, true); return; }
+  }
+  if (BS.mm.dirty && !BS.mm.reply && !BS.mm.inline) { toast('حداقل یکی از منوی پایین یا شیشه‌ای باید فعال باشه.', true); return; }
+  btns.forEach(b => { b.disabled = true; });
+  const prev = btn.textContent; btn.textContent = 'در حال ذخیره...';
   try {
-    if (groupKey === 'main_menu') {
-      // گروه منوی اصلی از APIهای مخصوص خودش استفاده می‌کند (همان که قبلاً در
-      // تب «تنظیمات و برندینگ» بود) تا هیچ‌کدام از ویژگی‌های قبلی‌اش
-      // (فعال/غیرفعال، چیدمان ردیف‌ها) تغییر نکند.
-      const order = group.items.map(i => i.key);
-      const buttons = group.items
-        .filter(i => i.togglable || i.has_text || i.has_style)
-        .map(i => ({
+    if (BS.mm.dirty) {
+      await apiPost('/settings/main-menu-display', { reply_enabled: BS.mm.reply, inline_enabled: BS.mm.inline, columns: BS.mm.columns });
+    }
+    const adminKeys = BS.order.filter(k => k.startsWith('admin_items__'));
+    if (adminKeys.some(k => BS.dirty.has(k))) {
+      const overrides = {};
+      adminKeys.forEach(k => {
+        const g = BS.groups[k];
+        g.items.forEach(it => { if (it.default_category && it.default_category !== g.category) overrides[it.key] = g.category; });
+      });
+      await apiPost('/buttons/admin-item-categories', { overrides });
+    }
+    for (const gk of BS.order) {
+      const g = BS.groups[gk];
+      const edited = g.items.filter(it => BS.edited.has(bsId(g, it.key)));
+      if (!BS.dirty.has(gk) && !edited.length) continue;
+      if (gk === 'main_menu') {
+        const buttons = edited.map(i => ({
           key: i.key,
           enabled: i.togglable ? !!i.enabled : undefined,
           text: i.has_text ? i.text : undefined,
           style: i.has_style ? i.style : undefined,
         }));
-      if (group._customLayoutTouched) {
-        const breaks = group.items.filter((it, idx) => idx > 0 && it.break_before !== false).map(i => i.key);
-        await apiPost('/settings/menu-layout', { order, breaks, buttons });
-      } else {
-        await apiPost('/settings/menu-order', { order, buttons });
+        if (BS.dirty.has(gk)) await apiPost('/settings/menu-layout', { order: bsFlatOrder(g), breaks: bsBreaks(g), buttons });
+        else await apiPost('/settings/menu-order', { order: bsFlatOrder(g), buttons });
+        continue;
       }
-    } else {
-      if (group.reorderable) {
-        await apiPost('/buttons/order', { group: group.key, order: group.items.map(i => i.key) });
+      if (BS.dirty.has(gk) && g.reorderable) {
+        await apiPost('/buttons/layout', { group: gk, order: bsFlatOrder(g), breaks: g.rowsEditable ? bsBreaks(g) : [] });
       }
-      const itemCalls = group.items
-        .filter(i => i.has_text || i.has_style)
-        .map(i => apiPost('/buttons/item', {
-          group: group.key, key: i.key,
-          text: i.has_text ? i.text : undefined,
-          style: i.has_style ? i.style : undefined,
-        }));
-      await Promise.all(itemCalls);
+      for (const it of edited) {
+        if (!it.has_text && !it.has_style && !it.togglable) continue;
+        await apiPost('/buttons/item', { group: gk, key: it.key, text: it.has_text ? it.text : undefined, style: it.has_style ? it.style : undefined, enabled: it.togglable ? !!it.enabled : undefined });
+      }
     }
     toast('ذخیره شد.');
+    await bsLoad();
+    bsRefresh();
   } catch (e) {
     handleErr(e);
-  } finally {
-    btn.disabled = false; btn.textContent = prevTxt;
+    btns.forEach(b => { b.disabled = false; });
+    btn.textContent = prev;
   }
 }
 
-function buildMainMenuGroup(items) {
-  return {
-    key: 'main_menu',
-    label: 'منوی اصلی ربات (پایین / شیشه‌ای)',
-    reorderable: true,
-    supports_row_break: true,
-    note: 'ترتیب، فعال/غیرفعال بودن، متن و رنگ دکمه‌های منوی اصلی ربات از همین‌جا قابل تغییر است. با دستگیره ⠿ ترتیب را جابه‌جا کن و با دکمه‌ی «کنار قبلی / ردیف جدید» مشخص کن کدام دکمه‌ها کنار هم و کدام‌ها در ردیف جدا نمایش داده شوند. برای نوع نمایش منو (پایین/شیشه‌ای) و تعداد دکمه در هر ردیف، به تب «تنظیمات و برندینگ» برو.',
-    items,
-    _customLayoutTouched: false,
-  };
+/* ------------------------------------------------------------------ boot -- */
+function bsWire() {
+  const root = $('#bs-root');
+  root.addEventListener('pointerdown', (e) => { if (e.target.closest('#bs-stage')) bsOnPointerDown(e); });
+  root.addEventListener('contextmenu', (e) => { if (e.target.closest('.tg-btn')) e.preventDefault(); });
+  root.addEventListener('click', async (e) => {
+    const screen = e.target.closest('[data-screen]');
+    if (screen) { BS.cur = screen.dataset.screen; BS.sel = null; bsRefresh(); return; }
+    if (e.target.closest('#bs-save, #bs-save2')) return bsSaveAll();
+    if (e.target.closest('#bs-reload')) { await bsLoad(); bsRefresh(); toast('تغییرات ذخیره‌نشده برگردانده شد.'); return; }
+    const mode = e.target.closest('[data-mode]');
+    if (mode) { BS.mm.mode = mode.dataset.mode; bsRenderPhone(); return; }
+    const mmSw = e.target.closest('[data-mm]');
+    if (mmSw) {
+      const k = mmSw.dataset.mm; BS.mm[k] = !BS.mm[k]; BS.mm.dirty = true;
+      if (!BS.mm.reply && !BS.mm.inline) { BS.mm[k] = true; toast('حداقل یکی از دو منو باید فعال بمونه.', true); }
+      if (BS.mm.mode === 'reply' && !BS.mm.reply && BS.mm.inline) BS.mm.mode = 'inline';
+      if (BS.mm.mode === 'inline' && !BS.mm.inline && BS.mm.reply) BS.mm.mode = 'reply';
+      bsRefresh(); return;
+    }
+    const cat = e.target.closest('.bs-cat');
+    if (cat && BS.sel) { bsMoveToCat(BS.sel, cat.dataset.dropCat); bsRefresh(); return; }
+    const sw = e.target.closest('.bs-sw');
+    if (sw && BS.sel) {
+      const g = BS.groups[BS.cur]; bsItem(g, BS.sel).style = sw.dataset.style; bsMarkEdited(g, BS.sel);
+      bsRenderTop(); bsRenderScreens(); bsRenderPhone(); bsRenderInspector(); return;
+    }
+    const act = e.target.closest('[data-act]');
+    if (act) { bsAction(act.dataset.act); return; }
+    const tgBtn = e.target.closest('#bs-stage .tg-btn[data-key]');
+    if (tgBtn) {
+      if (BS.suppressClick) return;
+      BS.sel = tgBtn.dataset.key; bsRenderPhone(); bsRenderInspector();
+      requestAnimationFrame(() => {
+        const s = $('.tg-btn.sel');
+        if (!s || window.innerWidth >= 1000) return;
+        const over = s.getBoundingClientRect().bottom - window.innerHeight * 0.45;
+        if (over <= 0) return;
+        let sc = s.parentElement;
+        while (sc && sc.scrollHeight <= sc.clientHeight + 1) sc = sc.parentElement;
+        (sc || document.scrollingElement).scrollBy({ top: over, behavior: 'smooth' });
+      });
+      return;
+    }
+    if (e.target.closest('#bs-stage') && !e.target.closest('.bs-modebar, .bs-catdrop') && BS.sel) {
+      BS.sel = null; bsRenderPhone(); bsRenderInspector();
+    }
+  });
+  root.addEventListener('input', (e) => {
+    if (e.target.id === 'bs-text' && BS.sel) {
+      const g = BS.groups[BS.cur];
+      bsItem(g, BS.sel).text = e.target.value; bsMarkEdited(g, BS.sel);
+      bsRenderTop(); bsRenderScreens(); bsRenderPhone();
+    }
+  });
+  root.addEventListener('change', (e) => {
+    if (e.target.id === 'bs-cat' && e.target.value && BS.sel) { bsMoveToCat(BS.sel, e.target.value); bsRefresh(); }
+  });
 }
 
 async function renderButtons() {
-  const [registry, menuOrder] = await Promise.all([apiGet('/buttons'), apiGet('/settings/menu-order')]);
-  BTN_REGISTRY = registry;
-  BTN_GROUPS = [buildMainMenuGroup(menuOrder), ...BTN_REGISTRY.groups];
-  const main = BTN_GROUPS[0];
-  const preview = main.items.map((it, idx) => `${idx > 0 && it.break_before !== false ? '<span class="bot-preview-break"></span>' : ''}<span class="bot-preview-key" style="${it.style === 'primary' ? 'border-color:#3390ec;background:#e7f3ff' : it.style === 'success' ? 'border-color:#31a24c;background:#e9f8ed' : it.style === 'danger' ? 'border-color:#e05252;background:#fff0f0' : ''}">${esc(it.text || it.label)}</span>`).join('');
-  const html = `
-    <div class="card bot-menu-editor-hero" style="margin-bottom:18px;padding:20px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0 0 6px">ویرایشگر گرافیکی منوی بات</h2><span class="card-sub">چیدمان، ترتیب و انتقال دکمه‌ها از یک محیط واحد؛ تغییرات هر بخش با دکمه‌ی ذخیره‌ی همان بخش ثبت می‌شود.</span></div><span class="chip">LIVE PREVIEW</span></div>
-      <div class="bot-menu-preview-wrap"><div class="bot-menu-preview-top"><span>●</span><b>پیش‌نمایش منوی تلگرام</b><small>SHOP VPN BOT</small></div><div class="bot-menu-preview">${preview || '<span class="card-sub">منوی اصلی خالی است</span>'}</div><div class="bot-menu-preview-footer">پیش‌نمایش منوی اصلی · ترتیب و ردیف‌ها</div></div>
-      <div class="bot-menu-editor-hint">⠿ برای جابه‌جایی داخل هر بخش بکش و رها کن. برای انتقال عملکردی بین دسته‌های پنل مدیریت، مقصد را از کنار دکمه انتخاب کن.</div>
-    </div>
-    <div class="bot-menu-groups-grid">${BTN_GROUPS.map(g => btnGroupCardHtml(g)).join('')}</div>`;
-  setContent(html);
-  BTN_GROUPS.forEach(g => wireButtonGroupList(g.key));
-  $$('[data-save-group]', content()).forEach(b => b.addEventListener('click', () => saveButtonGroup(b.dataset.saveGroup)));
+  if (BS.drag) bsDragCleanup();
+  await bsLoad();
+  setContent(`
+    <div id="bs-root" class="bs-root">
+      <div class="card bs-topcard" id="bs-top"></div>
+      <div class="bs-grid">
+        <aside class="bs-screens" id="bs-screens"></aside>
+        <section class="bs-stage" id="bs-stage"><div id="bs-stage-body"></div></section>
+        <aside class="bs-inspector card" id="bs-inspector"></aside>
+      </div>
+      <div class="settings-save-bar" id="bs-bottom"></div>
+    </div>`);
+  bsWire();
+  bsRefresh();
 }
 
 /* ========================================================= bot texts === */
