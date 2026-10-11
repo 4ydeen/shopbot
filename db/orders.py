@@ -87,6 +87,41 @@ class OrdersMixin:
                 clean.append(k)
         self.set_setting(f"btncustom_order__{group}", json.dumps(clean, ensure_ascii=False))
 
+    def get_group_row_breaks(self, group: str):
+        import json
+        raw = self.get_setting(f"btncustom_breaks__{group}", "")
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(data, list):
+            return None
+        return [k for k in data if isinstance(k, str)]
+
+    def set_group_row_breaks(self, group: str, keys: list, valid_keys: list):
+        import json
+        clean = [k for k in keys if k in valid_keys]
+        self.set_setting(f"btncustom_breaks__{group}", json.dumps(clean, ensure_ascii=False))
+
+    def get_admin_item_cat_overrides(self) -> dict:
+        import json
+        raw = self.get_setting("btncustom_admin_item_cat", "")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {str(k): str(v) for k, v in data.items()}
+
+    def set_admin_item_cat_overrides(self, mapping: dict):
+        import json
+        self.set_setting("btncustom_admin_item_cat", json.dumps(mapping, ensure_ascii=False))
+
     # -----------------------------------------------------------------------
     # بنرهای کاروسل بالای صفحه‌ی خانه‌ی مینی‌اپ
     # -----------------------------------------------------------------------
