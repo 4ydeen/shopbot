@@ -346,6 +346,35 @@ class DatabaseBase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_scheduled_broadcasts_status_time ON scheduled_broadcasts(status, scheduled_at);
 
+                CREATE TABLE IF NOT EXISTS channel_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_id INTEGER,
+                    channel_id TEXT,
+                    message_id INTEGER,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    angle TEXT,
+                    caption TEXT NOT NULL,
+                    button_text TEXT,
+                    deeplink TEXT,
+                    photo_id TEXT,
+                    is_pinned INTEGER DEFAULT 0,
+                    error TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    sent_at TEXT,
+                    scheduled_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_channel_posts_status ON channel_posts(status, id);
+
+                CREATE TABLE IF NOT EXISTS channel_post_clicks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    post_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    clicked_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_channel_post_clicks_post ON channel_post_clicks(post_id);
+                CREATE INDEX IF NOT EXISTS idx_channel_post_clicks_user ON channel_post_clicks(user_id, clicked_at);
+
                 CREATE TABLE IF NOT EXISTS wallet_transfers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     sender_id INTEGER NOT NULL,
@@ -1432,7 +1461,7 @@ class DatabaseBase:
         "custom_config_history", "location_change_log", "bulk_gift_jobs", "bulk_gift_items", "price_change_log", "lottery_log", "reseller_credit_log", "wallet_transactions", "wallet_tx_label", "coin_batches", "coin_wallet_credits", "reseller_requests",
         "reseller_product_credit", "reseller_inline_commission_log", "reseller_tiers",
         "reseller_tier_qty_discounts", "reseller_tier_requests",
-        "payment_webhook_logs", "web_push_subscriptions", "temp_messages", "order_surveys",
+        "payment_webhook_logs", "web_push_subscriptions", "temp_messages", "order_surveys", "channel_posts", "channel_post_clicks",
         "referral_fraud_flags",
         "settings",
     )
@@ -1597,6 +1626,7 @@ class DatabaseBase:
             ("mobile_app_tokens", "scope", "TEXT NOT NULL DEFAULT 'read,users,orders'"),
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
             ("tickets", "claimed_by", "INTEGER"),
+            ("channel_posts", "scheduled_at", "TEXT"),
             ("tickets", "department_id", "INTEGER"),
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("orders", "config_name", "TEXT"),
