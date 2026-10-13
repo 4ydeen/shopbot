@@ -15,6 +15,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton
 import admin_channel_posts
 import campaign_ai
 import channel_ai
+import jarvis_guide
 import post_image
 from i18n import tr
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
@@ -611,6 +612,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             "🎨 <b>مدل تصویر (بنر فارسی)</b>\n"
             f"<code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n\n"
             f"🖼 لوگوی بنر: {'✅ دارد' if channel_ai.has_logo() else '❌ ندارد'}\n"
+            f"🖼 بنر مرجع سبک: {'✅ دارد' if channel_ai.has_style_ref() else '❌ ندارد'}\n"
             f"🎯 حالت لوگو: {'لوگوی دقیق (چسباندن اصلی در نشان درخشان)' if channel_ai.logo_mode(db) == 'exact' else 'تصویر مرجع به مدل AI'}\n"
             f"🧩 پرامپت پایه‌ی سفارشی: {'✅ تنظیم شده' if (db.get_setting(channel_ai.BANNER_BASE_PROMPT_KEY, '') or '').strip() else 'پیش‌فرض'}\n"
             f"🧠 پست‌های تأییدشده‌ی یادگرفته‌شده: {len(channel_ai.learning_examples(db, channel_ai.LEARNING_LIMIT))}"
@@ -622,6 +624,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             [("📝 مدل متن", "adm_chai_tmodel"), ("🎨 مدل تصویر", "adm_chai_imodel")],
             [("🖼 لوگوی بنر", "adm_chai_logo"), ("🧠 یادگیری AI", "adm_chai_learn")],
             [("🧩 پرامپت پایه بنر", "adm_chai_banner_prompt"), ("🎯 حالت لوگو", "adm_chai_logomode")],
+            [("🖼 بنر مرجع سبک", "adm_chai_styleref"), ("📖 راهنمای Jarvis", "adm_chai_guide")],
             [("🧪 تست متن", "adm_chai_ttest"), ("🧪 تست تصویر (از اعتبار کم می‌شود)", "adm_chai_itest")],
             [("⬅️ بازگشت", _BACK)],
         )
@@ -690,6 +693,67 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await _chai_log(call.from_user.id, f"حالت لوگوی بنر: {new}")
         await _show_chai(call.message)
         await call.answer("🎯 لوگوی دقیق (پیشنهادی)" if new == "exact" else "🎯 تصویر مرجع به مدل AI (اگر درگاه پشتیبانی نکند خودکار به حالت دقیق برمی‌گردد)", show_alert=True)
+
+    @router.callback_query(F.data == "adm_chai_guide")
+    async def cb_chai_guide(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        await call.answer()
+        last = len(jarvis_guide.PARTS) - 1
+        for index, part in enumerate(jarvis_guide.PARTS):
+            await call.message.answer(part, reply_markup=_chai_back_kb() if index == last else None, disable_web_page_preview=True)
+
+    @router.callback_query(F.data == "adm_chai_styleref")
+    async def cb_chai_styleref(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminChannelAI.waiting_style_ref)
+        await call.message.answer(
+            "🖼 <b>بنر مرجع سبک</b>\n\n"
+            "یک بنر نهایی که سبک دلخواهت است بفرست (ترجیحاً به‌صورت فایل برای کیفیت بالا). "
+            "این تصویر همراه هر درخواست به مدل داده می‌شود تا چیدمان، نور، رنگ و تایپوگرافی را شبیه همان بسازد و فقط متن‌ها عوض شوند.\n"
+            "اگر درگاه تصویر مرجع را نپذیرد، خودکار بدون مرجع ساخته می‌شود.\n"
+            "برای حذف: <code>-</code>",
+            reply_markup=_chai_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminChannelAI.waiting_style_ref, F.photo | F.document | F.text)
+    async def msg_chai_styleref(message: Message, state: FSMContext, bot: Bot):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        if message.text is not None:
+            if message.text.strip() != "-":
+                await message.answer("تصویر بنر را بفرست، یا برای حذف <code>-</code> بفرست.", reply_markup=_chai_back_kb())
+                return
+            removed = await asyncio.to_thread(channel_ai.remove_style_ref)
+            await _chai_log(message.from_user.id, "بنر مرجع سبک حذف شد" if removed else "حذف بنر مرجع: چیزی ثبت نشده بود")
+            await state.clear()
+            await _show_chai(message, edit=False)
+            return
+        if message.photo:
+            file_id, size = message.photo[-1].file_id, message.photo[-1].file_size or 0
+        elif message.document and (message.document.mime_type or "").startswith("image/"):
+            file_id, size = message.document.file_id, message.document.file_size or 0
+        else:
+            await message.answer("⚠️ فقط فایل تصویری (PNG یا JPG) قابل قبول است.", reply_markup=_chai_back_kb())
+            return
+        if size > 10 * 1024 * 1024:
+            await message.answer("⚠️ حجم تصویر بیش از ۱۰ مگابایت است.", reply_markup=_chai_back_kb())
+            return
+        buf = io.BytesIO()
+        try:
+            await bot.download(file_id, destination=buf)
+            await asyncio.to_thread(channel_ai.save_style_ref, buf.getvalue())
+        except Exception as exc:
+            _log.warning("ذخیره‌ی بنر مرجع ناموفق بود: %s", exc)
+            await message.answer("❌ این فایل به‌عنوان تصویر خوانده نشد: " + html.escape(str(exc)[:150]), reply_markup=_chai_back_kb())
+            return
+        await _chai_log(message.from_user.id, "بنر مرجع سبک ذخیره شد")
+        await state.clear()
+        await _show_chai(message, edit=False)
 
     @router.callback_query(F.data == "adm_chai_logo")
     async def cb_chai_logo(call: CallbackQuery, state: FSMContext):
