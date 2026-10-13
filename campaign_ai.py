@@ -133,6 +133,15 @@ def _validate_variant(raw, facts: dict):
     }
 
 
+def active_discount_codes(db) -> list:
+    now = datetime.utcnow()
+    return [d["code"] for d in (dict(row) for row in db.list_discount_codes()) if _is_active_code(d, now)]
+
+
+def is_valid_param(value: str) -> bool:
+    return bool(_PARAM_RE.match(value))
+
+
 def start_param_for(deeplink: dict) -> str:
     kind = deeplink["type"]
     if kind == "test":

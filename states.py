@@ -282,6 +282,10 @@ class AdminCampaign(StatesGroup):
     waiting_photo = State()
     waiting_channel = State()
     confirming = State()
+    waiting_manual_caption = State()
+    waiting_manual_button = State()
+    waiting_manual_link = State()
+    waiting_manual_value = State()
 
 
 class AdminChannelAI(StatesGroup):

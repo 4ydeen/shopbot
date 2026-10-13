@@ -87,10 +87,25 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         )
 
     async def _ask_goal(call_or_msg, state: FSMContext):
-        await state.set_state(AdminCampaign.waiting_goal)
-        text = ("🤖 هدف کمپین را بنویس (مثلاً «فروش ویژه آخر هفته» یا «معرفی کانفیگ تست»).\n"
-                "AI فقط از محصولات، قیمت‌ها و کدهای تخفیف واقعی فروشگاه استفاده می‌کند.")
-        markup = _kb([("▶️ بدون هدف خاص", "adm_camp_nogoal")], [("❌ لغو", "adm_camp_cancel")])
+        if channel_ai.text_configured(db):
+            await state.set_state(AdminCampaign.waiting_goal)
+            text = ("🤖 هدف کمپین را بنویس (مثلاً «فروش ویژه آخر هفته» یا «معرفی کانفیگ تست»).\n"
+                    "AI فقط از محصولات، قیمت‌ها و کدهای تخفیف واقعی فروشگاه استفاده می‌کند.\n\n"
+                    "یا کپشن را خودت بنویس.")
+            markup = _kb(
+                [("▶️ بدون هدف خاص", "adm_camp_nogoal")],
+                [("✍️ کپشن دستی (بدون AI)", "adm_camp_manual")],
+                [("❌ لغو", "adm_camp_cancel")],
+            )
+        else:
+            await state.clear()
+            text = ("مدل متن کانال تنظیم نشده؛ برای ساخت کپشن با AI از «⚙️ مدل‌های AI کانال» کلید Jarvis را وارد کن.\n"
+                    "فعلاً می‌توانی کپشن را دستی بنویسی.")
+            markup = _kb(
+                [("✍️ کپشن دستی (بدون AI)", "adm_camp_manual")],
+                [("⚙️ مدل‌های AI کانال", "adm_chai")],
+                [("❌ لغو", "adm_camp_cancel")],
+            )
         if isinstance(call_or_msg, CallbackQuery):
             await call_or_msg.message.answer(text, reply_markup=markup)
             await call_or_msg.answer()
@@ -101,9 +116,6 @@ def register(router: Router, db, senior_admin_only, deny_mid):
     async def cb_start(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not channel_ai.text_configured(db):
-            await call.answer("مدل متن کانال تنظیم نشده؛ از «مدل‌های AI کانال» کلید Jarvis را وارد کن.", show_alert=True)
-            return
         await state.clear()
         await _ask_goal(call, state)
 
@@ -127,6 +139,133 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             return
         await _generate_and_show(message, state, (message.text or "").strip())
 
+    @router.callback_query(F.data == "adm_camp_manual")
+    async def cb_manual(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        await state.set_state(AdminCampaign.waiting_manual_caption)
+        await call.message.answer(
+            f"✍️ متن کپشن پست را بفرست (حداکثر {campaign_ai.CAPTION_LIMIT} کاراکتر).",
+            reply_markup=_cancel_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminCampaign.waiting_manual_caption, F.text)
+    async def msg_manual_caption(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        caption = (message.text or "").strip()
+        if not caption or len(caption) > campaign_ai.CAPTION_LIMIT:
+            await message.answer(
+                f"کپشن باید بین ۱ تا {campaign_ai.CAPTION_LIMIT} کاراکتر باشد (الان {len(caption)}). دوباره بفرست.",
+                reply_markup=_cancel_kb(),
+            )
+            return
+        await state.update_data(manual_caption=caption)
+        await state.set_state(AdminCampaign.waiting_manual_button)
+        await message.answer(
+            "🔘 متن دکمه‌ی زیر پست را بفرست (مثلاً «🎁 خرید با ۳۰٪ تخفیف»، حداکثر ۶۴ کاراکتر).",
+            reply_markup=_cancel_kb(),
+        )
+
+    @router.message(AdminCampaign.waiting_manual_button, F.text)
+    async def msg_manual_button(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        button = (message.text or "").strip()
+        if not button or len(button) > 64:
+            await message.answer("متن دکمه باید بین ۱ تا ۶۴ کاراکتر باشد. دوباره بفرست.", reply_markup=_cancel_kb())
+            return
+        await state.update_data(manual_button=button)
+        await state.set_state(AdminCampaign.waiting_manual_link)
+        await message.answer(
+            "🔗 دکمه به چه چیزی وصل شود؟",
+            reply_markup=_kb(
+                [("🚫 فقط باز شدن بات", "adm_camp_dl:none"), ("🛒 منوی خرید", "adm_camp_dl:buy")],
+                [("🧪 کانفیگ تست", "adm_camp_dl:test"), ("🎡 گردونه شانس", "adm_camp_dl:wheel")],
+                [("🎟 کد تخفیف", "adm_camp_dl:disc"), ("🏷 پارامتر دلخواه", "adm_camp_dl:camp")],
+                [("❌ لغو", "adm_camp_cancel")],
+            ),
+        )
+
+    async def _finish_manual(target: Message, state: FSMContext, deeplink: dict):
+        data = await state.get_data()
+        variant = {
+            "angle": "کپشن دستی",
+            "caption": data["manual_caption"],
+            "button_text": data["manual_button"],
+            "deeplink": deeplink,
+            "note_for_admin": "",
+            "image_prompt": "",
+            "manual": True,
+        }
+        await state.update_data(variant=variant, photo_id=None)
+        await _ask_photo(target, state)
+
+    @router.callback_query(F.data.startswith("adm_camp_dl:"))
+    async def cb_manual_link(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        data = await state.get_data()
+        if not data.get("manual_caption") or not data.get("manual_button"):
+            await call.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", show_alert=True)
+            return
+        kind = call.data.split(":", 1)[1]
+        if kind == "none":
+            deeplink = {"type": "none"}
+        elif kind == "buy":
+            deeplink = {"type": "campaign", "param": "buy"}
+        elif kind == "test":
+            if (await asyncio.to_thread(db.get_setting, "test_enabled", "1")) != "1":
+                await call.answer("کانفیگ تست در بات غیرفعال است.", show_alert=True)
+                return
+            deeplink = {"type": "test"}
+        elif kind == "wheel":
+            if not (await asyncio.to_thread(db.get_wheel_settings))["enabled"]:
+                await call.answer("گردونه شانس در بات غیرفعال است.", show_alert=True)
+                return
+            deeplink = {"type": "wheel"}
+        elif kind in ("disc", "camp"):
+            await state.update_data(manual_link_kind=kind)
+            await state.set_state(AdminCampaign.waiting_manual_value)
+            prompt = (
+                "🎟 کد تخفیف را بفرست (باید از قبل ساخته شده، فعال و عمومی باشد)."
+                if kind == "disc" else
+                "🏷 پارامتر را بفرست (فقط حروف انگلیسی، عدد و زیرخط، حداکثر ۴۰ کاراکتر؛ برای باز کردن یک محصول مثلاً prod_12)."
+            )
+            await call.message.answer(prompt, reply_markup=_cancel_kb())
+            await call.answer()
+            return
+        else:
+            await call.answer()
+            return
+        await call.answer()
+        await _finish_manual(call.message, state, deeplink)
+
+    @router.message(AdminCampaign.waiting_manual_value, F.text)
+    async def msg_manual_value(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        data = await state.get_data()
+        raw = (message.text or "").strip()
+        if data.get("manual_link_kind") == "disc":
+            codes = await asyncio.to_thread(campaign_ai.active_discount_codes, db)
+            code = next((c for c in codes if c.lower() == raw.lower()), None)
+            if not code:
+                await message.answer("کد تخفیفِ عمومی و فعالی با این نام پیدا نشد. دوباره بفرست.", reply_markup=_cancel_kb())
+                return
+            deeplink = {"type": "discount", "code": code}
+        else:
+            if not campaign_ai.is_valid_param(raw):
+                await message.answer("پارامتر نامعتبر است (فقط حروف انگلیسی، عدد و زیرخط، حداکثر ۴۰). دوباره بفرست.", reply_markup=_cancel_kb())
+                return
+            deeplink = {"type": "campaign", "param": raw}
+        await _finish_manual(message, state, deeplink)
+
     @router.callback_query(F.data == "adm_camp_regen")
     async def cb_regen(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -147,13 +286,16 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await call.answer("این نسخه دیگر معتبر نیست؛ دوباره تولید کن.", show_alert=True)
             return
         await state.update_data(variant=variant, photo_id=None)
+        await _ask_photo(call.message, state)
+        await call.answer()
+
+    async def _ask_photo(target: Message, state: FSMContext):
         await state.set_state(AdminCampaign.waiting_photo)
         rows = [[("🎨 ساخت تصویر با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
-        await call.message.answer(
+        await target.answer(
             "🖼 عکس پست را بفرست، یا اگر پست بدون عکس می‌خواهی دکمه‌ی زیر را بزن.",
             reply_markup=_kb(*rows, [("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
         )
-        await call.answer()
 
     async def _after_photo(target: Message, state: FSMContext, bot: Bot):
         channel = await asyncio.to_thread(db.get_setting, _CHANNEL_SETTING, "")
@@ -264,7 +406,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             reply_markup=_kb(
                 [("📣 ارسال به کانال", "adm_camp_send")],
                 *image_rows,
-                [("📢 تغییر کانال", "adm_camp_channel"), ("🔄 نسخه‌ی دیگر", "adm_camp_regen")],
+                [("📢 تغییر کانال", "adm_camp_channel")] + ([] if data["variant"].get("manual") else [("🔄 نسخه‌ی دیگر", "adm_camp_regen")]),
                 [("❌ لغو", "adm_camp_cancel")],
             ),
         )
