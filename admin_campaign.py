@@ -4,6 +4,7 @@
 
 import asyncio
 import html
+import io
 import logging
 import re
 
@@ -334,7 +335,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
 
     async def _ask_photo(target: Message, state: FSMContext):
         await state.set_state(AdminCampaign.waiting_photo)
-        rows = [[("🎨 ساخت تصویر با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
+        rows = [[("🎨 ساخت بنر فارسی با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
         await target.answer(
             "🖼 عکس پست را بفرست، یا اگر پست بدون عکس می‌خواهی دکمه‌ی زیر را بزن.",
             reply_markup=_kb(*rows, [("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
@@ -365,7 +366,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await _after_photo(call.message, state, bot)
 
     @router.callback_query(F.data == "adm_camp_genimg")
-    async def cb_genimg(call: CallbackQuery, state: FSMContext, bot: Bot):
+    async def cb_genimg(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
         variant = (await state.get_data()).get("variant")
@@ -373,49 +374,80 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await call.answer("ابتدا یک نسخه انتخاب کن.", show_alert=True)
             return
         await call.answer()
-        status = await call.message.answer("🎨 در حال ساخت تصویر با AI (ممکن است چند دقیقه طول بکشد)...")
+        await _ask_colors(call.message, state)
+
+    async def _ask_colors(target: Message, state: FSMContext):
+        """قبل از ساخت بنر، رنگ‌های برند از مدیر پرسیده می‌شود."""
+        saved = await asyncio.to_thread(channel_ai.saved_colors, db)
+        await state.set_state(AdminCampaign.waiting_banner_colors)
+        rows = [[(f"🎨 همان رنگ‌های قبلی ({saved[:30]})", "adm_camp_colors_prev")]] if saved else []
+        await target.answer(
+            "🎨 قبل از ساخت بنر، رنگ‌های برند را بنویس.\n"
+            "اسم رنگ یا کد هگز بفرست، مثلاً: <code>آبی و طلایی</code> یا <code>#0B5FFF, #FFC400</code>",
+            reply_markup=_kb(*rows, [("🤖 انتخاب رنگ با AI", "adm_camp_colors_auto")], [("❌ لغو", "adm_camp_cancel")]),
+        )
+
+    @router.message(AdminCampaign.waiting_banner_colors, F.text)
+    async def msg_banner_colors(message: Message, state: FSMContext, bot: Bot):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        colors = (message.text or "").strip()
+        if not colors or len(colors) > 150:
+            await message.answer("رنگ‌ها باید بین ۱ تا ۱۵۰ کاراکتر باشد. دوباره بفرست.", reply_markup=_cancel_kb())
+            return
+        await asyncio.to_thread(channel_ai.save_colors, db, colors)
+        await _run_banner(message, state, bot, colors)
+
+    @router.callback_query(F.data.in_({"adm_camp_colors_prev", "adm_camp_colors_auto"}))
+    async def cb_banner_colors_pick(call: CallbackQuery, state: FSMContext, bot: Bot):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        colors = await asyncio.to_thread(channel_ai.saved_colors, db) if call.data == "adm_camp_colors_prev" else ""
+        await call.answer()
+        await _run_banner(call.message, state, bot, colors)
+
+    async def _run_banner(target: Message, state: FSMContext, bot: Bot, colors: str):
+        data = await state.get_data()
+        variant = data.get("variant")
+        if not variant:
+            await state.clear()
+            await target.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
+            return
+        status = await target.answer("🎨 در حال ساخت بنر فارسی با AI (ممکن است چند دقیقه طول بکشد)...")
+        prompt = channel_ai.build_banner_prompt(variant.get("overlay") or {}, variant.get("image_prompt") or "", colors)
         try:
-            raw, source = await channel_ai.generate_image(db, variant.get("image_prompt") or "")
+            raw, source = await channel_ai.generate_image(db, prompt)
         except Exception as exc:
-            _log.warning("ساخت تصویر ناموفق بود: %s", exc)
+            _log.warning("ساخت بنر ناموفق بود: %s", exc)
             await status.edit_text(
-                "❌ ساخت تصویر انجام نشد: " + html.escape(str(exc)),
+                "❌ ساخت بنر انجام نشد: " + html.escape(str(exc)),
                 reply_markup=_kb([("🔄 تلاش دوباره", "adm_camp_genimg")], [("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
             )
+            await state.set_state(AdminCampaign.waiting_photo)
             return
         try:
             await status.delete()
         except Exception:
             pass
-        data = await state.get_data()
-        overlay_on = data.get("overlay_on")
-        if overlay_on is None:
-            overlay_on = await asyncio.to_thread(post_image.overlay_default, db)
         img_size = data.get("img_size") or await asyncio.to_thread(post_image.default_size, db)
         token = await asyncio.to_thread(post_image.save_raw, raw)
-        await state.update_data(raw_bg=token, overlay_on=overlay_on, img_size=img_size)
-        await _compose_and_send(call.message, state, "🎨 تصویر ساخته‌شده: " + source)
-        await _after_photo(call.message, state, bot)
+        await state.update_data(raw_bg=token, img_size=img_size)
+        await _compose_and_send(target, state, "🎨 بنر ساخته‌شده: " + source)
+        await _after_photo(target, state, bot)
 
     async def _compose_and_send(target: Message, state: FSMContext, label: str) -> bool:
         data = await state.get_data()
         raw = await asyncio.to_thread(post_image.load_raw, data.get("raw_bg"))
         if raw is None:
             return False
-        overlay = (data.get("variant") or {}).get("overlay") if data.get("overlay_on") else None
         size = data.get("img_size") or "post"
-        out, note = raw, ""
-        try:
-            brand = await asyncio.to_thread(post_image.load_brand, db)
-            out = await asyncio.to_thread(post_image.render, raw, overlay, size, brand)
-        except Exception as exc:
-            _log.warning("نوشتن متن روی تصویر ناموفق بود: %s", exc)
-            note = "\n⚠️ متن روی تصویر نوشته نشد: " + str(exc)[:200]
-        sent = await target.answer_photo(BufferedInputFile(out, filename="post.jpg"), caption=tr(label) + note)
+        out = await asyncio.to_thread(channel_ai.compose_banner, raw, size)
+        sent = await target.answer_photo(BufferedInputFile(out, filename="banner.jpg"), caption=tr(label))
         await state.update_data(photo_id=sent.photo[-1].file_id)
         return True
 
-    @router.callback_query(F.data.in_({"adm_camp_size", "adm_camp_ovr"}))
+    @router.callback_query(F.data == "adm_camp_size")
     async def cb_image_tweak(call: CallbackQuery, state: FSMContext, bot: Bot):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
@@ -423,13 +455,10 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         if not data.get("raw_bg") or not data.get("variant"):
             await call.answer("تصویر AI برای تغییر وجود ندارد؛ دوباره بساز.", show_alert=True)
             return
-        if call.data == "adm_camp_size":
-            await state.update_data(img_size=post_image.next_size(data.get("img_size") or "post"))
-        else:
-            await state.update_data(overlay_on=not data.get("overlay_on"))
+        await state.update_data(img_size=post_image.next_size(data.get("img_size") or "post"))
         await call.answer()
-        if not await _compose_and_send(call.message, state, "🎨 تصویر بازسازی شد"):
-            await call.message.answer("❌ تصویر پایه پاک شده؛ «تصویر جدید با AI» را بزن.")
+        if not await _compose_and_send(call.message, state, "🎨 بنر بازسازی شد"):
+            await call.message.answer("❌ تصویر پایه پاک شده؛ «بنر جدید با AI» را بزن.")
             return
         await _show_preview(call.message, state, bot)
 
@@ -485,12 +514,9 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await target.answer("❌ ساخت پیش‌نمایش ناموفق بود: " + html.escape(str(exc)), reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
             await state.clear()
             return
-        image_rows = [[("🎨 تصویر جدید با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
+        image_rows = [[("🎨 بنر جدید با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
         if data.get("raw_bg"):
-            tweak = [(post_image.SIZE_LABELS[data.get("img_size") or "post"], "adm_camp_size")]
-            if data["variant"].get("overlay"):
-                tweak.append(("🔤 متن روی تصویر: روشن" if data.get("overlay_on") else "🔤 متن روی تصویر: خاموش", "adm_camp_ovr"))
-            image_rows.insert(0, tweak)
+            image_rows.insert(0, [(post_image.SIZE_LABELS[data.get("img_size") or "post"], "adm_camp_size")])
         await target.answer(
             "این پست به کانال ارسال شود؟",
             reply_markup=_kb(
@@ -525,6 +551,8 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             db.log_admin_action, call.from_user.id, "ai_channel_post", f"پست کانال با AI ارسال شد | دیپ‌لینک: {param}",
             "channel_post", post_id,
         )
+        if not data["variant"].get("manual"):
+            await asyncio.to_thread(channel_ai.record_approved, db, data["variant"], data.get("goal", ""))
         await call.message.answer(
             f"✅ پست در کانال ارسال شد (#{post_id}).",
             reply_markup=_kb([("🗂 مدیریت این پست", f"adm_cpost_view:{post_id}")], [("⬅️ بازگشت", _BACK)]),
@@ -568,23 +596,22 @@ def register(router: Router, db, senior_admin_only, deny_mid):
     def _chai_text() -> str:
         has_key = bool(channel_ai.jarvis_keys(db))
         return (
-            "⚙️ <b>مدل‌های AI کانال</b>\n"
-            "جدا از دستیار پشتیبانی، دستیار ادمین و بقیه‌ی ایجنت‌ها؛ تغییر این بخش روی آن‌ها اثری ندارد.\n\n"
+            "⚙️ <b>مدل‌های AI پست کانال (فقط Jarvis)</b>\n"
+            "این بخش فقط از Jarvis استفاده می‌کند و جدا از بقیه‌ی ایجنت‌های بات است.\n\n"
             f"🔑 کلید Jarvis: {'✅ ثبت شده' if has_key else '❌ ثبت نشده'}\n\n"
-            "📝 <b>مدل متن</b>\n"
-            f"مسیر: {channel_ai.TEXT_MODE_LABELS[channel_ai.text_mode(db)]}\n"
-            f"مدل Jarvis: <code>{html.escape(channel_ai.jarvis_text_model(db))}</code>\n\n"
-            "🎨 <b>مدل تصویر</b>\n"
-            f"مسیر: {channel_ai.IMAGE_MODE_LABELS[channel_ai.image_mode(db)]}\n"
-            f"مدل Jarvis: <code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n"
-            f"مدل Gemini: <code>{html.escape(channel_ai.gemini_image_model(db))}</code>"
+            "📝 <b>مدل متن (کپشن با ایموجی)</b>\n"
+            f"<code>{html.escape(channel_ai.jarvis_text_model(db))}</code>\n\n"
+            "🎨 <b>مدل تصویر (بنر فارسی)</b>\n"
+            f"<code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n\n"
+            f"🖼 لوگوی بنر: {'✅ دارد' if channel_ai.has_logo() else '❌ ندارد'}\n"
+            f"🧠 پست‌های تأییدشده‌ی یادگرفته‌شده: {len(channel_ai.learning_examples(db, channel_ai.LEARNING_LIMIT))}"
         )
 
     def _chai_kb() -> InlineKeyboardMarkup:
         return _kb(
             [("🔑 کلید Jarvis", "adm_chai_key")],
             [("📝 مدل متن", "adm_chai_tmodel"), ("🎨 مدل تصویر", "adm_chai_imodel")],
-            [("🔀 مسیر متن", "adm_chai_tmode"), ("🔀 مسیر تصویر", "adm_chai_imode")],
+            [("🖼 لوگوی بنر", "adm_chai_logo"), ("🧠 یادگیری AI", "adm_chai_learn")],
             [("🧪 تست متن", "adm_chai_ttest"), ("🧪 تست تصویر (از اعتبار کم می‌شود)", "adm_chai_itest")],
             [("⬅️ بازگشت", _BACK)],
         )
@@ -612,27 +639,106 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await _show_chai(call.message)
         await call.answer()
 
-    @router.callback_query(F.data == "adm_chai_tmode")
-    async def cb_chai_tmode(call: CallbackQuery):
+    @router.callback_query(F.data == "adm_chai_logo")
+    async def cb_chai_logo(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        modes = channel_ai.TEXT_MODES
-        new = modes[(modes.index(channel_ai.text_mode(db)) + 1) % len(modes)]
-        await asyncio.to_thread(db.set_setting, "channel_text_provider", new)
-        await _chai_log(call.from_user.id, f"مسیر متن کانال: {new}")
-        await _show_chai(call.message)
+        await state.set_state(AdminChannelAI.waiting_logo)
+        await call.message.answer(
+            "🖼 لوگوی بنرهای این بخش را بفرست. برای حفظ شفافیت، آن را «به‌صورت فایل» (PNG) بفرست.\n"
+            "برای حذف لوگو: <code>-</code>",
+            reply_markup=_chai_back_kb(),
+        )
         await call.answer()
 
-    @router.callback_query(F.data == "adm_chai_imode")
-    async def cb_chai_imode(call: CallbackQuery):
+    @router.message(AdminChannelAI.waiting_logo, F.photo | F.document | F.text)
+    async def msg_chai_logo(message: Message, state: FSMContext, bot: Bot):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        if message.text is not None:
+            if message.text.strip() != "-":
+                await message.answer("عکس یا فایل لوگو را بفرست، یا برای حذف <code>-</code> بفرست.", reply_markup=_chai_back_kb())
+                return
+            removed = await asyncio.to_thread(channel_ai.remove_logo)
+            await _chai_log(message.from_user.id, "لوگوی بنر کانال حذف شد" if removed else "حذف لوگو: لوگویی ثبت نشده بود")
+            await state.clear()
+            await _show_chai(message, edit=False)
+            return
+        if message.photo:
+            file_id, size = message.photo[-1].file_id, message.photo[-1].file_size or 0
+        elif message.document and (message.document.mime_type or "").startswith("image/"):
+            file_id, size = message.document.file_id, message.document.file_size or 0
+        else:
+            await message.answer("⚠️ فقط فایل تصویری (PNG یا JPG) قابل قبول است.", reply_markup=_chai_back_kb())
+            return
+        if size > 5 * 1024 * 1024:
+            await message.answer("⚠️ حجم لوگو بیش از ۵ مگابایت است.", reply_markup=_chai_back_kb())
+            return
+        buf = io.BytesIO()
+        try:
+            await bot.download(file_id, destination=buf)
+            await asyncio.to_thread(channel_ai.save_logo, buf.getvalue())
+        except Exception as exc:
+            _log.warning("ذخیره‌ی لوگوی بنر ناموفق بود: %s", exc)
+            await message.answer("❌ این فایل به‌عنوان تصویر خوانده نشد: " + html.escape(str(exc)[:150]), reply_markup=_chai_back_kb())
+            return
+        await _chai_log(message.from_user.id, "لوگوی بنر کانال ذخیره شد")
+        await state.clear()
+        await _show_chai(message, edit=False)
+
+    def _learn_text() -> str:
+        items = channel_ai.learning_examples(db, channel_ai.LEARNING_LIMIT)
+        lines = [
+            "🧠 <b>یادگیری AI پست کانال</b>",
+            "هوش مصنوعی فقط از پست‌هایی یاد می‌گیرد که تو بعد از بررسی تأیید و به کانال فرستادی. "
+            "پیش‌نویس‌ها، نسخه‌های ردشده و پست‌های دستی یاد گرفته نمی‌شوند.",
+            "",
+            f"تعداد پست‌های یادگرفته‌شده: <b>{len(items)}</b> از {channel_ai.LEARNING_LIMIT}",
+        ]
+        if items:
+            lines.append("\n<b>آخرین پست‌های تأییدشده:</b>")
+            for item in reversed(items[-5:]):
+                preview = (item.get("caption") or "").replace("\n", " ")[:70]
+                lines.append(f"• {html.escape(item.get('angle') or '—')}: {html.escape(preview)}…")
+        else:
+            lines.append("هنوز پستی تأیید نشده است.")
+        return "\n".join(lines)
+
+    def _learn_kb(confirm: bool = False) -> InlineKeyboardMarkup:
+        if confirm:
+            return _kb([("✅ بله، پاک کن", "adm_chai_learn_clear_ok")], [("⬅️ انصراف", "adm_chai_learn")])
+        return _kb([("🗑 پاک‌سازی یادگیری", "adm_chai_learn_clear")], [("⬅️ بازگشت", "adm_chai")])
+
+    async def _show_learn(call: CallbackQuery, confirm: bool = False):
+        try:
+            await call.message.edit_text(_learn_text(), reply_markup=_learn_kb(confirm))
+        except Exception:
+            await call.message.answer(_learn_text(), reply_markup=_learn_kb(confirm))
+
+    @router.callback_query(F.data == "adm_chai_learn")
+    async def cb_chai_learn(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        modes = channel_ai.IMAGE_MODES
-        new = modes[(modes.index(channel_ai.image_mode(db)) + 1) % len(modes)]
-        await asyncio.to_thread(db.set_setting, "channel_image_provider", new)
-        await _chai_log(call.from_user.id, f"مسیر تصویر کانال: {new}")
-        await _show_chai(call.message)
+        await state.clear()
+        await _show_learn(call)
         await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_learn_clear")
+    async def cb_chai_learn_clear(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await _show_learn(call, confirm=True)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_learn_clear_ok")
+    async def cb_chai_learn_clear_ok(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await asyncio.to_thread(channel_ai.clear_learning, db)
+        await _chai_log(call.from_user.id, "یادگیری AI پست کانال پاک شد")
+        await _show_learn(call)
+        await call.answer("یادگیری پاک شد.")
 
     @router.callback_query(F.data == "adm_chai_key")
     async def cb_chai_key(call: CallbackQuery, state: FSMContext):

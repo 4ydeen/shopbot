@@ -280,6 +280,7 @@ class AdminCampaign(StatesGroup):
     waiting_goal = State()
     choosing = State()
     waiting_photo = State()
+    waiting_banner_colors = State()
     waiting_channel = State()
     confirming = State()
     waiting_manual_caption = State()
@@ -301,6 +302,7 @@ class AdminChannelAI(StatesGroup):
     waiting_key = State()
     waiting_text_model = State()
     waiting_image_model = State()
+    waiting_logo = State()
 
 
 class AdminChannelEngage(StatesGroup):

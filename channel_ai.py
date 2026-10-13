@@ -1,49 +1,48 @@
 # -*- coding: utf-8 -*-
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
-"""ایجنت‌های متن و تصویر مخصوص پست کانال (Jarvis + پشتیبان)، جدا از ایجنت‌های پشتیبانی و ادمین."""
+"""ایجنت‌های متن و تصویر پست کانال. فقط از Jarvis استفاده می‌کند (دو مدل: یکی متن، یکی تصویر).
+
+ایجنت‌های پشتیبانی، دستیار ادمین و بقیه‌ی بخش‌ها هیچ تأثیری روی این فایل ندارند."""
 
 import asyncio
 import base64
 import io
 import json
 import logging
+import os
 import re
+from datetime import datetime
 
 import aiohttp
 
 import ai_support
 import config
+import post_image
 
 _log = logging.getLogger("channel_ai")
 
 JARVIS_BASE_URL = "https://api.jarvis.you/v1"
 JARVIS_TEXT_MODEL = "CLAUDE_6_5_HAIKU"
 JARVIS_IMAGE_MODEL = "gemini-3-1-flash-image"
-TEXT_MODES = ("auto", "jarvis", "shared")
-IMAGE_MODES = ("auto", "jarvis", "gemini")
-TEXT_MODE_LABELS = {
-    "auto": "🤖 خودکار (اول Jarvis، بعد ایجنت‌های مشترک)",
-    "jarvis": "🧠 فقط Jarvis",
-    "shared": "🔁 فقط ایجنت‌های مشترک دستیار هوشمند",
-}
-IMAGE_MODE_LABELS = {
-    "auto": "🤖 خودکار (اول Jarvis، بعد Gemini)",
-    "jarvis": "🧠 فقط Jarvis",
-    "gemini": "🔷 فقط Gemini",
-}
-IMAGE_STYLE = (
-    "Premium 3D render, glossy glassmorphism and brushed-metal materials, one clear hero object as focal point, "
-    "isometric cinematic composition, volumetric rim lighting, soft neon glow, floating particles, "
-    "shallow depth of field, rich dark gradient background, ultra detailed, 16:9 wide. "
-    "Absolutely no text, no letters, no numbers, no logos, no watermark, no people, no real brand names."
-)
+CHANNEL_LOGO_PATH = os.path.join(config.BASE_DIR, "channel_banner_logo.png")
+LEARNING_KEY = "channel_ai_learning"
+LEARNING_LIMIT = 40
+LEARNING_IN_PROMPT = 8
+COLORS_KEY = "channel_banner_colors"
 DEFAULT_IMAGE_PROMPT = "A glowing shield and a fast rocket over a futuristic network of light, symbolizing private fast internet"
+BANNER_RULES = (
+    "Style: premium modern advertising banner, glossy gradients, soft glow, floating sparkles and subtle "
+    "internet and security icons, strong contrast so every text is easy to read. "
+    "All text must be in Persian (Farsi), right-to-left, spelled exactly as written in quotes, large bold readable font, "
+    "no extra letters and no garbled characters. "
+    "Keep every text element inside the central safe area with at least 10 percent margin from all edges. "
+    "Do not add any other text: no English words, no watermark, no QR code, no real brand names, no logos, no human faces."
+)
 
 _NON_TEXT = ("embed", "image", "tts", "whisper", "audio", "moderation", "rerank", "video")
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 _TEXT_TIMEOUT = 300
 _RETRY_SUFFIX = "\n\nپاسخ قبلی JSON معتبر نبود. فقط و فقط یک آبجکت JSON معتبر بده؛ بدون توضیح و بدون ```."
-_gemini_image_cache = {}
 _semaphore_obj = None
 
 
@@ -56,7 +55,6 @@ def _semaphore():
     if _semaphore_obj is None:
         _semaphore_obj = asyncio.Semaphore(2)
     return _semaphore_obj
-#‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 
 def _err(exc) -> str:
@@ -89,32 +87,12 @@ def jarvis_image_size(db) -> str:
     return ai_support._setting(db, "jarvis_image_size")
 
 
-def gemini_image_model(db) -> str:
-    return ai_support._setting(db, "gemini_image_model", "auto") or "auto"
-
-
-def text_mode(db) -> str:
-    mode = ai_support._setting(db, "channel_text_provider", "auto")
-    return mode if mode in TEXT_MODES else "auto"
-
-
-def image_mode(db) -> str:
-    mode = ai_support._setting(db, "channel_image_provider", "auto")
-    return mode if mode in IMAGE_MODES else "auto"
-
-
 def text_configured(db) -> bool:
-    mode = text_mode(db)
-    if mode in ("auto", "jarvis") and jarvis_keys(db):
-        return True
-    return mode in ("auto", "shared") and ai_support.is_configured(db)
+    return bool(jarvis_keys(db))
 
 
 def image_configured(db) -> bool:
-    mode = image_mode(db)
-    if mode in ("auto", "jarvis") and jarvis_keys(db):
-        return True
-    return mode in ("auto", "gemini") and bool(ai_support.resolve_gemini_keys(db))
+    return bool(jarvis_keys(db))
 
 
 async def _request(method: str, url: str, headers: dict = None, payload: dict = None, timeout: int = 90, raw: bool = False):
@@ -176,27 +154,14 @@ async def _jarvis_json(db, system_prompt: str, user_text: str) -> dict:
 
 
 async def ask_json(db, system_prompt: str, user_text: str) -> tuple:
-    """(داده، منبع) از مدل متن کانال؛ بر اساس مسیر تنظیم‌شده Jarvis و/یا ایجنت‌های مشترک."""
-    mode = text_mode(db)
-    errors = []
-    if mode in ("auto", "jarvis"):
-        if jarvis_keys(db):
-            try:
-                return await _jarvis_json(db, system_prompt, user_text), f"jarvis/{jarvis_text_model(db)}"
-            except Exception as exc:
-                errors.append(_err(exc))
-                _log.warning("channel text via jarvis failed: %s", _err(exc)[:200])
-        else:
-            errors.append("کلید Jarvis تنظیم نشده")
-        if mode == "jarvis":
-            raise ChannelAIError("؛ ".join(errors))
-    if mode in ("auto", "shared") and await asyncio.to_thread(ai_support.is_configured, db):
-        import ai_text
-        try:
-            return await ai_text.generate_json(db, system_prompt, user_text), "shared"
-        except Exception as exc:
-            errors.append(_err(exc))
-    raise ChannelAIError("؛ ".join(errors) or "مدل متن کانال تنظیم نشده")
+    """(داده، منبع) از مدل متن Jarvis. فقط Jarvis؛ اگر کار نکرد خطای قابل نمایش می‌دهد."""
+    if not jarvis_keys(db):
+        raise ChannelAIError("کلید Jarvis تنظیم نشده")
+    try:
+        return await _jarvis_json(db, system_prompt, user_text), f"jarvis/{jarvis_text_model(db)}"
+    except Exception as exc:
+        _log.warning("channel text via jarvis failed: %s", _err(exc)[:200])
+        raise ChannelAIError(_err(exc)) from exc
 
 
 async def generate_json(db, system_prompt: str, user_text: str) -> dict:
@@ -235,60 +200,6 @@ async def _jarvis_image(db, prompt: str) -> bytes:
     raise ChannelAIError(f"jarvis/{model}: {_err(last)}")
 
 
-def _version_key(name: str) -> tuple:
-    nums = re.findall(r"\d+(?:\.\d+)?", name)
-    return (float(nums[0]) if nums else 0.0, "preview" not in name, "latest" not in name)
-
-
-async def _gemini_image_model_pick(key: str, configured: str, force: bool = False) -> str:
-    if configured not in ("", "auto") and not force:
-        return configured
-    if "m" in _gemini_image_cache and not force:
-        return _gemini_image_cache["m"]
-    data = await _request(
-        "GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
-        headers={"x-goog-api-key": key}, timeout=30,
-    )
-    names = []
-    for item in data.get("models", []):
-        name = str(item.get("name", "")).removeprefix("models/")
-        if name.startswith("gemini") and "image" in name and "generateContent" in item.get("supportedGenerationMethods", []):
-            names.append(name)
-    pool = [n for n in names if "flash" in n] or names
-    if not pool:
-        raise ChannelAIError("مدل تصویر Gemini پیدا نشد")
-    _gemini_image_cache["m"] = max(pool, key=_version_key)
-    return _gemini_image_cache["m"]
-
-
-async def _gemini_image(db, prompt: str) -> bytes:
-    keys = ai_support.resolve_gemini_keys(db)
-    if not keys:
-        raise ChannelAIError("کلید Gemini تنظیم نشده")
-    configured = gemini_image_model(db)
-    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"responseModalities": ["IMAGE"]}}
-    last = None
-    for key in keys:
-        try:
-            model = await _gemini_image_model_pick(key, configured)
-            url = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent"
-            try:
-                data = await _request("POST", url.format(model), headers={"x-goog-api-key": key}, payload=payload, timeout=120)
-            except ChannelAIError as exc:
-                if "HTTP 404" not in str(exc) or configured not in ("", "auto"):
-                    raise
-                model = await _gemini_image_model_pick(key, configured, force=True)
-                data = await _request("POST", url.format(model), headers={"x-goog-api-key": key}, payload=payload, timeout=120)
-            for part in data["candidates"][0]["content"]["parts"]:
-                blob = part.get("inlineData") or part.get("inline_data")
-                if blob and blob.get("data"):
-                    return base64.b64decode(blob["data"])
-            raise ChannelAIError("پاسخ Gemini تصویر نداشت")
-        except Exception as exc:
-            last = exc
-    raise ChannelAIError(f"gemini: {_err(last)}")
-
-
 def _normalize(raw: bytes) -> bytes:
     from PIL import Image
     img = Image.open(io.BytesIO(raw)).convert("RGB")
@@ -298,26 +209,115 @@ def _normalize(raw: bytes) -> bytes:
     return out.getvalue()
 
 
-async def generate_image(db, image_prompt: str) -> tuple:
-    """(بایت JPEG، منبع) از مدل تصویر کانال؛ مستقل از مدل متن. اگر هیچ مسیری موفق نشد ChannelAIError."""
-    mode = image_mode(db)
-    prompt = f"{(image_prompt or DEFAULT_IMAGE_PROMPT).strip()}. {IMAGE_STYLE}"
-    routes = []
-    if mode in ("auto", "jarvis") and jarvis_keys(db):
-        routes.append(("jarvis", f"jarvis/{jarvis_image_model(db)}", _jarvis_image))
-    if mode in ("auto", "gemini") and ai_support.resolve_gemini_keys(db):
-        routes.append(("gemini", "gemini", _gemini_image))
-    if not routes:
-        raise ChannelAIError("مدل تصویر کانال تنظیم نشده (کلید Jarvis یا Gemini لازم است)")
-    errors = []
-    for _name, label, fn in routes:
-        try:
-            raw = await fn(db, prompt)
-            return await asyncio.to_thread(_normalize, raw), label
-        except Exception as exc:
-            errors.append(_err(exc))
-            _log.warning("channel image via %s failed: %s", label, _err(exc)[:200])
-    raise ChannelAIError("؛ ".join(errors))
+def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "") -> str:
+    """پرامپت بنر فارسی. متن‌ها عیناً داخل پرامپت می‌آیند تا مدل تصویر خودش آن‌ها را فارسی بکشد."""
+    overlay = overlay or {}
+    texts = []
+    if overlay.get("title"):
+        texts.append(f"headline «{overlay['title']}»")
+    if overlay.get("price_toman"):
+        texts.append(f"price «{post_image.fa_number(overlay['price_toman'])} تومان»")
+    badge = post_image._badge_text(overlay)
+    if badge:
+        texts.append(f"discount badge «{badge}»")
+    palette = (colors or "").strip()[:150] or "a modern harmonious palette that suits the scene"
+    parts = [
+        "Design a Persian advertising banner for a fast and private VPN internet service.",
+        ("Persian texts to render exactly: " + "; ".join(texts) + ".") if texts else "",
+        f"Brand colors requested by the admin: {palette}.",
+        f"Scene and mood: {(scene or '').strip()[:300] or DEFAULT_IMAGE_PROMPT}.",
+        BANNER_RULES,
+    ]
+    return " ".join(p for p in parts if p)
+
+
+async def generate_image(db, prompt: str) -> tuple:
+    """(بایت JPEG، منبع) از مدل تصویر Jarvis. prompt خالی یعنی بنر نمونه برای تست."""
+    if not jarvis_keys(db):
+        raise ChannelAIError("کلید Jarvis تنظیم نشده")
+    prompt = (prompt or "").strip() or build_banner_prompt({"title": "پروکسی امن و سریع", "price_toman": 250000, "discount_percent": 20})
+    try:
+        raw = await _jarvis_image(db, prompt)
+        return await asyncio.to_thread(_normalize, raw), f"jarvis/{jarvis_image_model(db)}"
+    except Exception as exc:
+        _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
+        raise ChannelAIError(_err(exc)) from exc
+
+
+def has_logo() -> bool:
+    return os.path.isfile(CHANNEL_LOGO_PATH)
+
+
+def save_logo(raw: bytes) -> None:
+    from PIL import Image
+    with Image.open(io.BytesIO(raw)) as img:
+        mark = img.convert("RGBA")
+    mark.thumbnail((800, 800), Image.LANCZOS)
+    mark.save(CHANNEL_LOGO_PATH, "PNG")
+
+
+def remove_logo() -> bool:
+    if os.path.isfile(CHANNEL_LOGO_PATH):
+        os.remove(CHANNEL_LOGO_PATH)
+        return True
+    return False
+
+
+def compose_banner(raw: bytes, size: str) -> bytes:
+    """تصویر AI را به اندازه‌ی انتخابی می‌برد و لوگوی اختصاصی این بخش را بالا-راست می‌گذارد."""
+    from PIL import Image
+    jpeg = post_image.render(raw, None, size)
+    if not has_logo():
+        return jpeg
+    base = Image.open(io.BytesIO(jpeg)).convert("RGBA")
+    with Image.open(CHANNEL_LOGO_PATH) as logo_file:
+        mark = logo_file.convert("RGBA")
+    width, height = base.size
+    mark.thumbnail((int(width * 0.22), int(height * 0.14)), Image.LANCZOS)
+    margin = int(width * 0.05)
+    base.alpha_composite(mark, (width - mark.width - margin, margin))
+    out = io.BytesIO()
+    base.convert("RGB").save(out, "JPEG", quality=92)
+    return out.getvalue()
+
+
+def saved_colors(db) -> str:
+    return ai_support._setting(db, COLORS_KEY)
+
+
+def save_colors(db, value: str) -> None:
+    db.set_setting(COLORS_KEY, (value or "").strip()[:150])
+
+
+def _load_learning(db) -> list:
+    try:
+        data = json.loads(db.get_setting(LEARNING_KEY, "[]") or "[]")
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def learning_examples(db, limit: int = LEARNING_IN_PROMPT) -> list:
+    """آخرین پست‌های تأییدشده (قدیمی به جدید)."""
+    return _load_learning(db)[-limit:]
+
+
+def record_approved(db, variant: dict, goal: str = "") -> None:
+    """فقط وقتی ادمین پست را تأیید و به کانال فرستاد صدا زده می‌شود؛ پیش‌نویس و نسخه‌های ردشده یاد گرفته نمی‌شوند."""
+    items = _load_learning(db)
+    items.append({
+        "angle": str(variant.get("angle") or "")[:80],
+        "caption": str(variant.get("caption") or "")[:600],
+        "button_text": str(variant.get("button_text") or "")[:64],
+        "link_type": str((variant.get("deeplink") or {}).get("type") or "none"),
+        "goal": (goal or "")[:200],
+        "approved_at": datetime.now().isoformat(timespec="minutes"),
+    })
+    db.set_setting(LEARNING_KEY, json.dumps(items[-LEARNING_LIMIT:], ensure_ascii=False))
+
+
+def clear_learning(db) -> None:
+    db.set_setting(LEARNING_KEY, "[]")
 
 
 async def list_jarvis_models(db) -> tuple:
@@ -341,4 +341,3 @@ async def check_jarvis_key(base: str, key: str) -> tuple:
         text = _err(exc)
         return ("HTTP 401" not in text and "HTTP 403" not in text), text
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
-# 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 
