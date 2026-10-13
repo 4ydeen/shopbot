@@ -55,6 +55,7 @@ from i18n import (
     start_missing_tracking, stop_missing_tracking, pop_missing_lookups, merge_language_catalog,
 )
 from broadcast_i18n import send_scheduled_broadcast
+from channel_post_scheduler import channel_post_loop
 
 logger = logging.getLogger(__name__)
 
@@ -468,6 +469,7 @@ class BotManager:
         panel_health_task = asyncio.create_task(panel_health_loop(bot, db)) if is_main_bot else None
         daily_report_task = asyncio.create_task(daily_report_loop(bot, db))
         scheduled_broadcast_task = asyncio.create_task(scheduled_broadcast_loop(bot, db))
+        channel_post_task = asyncio.create_task(channel_post_loop(bot, db))
         cleanup_task = asyncio.create_task(cleanup_loop(bot, db))
         lottery_task = asyncio.create_task(lottery_loop(bot, db))
         reseller_expiry_task = asyncio.create_task(db.reseller_expiry_loop(bot))
@@ -479,7 +481,7 @@ class BotManager:
             "backup_task": backup_task, "cache_refresh_task": cache_refresh_task,
             "temp_msg_task": temp_msg_task, "extra_gateway_task": extra_gateway_task,
             "panel_health_task": panel_health_task, "daily_report_task": daily_report_task,
-            "scheduled_broadcast_task": scheduled_broadcast_task,
+            "scheduled_broadcast_task": scheduled_broadcast_task, "channel_post_task": channel_post_task,
             "cleanup_task": cleanup_task, "lottery_task": lottery_task,
             "reseller_expiry_task": reseller_expiry_task, "signup_gift_task": signup_gift_task,
             "db_path": db_path,
@@ -489,7 +491,7 @@ class BotManager:
 
     _STOP_TASK_KEYS = (
         "reminder_task", "connect_alert_task", "churn_offer_task", "backup_task",
-        "scheduled_broadcast_task", "cache_refresh_task", "temp_msg_task",
+        "scheduled_broadcast_task", "channel_post_task", "cache_refresh_task", "temp_msg_task",
         "extra_gateway_task", "panel_health_task", "daily_report_task",
         "cleanup_task", "lottery_task", "reseller_expiry_task", "signup_gift_task",
     )

@@ -11,11 +11,12 @@ from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+import admin_channel_posts
 import campaign_ai
 import channel_ai
 from i18n import tr
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
-from states import AdminCampaign, AdminChannelAI
+from states import AdminCampaign, AdminChannelAI, AdminChannelPost
 
 _log = logging.getLogger("admin_campaign")
 _BACK = "adm_deeplink_tools"
@@ -45,19 +46,11 @@ def _variant_text(index: int, v: dict) -> str:
 
 def register(router: Router, db, senior_admin_only, deny_mid):
 
-    async def _post_markup(bot: Bot, data: dict) -> InlineKeyboardMarkup:
-        me = await bot.get_me()
-        param = campaign_ai.start_param_for(data["variant"]["deeplink"])
-        url = f"https://t.me/{me.username}?start={param}" if param else f"https://t.me/{me.username}"
-        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=data["variant"]["button_text"], url=url)]])
-
     async def _send_post(bot: Bot, chat_id, data: dict):
-        caption = html.escape(data["variant"]["caption"])
-        markup = await _post_markup(bot, data)
-        if data.get("photo_id"):
-            await bot.send_photo(chat_id=chat_id, photo=data["photo_id"], caption=caption, reply_markup=markup)
-        else:
-            await bot.send_message(chat_id=chat_id, text=caption, reply_markup=markup)
+        variant = data["variant"]
+        return await admin_channel_posts.deliver(
+            bot, chat_id, variant["caption"], variant["button_text"], variant["deeplink"], data.get("photo_id"),
+        )
 
     async def _generate_and_show(target: Message, state: FSMContext, goal: str):
         status = await target.answer("⏳ در حال تولید نسخه‌ها با AI از روی محصولات و کدهای تخفیف واقعی...")
@@ -404,7 +397,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await target.answer(
             "این پست به کانال ارسال شود؟",
             reply_markup=_kb(
-                [("📣 ارسال به کانال", "adm_camp_send")],
+                [("📣 ارسال به کانال", "adm_camp_send"), ("💾 ذخیره پیش‌نویس", "adm_camp_draft"), ("⏰ زمان‌بندی", "adm_camp_sched")],
                 *image_rows,
                 [("📢 تغییر کانال", "adm_camp_channel")] + ([] if data["variant"].get("manual") else [("🔄 نسخه‌ی دیگر", "adm_camp_regen")]),
                 [("❌ لغو", "adm_camp_cancel")],
@@ -420,20 +413,59 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await call.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", show_alert=True)
             return
         await state.clear()
-        try:
-            await _send_post(bot, data["channel_id"], data)
-        except Exception as exc:
+        post_id = await asyncio.to_thread(admin_channel_posts.create_from_data, db, call.from_user.id, data)
+        ok, error = await admin_channel_posts.publish_record(bot, db, post_id)
+        if not ok:
             await call.message.answer(
-                "❌ ارسال به کانال ناموفق بود: " + html.escape(str(exc)) + "\n(احتمالاً بات ادمین کانال نیست یا دسترسی ارسال پیام ندارد)",
-                reply_markup=_kb([("⬅️ بازگشت", _BACK)]),
+                "❌ ارسال به کانال ناموفق بود: " + html.escape(error) + "\n(احتمالاً بات ادمین کانال نیست یا دسترسی ارسال پیام ندارد)\n"
+                f"پست به‌صورت #{post_id} با وضعیت خطا ذخیره شد.",
+                reply_markup=_kb([("🔄 تلاش دوباره", f"adm_cpost_send:{post_id}")], [("⬅️ بازگشت", _BACK)]),
             )
             await call.answer()
             return
         param = campaign_ai.start_param_for(data["variant"]["deeplink"]) or "-"
         await asyncio.to_thread(
             db.log_admin_action, call.from_user.id, "ai_channel_post", f"پست کانال با AI ارسال شد | دیپ‌لینک: {param}",
+            "channel_post", post_id,
         )
-        await call.message.answer("✅ پست در کانال ارسال شد.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
+        await call.message.answer(
+            f"✅ پست در کانال ارسال شد (#{post_id}).",
+            reply_markup=_kb([("🗂 مدیریت این پست", f"adm_cpost_view:{post_id}")], [("⬅️ بازگشت", _BACK)]),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_camp_draft")
+    async def cb_draft(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        data = await state.get_data()
+        if not data.get("variant") or not data.get("channel_id"):
+            await call.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", show_alert=True)
+            return
+        await state.clear()
+        post_id = await asyncio.to_thread(admin_channel_posts.create_from_data, db, call.from_user.id, data)
+        await call.message.answer(
+            f"💾 پیش‌نویس ذخیره شد (#{post_id}).",
+            reply_markup=_kb([("🗂 مدیریت این پست", f"adm_cpost_view:{post_id}")], [("⬅️ بازگشت", _BACK)]),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_camp_sched")
+    async def cb_sched(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        data = await state.get_data()
+        if not data.get("variant") or not data.get("channel_id"):
+            await call.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", show_alert=True)
+            return
+        post_id = await asyncio.to_thread(admin_channel_posts.create_from_data, db, call.from_user.id, data)
+        await state.clear()
+        await state.set_state(AdminChannelPost.waiting_schedule)
+        await state.update_data(cpost_id=post_id)
+        await call.message.answer(
+            admin_channel_posts.SCHEDULE_PROMPT,
+            reply_markup=_kb([("❌ لغو (ذخیره به‌عنوان پیش‌نویس)", f"adm_cpost_view:{post_id}")]),
+        )
         await call.answer()
 
     def _chai_text() -> str:

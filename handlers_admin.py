@@ -56,6 +56,8 @@ import admin_help
 import ai_media
 import admin_tools
 import admin_campaign
+import admin_channel_plan
+import admin_channel_posts
 import bulk_gifts
 import report_router
 from test_config_provision import format_plan_amount
@@ -15125,6 +15127,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     )
 
     admin_campaign.register(router, db, senior_admin_only, deny_mid)
+    admin_channel_posts.register(router, db, senior_admin_only, deny_mid)
+    admin_channel_plan.register(router, db, senior_admin_only, deny_mid)
 
     extra_gateway_admin.register(
         router, db, is_main_bot, admin_only, full_admin_only, deny_support, replace_admin_view,

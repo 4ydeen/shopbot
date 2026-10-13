@@ -1650,6 +1650,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
     ("adm_deeplink_tools", "🔗 دیپ‌لینک و پست کانال", "adm_deeplink_tools"),
     ("adm_camp_start", "🤖 ساخت پست کانال با AI", "adm_camp_start"),
+    ("adm_cposts", "🗂 مدیریت پست‌های کانال", "adm_cposts"),
     ("adm_stats", "📊 آمار فروش", "adm_stats"),
     ("adm_user_search", "👥 مدیریت کاربران", "adm_stats_user"),
     ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
@@ -1729,6 +1730,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_broadcast",
         "adm_deeplink_tools",
         "adm_camp_start",
+        "adm_cposts",
         "adm_forcejoin_menu",
         "adm_terms_menu",
         "adm_temp_message",
@@ -2548,6 +2550,7 @@ def deeplink_tools_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=tr("🔗 ساخت دیپ‌لینک تبلیغاتی"), callback_data="adm_dl_build")],
         [InlineKeyboardButton(text=tr("🤖 ساخت پست کانال با AI"), callback_data="adm_camp_start")],
+        [InlineKeyboardButton(text=tr("🗂 مدیریت پست‌های کانال"), callback_data="adm_cposts")],
         [InlineKeyboardButton(text=tr("⚙️ مدل‌های AI کانال"), callback_data="adm_chai")],
         [InlineKeyboardButton(text=tr("🖼 افزودن دکمه به پست کانال"), callback_data="adm_dl_addbtn")],
         [InlineKeyboardButton(text=tr("📋 پارامترهای اصلی منوی کاربر"), callback_data="adm_dl_params_list")],

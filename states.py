@@ -288,6 +288,15 @@ class AdminCampaign(StatesGroup):
     waiting_manual_value = State()
 
 
+class AdminChannelPost(StatesGroup):
+    waiting_value = State()
+    waiting_schedule = State()
+
+
+class AdminChannelPlan(StatesGroup):
+    confirming = State()
+
+
 class AdminChannelAI(StatesGroup):
     waiting_key = State()
     waiting_text_model = State()

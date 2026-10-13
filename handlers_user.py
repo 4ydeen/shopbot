@@ -69,6 +69,9 @@ from test_config_provision import provision_test_plan, format_plan_amount, Provi
 from i18n import set_language, reset_language, language_label, normalize_language, is_language_enabled, tr
 
 
+_CHANNEL_POST_TOKEN = re.compile(r"cp\d{1,9}")
+
+
 async def _send_admin_notification(bot, admin_id, send_coro_factory, context_label: str, ref_id: int):
     """ارسال اعلان به یک ادمین با تلاش مجدد در برابر flood-limit و خطای شبکه.
     دلیل عدم دریافت نوتیف توسط ادمین (بلاک بودن ربات، فایل نامعتبر و ...) به‌صورت
@@ -700,7 +703,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
 
         # طبق تصمیم صریح: ورود با هر دیپ‌لینکی (نه فقط nofj) یعنی معافیت دائمی
         # از عضویت اجباری برای همین کاربر.
-        if start_param:
+        if any(not _CHANNEL_POST_TOKEN.fullmatch(t) for t in start_param.split("-") if t):
             (await asyncio.to_thread(db.set_force_join_exempt, message.from_user.id))
 
         for token in filter(None, start_param.split("-")):
@@ -750,6 +753,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     post_start_actions.append(f"__open_product__:{int(prod_part)}")
             elif token == "nofj":
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
+            elif _CHANNEL_POST_TOKEN.fullmatch(token):
+                (await asyncio.to_thread(db.record_channel_post_click, int(token[2:]), message.from_user.id))
             elif token:
                 (await asyncio.to_thread(db.set_acquisition_source, message.from_user.id, token))
 
