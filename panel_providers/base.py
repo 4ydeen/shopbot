@@ -94,7 +94,8 @@ class BasePanelProvider(ABC):
 
     @abstractmethod
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
-                           reset_usage: bool = False, preserve_remaining: bool = False) -> PanelUserResult:
+                           reset_usage: bool = False, preserve_remaining: bool = False,
+                           unlimited_volume: bool = False) -> PanelUserResult:
         """حجم/انقضای یک کاربر موجود روی پنل را برای «تمدید سرویس» افزایش می‌دهد.
         add_volume_gb/add_days روی مقدار فعلی جمع می‌شوند (نه جایگزین آن).
         اگر انقضای فعلی گذشته باشد، مبنای محاسبه‌ی انقضای جدید «اکنون» است، نه

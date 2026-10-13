@@ -379,6 +379,7 @@ class ThreeXUIProvider(BasePanelProvider):
 
     async def update_user(self, username: str, add_volume_gb: float = 0, add_days: int = 0,
                            reset_usage: bool = False, preserve_remaining: bool = False,
+                           unlimited_volume: bool = False,
                            user_limit: int = None) -> PanelUserResult:
         sub_base_url = self.server["xui_sub_base_url"]
         used_bytes = 0
@@ -410,7 +411,9 @@ class ThreeXUIProvider(BasePanelProvider):
                 # دستی)، حجم باقیمانده‌ی مصرف‌نشده (بر اساس مصرف واقعی خوانده‌شده از traffic‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 # endpoint) حفظ و بستهٔ جدید رویش اضافه می‌شود. تمدید «افزایشی»
                 # (reset_usage=False) همیشه روی سقف قبلی جمع می‌زند.
-                if reset_usage and preserve_remaining:
+                if unlimited_volume:
+                    new_total = 0  # 0 = نامحدود
+                elif reset_usage and preserve_remaining:
                     remaining = max(int(client.get("totalGB") or 0) - int(used_bytes or 0), 0)
                     new_total = remaining + int(add_volume_gb * (1024 ** 3))
                 elif add_volume_gb:
