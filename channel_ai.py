@@ -30,16 +30,41 @@ LEARNING_LIMIT = 40
 LEARNING_IN_PROMPT = 8
 COLORS_KEY = "channel_banner_colors"
 BANNER_BASE_PROMPT_KEY = "channel_banner_base_prompt"
-DEFAULT_BANNER_BASE_PROMPT = "بنر تبلیغاتی حرفه‌ای، پرانرژی و سینمایی برای برند VPN؛ کنتراست بالا، نورپردازی نئونی آبی و بنفش، عمق سه‌بعدی، ترکیب‌بندی پویا و سلسله‌مراتب بصری واضح. لوگوی مرجع را بدون تغییر حفظ کن و برای تیتر فارسی فضای خوانا در نظر بگیر."
+LOGO_MODE_KEY = "channel_banner_logo_mode"
+LOGO_MODES = ("exact", "ai")
+DEFAULT_BANNER_BASE_PROMPT = (
+    "Premium cinematic advertising banner for a VPN brand, finished like a top ad-agency poster. "
+    "Deep dark-navy base with vivid electric-blue and violet neon lighting, strong rim light, volumetric glow and glossy 3D depth. "
+    "One clear focal subject (shield, smartphone showing a connected VPN screen, or a glowing globe network) on one side, "
+    "dynamic diagonal composition, rich layered background with light trails and soft particles. "
+    "Strict visual hierarchy: huge headline first, then product and price, then discount badge, then call to action. "
+    "Typography: bold modern Persian font, very large, high contrast, subtle neon gradient on the key word, never tiny. "
+    "Light, color and effects must feel like one coherent scene, with nothing flat or pasted-looking. "
+    "Avoid generic stock-art look, clutter and random decoration. Vary composition, background and lighting between campaigns "
+    "while keeping the blue and violet brand feel."
+)
 DEFAULT_IMAGE_PROMPT = "A glowing shield and a fast rocket over a futuristic network of light, symbolizing private fast internet"
 BANNER_RULES = (
-    "Style: premium modern advertising banner, glossy gradients, soft glow, floating sparkles and subtle "
-    "internet and security icons, strong contrast so every text is easy to read. "
+    "Style: premium modern advertising banner, strong contrast so every text is easy to read on a phone screen. "
     "All text must be in Persian (Farsi), right-to-left, spelled exactly as written in quotes, large bold readable font, "
     "no extra letters and no garbled characters. "
     "Keep every text element inside the central safe area with at least 10 percent margin from all edges. "
-    "Do not add any other text: no English words, no watermark, no QR code, no real brand names, no logos, no human faces."
+    "Do not add any other text: no English words, no watermark, no QR code, no real brand names, no human faces."
 )
+LOGO_RULES = {
+    "exact": (
+        "MANDATORY LOGO AREA: do NOT draw, invent or imitate any logo, emblem, brand mark or app icon anywhere in the image. "
+        "Keep the top-left corner (a square of about 28 percent of the image width) as a calm, dark, uncluttered area with no text "
+        "and no important elements; the official logo is placed there afterwards. Keep the headline and key subjects out of that corner."
+    ),
+    "ai": (
+        "MANDATORY LOGO: the attached image is the official brand logo. Reproduce it EXACTLY: same icon, shapes, colors and lettering. "
+        "Never redraw, restyle, simplify, translate or crop it. Place it top-left inside a circular glowing badge (about 22 percent of "
+        "the image width) with a thin neon rim light matching the scene palette, integrated with the scene lighting but sharp and unchanged. "
+        "Keep the headline and key subjects away from the badge."
+    ),
+    "none": "Do not draw any logo, emblem, brand mark or app icon anywhere in the image.",
+}
 
 _NON_TEXT = ("embed", "image", "tts", "whisper", "audio", "moderation", "rerank", "video")
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -97,9 +122,9 @@ def image_configured(db) -> bool:
     return bool(jarvis_keys(db))
 
 
-async def _request(method: str, url: str, headers: dict = None, payload: dict = None, timeout: int = 90, raw: bool = False):
+async def _request(method: str, url: str, headers: dict = None, payload: dict = None, timeout: int = 90, raw: bool = False, form=None):
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout, connect=10)) as session:
-        async with session.request(method, url, headers=headers or {}, json=payload) as resp:
+        async with session.request(method, url, headers=headers or {}, json=payload, data=form) as resp:
             body = await resp.read()
             if resp.status >= 400:
                 text = body.decode("utf-8", "ignore")
@@ -170,7 +195,93 @@ async def generate_json(db, system_prompt: str, user_text: str) -> dict:
     return (await ask_json(db, system_prompt, user_text))[0]
 
 
-async def _jarvis_image(db, prompt: str) -> bytes:
+class _RefUnsupported(ChannelAIError):
+    """درگاه تصویر مرجع (لوگو) را نپذیرفت؛ باید بدون مرجع و با روش «لوگوی دقیق» ساخته شود."""
+
+
+_AUTH_CODES = ("HTTP 401", "HTTP 402", "HTTP 403")
+
+
+async def _extract_image(data: dict):
+    """بایت تصویر را از پاسخ images/generations یا chat/completions (قالب Gemini) بیرون می‌کشد؛ نبود تصویر None."""
+    item = (data.get("data") or [{}])[0] if isinstance(data.get("data"), list) else {}
+    if item.get("b64_json"):
+        return base64.b64decode(item["b64_json"])
+    if item.get("url"):
+        return await _request("GET", item["url"], timeout=60, raw=True)
+    message = ((data.get("choices") or [{}])[0] or {}).get("message") or {}
+    candidates = [(i.get("image_url") or {}).get("url") for i in (message.get("images") or []) if isinstance(i, dict)]
+    content = message.get("content")
+    if isinstance(content, list):
+        candidates += [(p.get("image_url") or {}).get("url") for p in content if isinstance(p, dict) and p.get("type") == "image_url"]
+    for url in candidates:
+        if not url:
+            continue
+        if url.startswith("data:") and "," in url:
+            return base64.b64decode(url.split(",", 1)[1])
+        if url.startswith("http"):
+            return await _request("GET", url, timeout=60, raw=True)
+    return None
+
+
+def _logo_reference_png() -> bytes:
+    """لوگوی ثبت‌شده را روی پس‌زمینه‌ی تیره می‌گذارد (شفافیت برای مدل سیاه/سفید خوانده می‌شود) و به‌صورت PNG مربعی برمی‌گرداند."""
+    from PIL import Image
+    with Image.open(CHANNEL_LOGO_PATH) as logo_file:
+        mark = logo_file.convert("RGBA")
+    mark.thumbnail((900, 900), Image.LANCZOS)
+    side = max(mark.size) + 120
+    canvas = Image.new("RGBA", (side, side), (8, 10, 30, 255))
+    canvas.alpha_composite(mark, ((side - mark.width) // 2, (side - mark.height) // 2))
+    out = io.BytesIO()
+    canvas.convert("RGB").save(out, "PNG")
+    return out.getvalue()
+
+
+async def _image_with_reference(db, key: str, model: str, prompt: str, reference: bytes) -> bytes:
+    """دو روش را امتحان می‌کند: images/edits (استاندارد OpenAI) و chat/completions تصویری (قالب Gemini)."""
+    import aiohttp as _aiohttp
+    headers = {"Authorization": f"Bearer {key}"}
+    last = None
+    try:
+        form = _aiohttp.FormData()
+        form.add_field("model", model)
+        form.add_field("prompt", prompt)
+        form.add_field("n", "1")
+        size = jarvis_image_size(db)
+        if size:
+            form.add_field("size", size)
+        form.add_field("image", reference, filename="logo.png", content_type="image/png")
+        data = await _request("POST", f"{jarvis_base(db)}/images/edits", headers=headers, timeout=180, form=form)
+        found = await _extract_image(data)
+        if found:
+            return found
+    except Exception as exc:
+        last = exc
+        if any(code in str(exc) for code in _AUTH_CODES):
+            raise
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(reference).decode()
+        payload = {
+            "model": model,
+            "modalities": ["image", "text"],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]}],
+        }
+        data = await _request("POST", f"{jarvis_base(db)}/chat/completions", headers=headers, payload=payload, timeout=180)
+        found = await _extract_image(data)
+        if found:
+            return found
+    except Exception as exc:
+        last = exc
+        if any(code in str(exc) for code in _AUTH_CODES):
+            raise
+    raise _RefUnsupported(_err(last) if last else "پاسخ بدون تصویر")
+
+
+async def _jarvis_image(db, prompt: str, reference: bytes = None) -> bytes:
     keys = jarvis_keys(db)
     if not keys:
         raise ChannelAIError("کلید Jarvis تنظیم نشده")
@@ -181,6 +292,15 @@ async def _jarvis_image(db, prompt: str) -> bytes:
         body["size"] = size
     last = None
     for key in keys:
+        if reference:
+            try:
+                async with _semaphore():
+                    return await _image_with_reference(db, key, model, prompt, reference)
+            except _RefUnsupported:
+                raise
+            except Exception as exc:
+                last = exc
+                continue
         for attempt in (1, 2):
             try:
                 async with _semaphore():
@@ -188,15 +308,13 @@ async def _jarvis_image(db, prompt: str) -> bytes:
                         "POST", f"{jarvis_base(db)}/images/generations",
                         headers={"Authorization": f"Bearer {key}"}, payload=body, timeout=180,
                     )
-                    item = (data.get("data") or [{}])[0]
-                    if item.get("b64_json"):
-                        return base64.b64decode(item["b64_json"])
-                    if item.get("url"):
-                        return await _request("GET", item["url"], timeout=60, raw=True)
+                    found = await _extract_image(data)
+                    if found:
+                        return found
                 raise ChannelAIError("پاسخ تصویر نه b64_json داشت و نه url")
             except Exception as exc:
                 last = exc
-                if any(code in str(exc) for code in ("HTTP 401", "HTTP 402", "HTTP 403")) or attempt == 2:
+                if any(code in str(exc) for code in _AUTH_CODES) or attempt == 2:
                     break
                 await asyncio.sleep(3)
     raise ChannelAIError(f"jarvis/{model}: {_err(last)}")
@@ -223,7 +341,7 @@ def save_banner_base_prompt(db, value: str) -> None:
     db.set_setting(BANNER_BASE_PROMPT_KEY, "" if value == "-" else value[:3000])
 
 
-def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "") -> str:
+def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "", logo_mode: str = "exact") -> str:
     """پرامپت بنر فارسی. متن‌ها عیناً داخل پرامپت می‌آیند تا مدل تصویر خودش آن‌ها را فارسی بکشد."""
     overlay = overlay or {}
     texts = []
@@ -242,6 +360,7 @@ def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_p
         f"Scene and mood: {(scene or '').strip()[:300] or DEFAULT_IMAGE_PROMPT}.",
         "CUSTOMIZABLE BASE PROMPT: " + ((base_prompt or "").strip()[:3000] or DEFAULT_BANNER_BASE_PROMPT),
         BANNER_RULES,
+        LOGO_RULES.get(logo_mode, LOGO_RULES["none"]),
     ]
     return " ".join(p for p in parts if p)
 
@@ -250,13 +369,53 @@ async def generate_image(db, prompt: str) -> tuple:
     """(بایت JPEG، منبع) از مدل تصویر Jarvis. prompt خالی یعنی بنر نمونه برای تست."""
     if not jarvis_keys(db):
         raise ChannelAIError("کلید Jarvis تنظیم نشده")
-    prompt = (prompt or "").strip() or build_banner_prompt({"title": "پروکسی امن و سریع", "price_toman": 250000, "discount_percent": 20})
+    prompt = (prompt or "").strip() or build_banner_prompt({"title": "پروکسی امن و سریع", "price_toman": 250000, "discount_percent": 20}, logo_mode="none")
     try:
         raw = await _jarvis_image(db, prompt)
         return await asyncio.to_thread(_normalize, raw), f"jarvis/{jarvis_image_model(db)}"
     except Exception as exc:
         _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
         raise ChannelAIError(_err(exc)) from exc
+
+
+def logo_mode(db) -> str:
+    """'exact': لوگوی اصلی با Pillow در نشان درخشان؛ 'ai': لوگو به‌عنوان تصویر مرجع به مدل داده می‌شود."""
+    value = (db.get_setting(LOGO_MODE_KEY, "exact") or "exact").strip()
+    return value if value in LOGO_MODES else "exact"
+
+
+def toggle_logo_mode(db) -> str:
+    new = "ai" if logo_mode(db) == "exact" else "exact"
+    db.set_setting(LOGO_MODE_KEY, new)
+    return new
+
+
+async def make_banner(db, overlay: dict, scene: str, colors: str, base_prompt: str) -> tuple:
+    """(بایت JPEG، منبع، حالت لوگوی واقعاً استفاده‌شده). اگر درگاه تصویر مرجع را نپذیرد خودکار به حالت «دقیق» برمی‌گردد."""
+    if not jarvis_keys(db):
+        raise ChannelAIError("کلید Jarvis تنظیم نشده")
+    wanted = logo_mode(db) if has_logo() else "none"
+    mode = wanted
+    raw = None
+    if wanted == "ai":
+        try:
+            reference = await asyncio.to_thread(_logo_reference_png)
+            prompt = build_banner_prompt(overlay, scene, colors, base_prompt, "ai")
+            raw = await _jarvis_image(db, prompt, reference)
+        except _RefUnsupported as exc:
+            _log.warning("jarvis image reference unsupported, falling back to exact logo mode: %s", _err(exc)[:200])
+            mode = "exact"
+        except Exception as exc:
+            _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
+            raise ChannelAIError(_err(exc)) from exc
+    if raw is None:
+        try:
+            raw = await _jarvis_image(db, build_banner_prompt(overlay, scene, colors, base_prompt, mode))
+        except Exception as exc:
+            _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
+            raise ChannelAIError(_err(exc)) from exc
+    source = f"jarvis/{jarvis_image_model(db)}" + (" + مرجع لوگو" if mode == "ai" else (" + لوگوی دقیق" if mode == "exact" else ""))
+    return await asyncio.to_thread(_normalize, raw), source, mode
 
 
 def has_logo() -> bool:
@@ -278,21 +437,108 @@ def remove_logo() -> bool:
     return False
 
 
-def compose_banner(raw: bytes, size: str) -> bytes:
-    """تصویر AI را به اندازه‌ی انتخابی می‌برد و لوگوی اختصاصی این بخش را بالا-راست می‌گذارد."""
-    from PIL import Image
+def _brand_accent(mark) -> tuple:
+    """پرجان‌ترین رنگ لوگو برای حلقه‌ی نورانی نشان؛ اگر رنگ شاخصی نبود آبی نئونی."""
+    small = mark.convert("RGBA").resize((48, 48))
+    scored = []
+    for r, g, b, a in small.getdata():
+        if a < 200:
+            continue
+        top = max(r, g, b)
+        scored.append((((top - min(r, g, b)) / (top or 1)) * (top / 255), (r, g, b)))
+    scored.sort(reverse=True)
+    best = scored[:max(1, len(scored) // 10)]
+    if not best or best[0][0] < 0.3:
+        return (60, 160, 255)
+    avg = tuple(int(sum(c[1][i] for c in best) / len(best)) for i in range(3))
+    boost = 255 / (max(avg) or 1)
+    return tuple(min(255, int(v * min(boost, 1.6))) for v in avg)
+
+
+def _logo_badge(mark, diameter: int, accent: tuple):
+    """لوگو را داخل نشان درخشان می‌گذارد (دایره برای لوگوی شفاف، مستطیل گرد برای لوگوی تمام‌قاب) و RGBA با حاشیه‌ی glow می‌دهد."""
+    from PIL import Image, ImageDraw, ImageFilter
+    scale = 3
+    alpha_hist = mark.getchannel("A").histogram()
+    opaque = sum(alpha_hist[250:]) / float(mark.width * mark.height) > 0.92
+    if opaque:
+        fit = mark.copy()
+        fit.thumbnail((diameter * scale, diameter * scale), Image.LANCZOS)
+        bw, bh = fit.size
+        radius = int(min(bw, bh) * 0.22)
+        inner = fit
+    else:
+        bw = bh = diameter * scale
+        radius = bw // 2
+        inner = mark.copy()
+        inner.thumbnail((int(bw * 0.66), int(bh * 0.66)), Image.LANCZOS)
+    pad = int(diameter * scale * 0.45)
+    canvas_w, canvas_h = bw + 2 * pad, bh + 2 * pad
+    box = (pad, pad, pad + bw, pad + bh)
+    ring = max(4, int(diameter * scale * 0.035))
+    out = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+
+    glow = Image.new("RGBA", out.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle(box, radius=radius, outline=accent + (255,), width=ring * 2)
+    out.alpha_composite(glow.filter(ImageFilter.GaussianBlur(diameter * scale * 0.06)))
+    out.alpha_composite(glow.filter(ImageFilter.GaussianBlur(diameter * scale * 0.015)))
+
+    if not opaque:
+        shade = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        ImageDraw.Draw(shade).rounded_rectangle(box, radius=radius, fill=(7, 10, 28, 235))
+        out.alpha_composite(shade)
+    else:
+        mask = Image.new("L", out.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle(box, radius=radius, fill=255)
+        layer = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        layer.paste(inner, (pad, pad))
+        clipped = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        clipped.paste(layer, (0, 0), mask)
+        out.alpha_composite(clipped)
+
+    rim = Image.new("RGBA", out.size, (0, 0, 0, 0))
+    light = tuple(min(255, c + 70) for c in accent)
+    ImageDraw.Draw(rim).rounded_rectangle(box, radius=radius, outline=light + (255,), width=ring)
+    out.alpha_composite(rim)
+
+    if not opaque:
+        shadow = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        offset = ((canvas_w - inner.width) // 2, (canvas_h - inner.height) // 2)
+        shadow.paste((0, 0, 0, 150), (offset[0], offset[1] + ring), inner.getchannel("A"))
+        out.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(diameter * scale * 0.012)))
+        out.alpha_composite(inner, offset)
+
+    final_w = canvas_w // scale
+    return out.resize((final_w, max(1, canvas_h // scale)), Image.LANCZOS), pad // scale
+
+
+def compose_banner(raw: bytes, size: str, mode: str = "exact") -> bytes:
+    """تصویر AI را به اندازه‌ی انتخابی می‌برد. در حالت «exact» لوگوی اصلی را (بدون دخالت مدل) در نشان درخشان بالا-چپ می‌گذارد."""
+    from PIL import Image, ImageEnhance, ImageFilter
     jpeg = post_image.render(raw, None, size)
-    if not has_logo():
+    if mode != "exact" or not has_logo():
         return jpeg
     base = Image.open(io.BytesIO(jpeg)).convert("RGBA")
     with Image.open(CHANNEL_LOGO_PATH) as logo_file:
         mark = logo_file.convert("RGBA")
     width, height = base.size
-    mark.thumbnail((int(width * 0.22), int(height * 0.14)), Image.LANCZOS)
+    diameter = int(width * 0.2)
+    badge, pad = _logo_badge(mark, diameter, _brand_accent(mark))
     margin = int(width * 0.05)
-    base.alpha_composite(mark, (width - mark.width - margin, margin))
+    top = int(height * 0.07) if height > width * 1.5 else margin
+    x, y = margin - pad, top - pad
+
+    scrim_size = int(diameter * 2.6)
+    fade = Image.radial_gradient("L").resize((scrim_size, scrim_size)).point(lambda v: max(0, 150 - int(v * 0.9)) if v < 170 else 0)
+    scrim = Image.new("RGBA", (scrim_size, scrim_size), (4, 6, 20, 0))
+    scrim.putalpha(fade)
+    cx, cy = margin + diameter // 2, top + diameter // 2
+    base.paste(scrim, (cx - scrim_size // 2, cy - scrim_size // 2), scrim)
+    base.paste(badge, (x, y), badge)
+    final = base.convert("RGB").filter(ImageFilter.UnsharpMask(radius=1.2, percent=60, threshold=3))
+    final = ImageEnhance.Contrast(final).enhance(1.03)
     out = io.BytesIO()
-    base.convert("RGB").save(out, "JPEG", quality=92)
+    final.save(out, "JPEG", quality=94, subsampling=0)
     return out.getvalue()
 
 

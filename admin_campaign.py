@@ -40,7 +40,8 @@ def _cancel_kb() -> InlineKeyboardMarkup:
 
 def _variant_text(index: int, v: dict) -> str:
     param = campaign_ai.start_param_for(v["deeplink"]) or "بدون دیپ‌لینک"
-    text = f"<b>━━ نسخه {index}: {html.escape(v['angle'])} ━━</b>\n\n{html.escape(v['caption'])}\n\n"
+    header = f"نسخه {index}: {html.escape(v['angle'])}" if index else f"کپشن پیشنهادی: {html.escape(v['angle'])}"
+    text = f"<b>━━ {header} ━━</b>\n\n{html.escape(v['caption'])}\n\n"
     text += f"🔘 دکمه: {html.escape(v['button_text'])}\n🔗 دیپ‌لینک: <code>{html.escape(param)}</code>"
     if v["note_for_admin"]:
         text += f"\n💡 {html.escape(v['note_for_admin'])}"
@@ -56,9 +57,9 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         )
 
     async def _generate_and_show(target: Message, state: FSMContext, goal: str):
-        status = await target.answer("⏳ در حال تولید نسخه‌ها با AI از روی محصولات و کدهای تخفیف واقعی...")
+        status = await target.answer("⏳ در حال نوشتن کپشن کامل با AI بر اساس موضوع شما و داده‌ی واقعی فروشگاه...")
         try:
-            variants, _facts = await campaign_ai.generate_campaigns(db, goal)
+            variants, _facts = await campaign_ai.generate_campaigns(db, goal, 1)
         except Exception as exc:
             _log.warning("تولید کمپین ناموفق بود: %s", exc)
             await status.edit_text(
@@ -74,19 +75,21 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await status.delete()
         except Exception:
             pass
-        for i, v in enumerate(variants, 1):
-            await target.answer(_variant_text(i, v))
-        pick_row = [(f"✅ نسخه {i}", f"adm_camp_pick:{i - 1}") for i in range(1, len(variants) + 1)]
         await target.answer(
-            "کدام نسخه منتشر شود؟",
-            reply_markup=_kb(pick_row, [("🔄 تولید دوباره", "adm_camp_regen"), ("✏️ تغییر هدف", "adm_camp_goal")], [("❌ لغو", "adm_camp_cancel")]),
+            _variant_text(0, variants[0]),
+            reply_markup=_kb(
+                [("✅ استفاده از این کپشن", "adm_camp_pick:0")],
+                [("🔄 بازنویسی", "adm_camp_regen"), ("✏️ تغییر موضوع", "adm_camp_goal")],
+                [("❌ لغو", "adm_camp_cancel")],
+            ),
         )
 
     async def _ask_goal(call_or_msg, state: FSMContext):
         if channel_ai.text_configured(db):
             await state.set_state(AdminCampaign.waiting_goal)
-            text = ("🤖 هدف کمپین را بنویس (مثلاً «فروش ویژه آخر هفته» یا «معرفی کانفیگ تست»).\n"
-                    "AI فقط از محصولات، قیمت‌ها و کدهای تخفیف واقعی فروشگاه استفاده می‌کند.\n\n"
+            text = ("🤖 موضوع پست را بنویس؛ هرچه کامل‌تر (نکات اصلی، پیشنهاد، مخاطب، قیمت یا شرایط، لحن) کپشن دقیق‌تر و جامع‌تر می‌شود.\n"
+                    "مثال: «معرفی کانفیگ تست رایگان ۲۴ ساعته؛ بدون نیاز به ثبت‌نام، مناسب اینستاگرام و تلگرام، تأکید بر ساده بودن اتصال».\n"
+                    "AI همه‌ی نکاتی را که بنویسی می‌آورد و جز آن‌ها فقط از محصولات، قیمت‌ها و کدهای واقعی فروشگاه استفاده می‌کند.\n\n"
                     "یا کپشن را خودت بنویس.")
             markup = _kb(
                 [("▶️ بدون هدف خاص", "adm_camp_nogoal")],
@@ -133,7 +136,11 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         if not senior_admin_only(message.from_user.id):
             await state.clear()
             return
-        await _generate_and_show(message, state, (message.text or "").strip())
+        goal = (message.text or "").strip()
+        if len(goal) > campaign_ai.SINGLE_GOAL_LIMIT:
+            await message.answer(f"موضوع حداکثر {campaign_ai.SINGLE_GOAL_LIMIT} کاراکتر باشد (الان {len(goal)}). کوتاه‌ترش کن و دوباره بفرست.", reply_markup=_cancel_kb())
+            return
+        await _generate_and_show(message, state, goal)
 
     @router.callback_query(F.data == "adm_camp_manual")
     async def cb_manual(call: CallbackQuery, state: FSMContext):
@@ -415,9 +422,9 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await target.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
             return
         status = await target.answer("🎨 در حال ساخت بنر فارسی با AI (ممکن است چند دقیقه طول بکشد)...")
-        prompt = channel_ai.build_banner_prompt(variant.get("overlay") or {}, variant.get("image_prompt") or "", colors, await asyncio.to_thread(channel_ai.saved_banner_base_prompt, db))
+        base_prompt = await asyncio.to_thread(channel_ai.saved_banner_base_prompt, db)
         try:
-            raw, source = await channel_ai.generate_image(db, prompt)
+            raw, source, used_mode = await channel_ai.make_banner(db, variant.get("overlay") or {}, variant.get("image_prompt") or "", colors, base_prompt)
         except Exception as exc:
             _log.warning("ساخت بنر ناموفق بود: %s", exc)
             await status.edit_text(
@@ -432,7 +439,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             pass
         img_size = data.get("img_size") or await asyncio.to_thread(post_image.default_size, db)
         token = await asyncio.to_thread(post_image.save_raw, raw)
-        await state.update_data(raw_bg=token, img_size=img_size)
+        await state.update_data(raw_bg=token, img_size=img_size, logo_mode=used_mode)
         await _compose_and_send(target, state, "🎨 بنر ساخته‌شده: " + source)
         await _after_photo(target, state, bot)
 
@@ -442,7 +449,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         if raw is None:
             return False
         size = data.get("img_size") or "post"
-        out = await asyncio.to_thread(channel_ai.compose_banner, raw, size)
+        out = await asyncio.to_thread(channel_ai.compose_banner, raw, size, data.get("logo_mode") or "exact")
         sent = await target.answer_photo(BufferedInputFile(out, filename="banner.jpg"), caption=tr(label))
         await state.update_data(photo_id=sent.photo[-1].file_id)
         return True
@@ -604,6 +611,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             "🎨 <b>مدل تصویر (بنر فارسی)</b>\n"
             f"<code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n\n"
             f"🖼 لوگوی بنر: {'✅ دارد' if channel_ai.has_logo() else '❌ ندارد'}\n"
+            f"🎯 حالت لوگو: {'لوگوی دقیق (چسباندن اصلی در نشان درخشان)' if channel_ai.logo_mode(db) == 'exact' else 'تصویر مرجع به مدل AI'}\n"
             f"🧩 پرامپت پایه‌ی سفارشی: {'✅ تنظیم شده' if (db.get_setting(channel_ai.BANNER_BASE_PROMPT_KEY, '') or '').strip() else 'پیش‌فرض'}\n"
             f"🧠 پست‌های تأییدشده‌ی یادگرفته‌شده: {len(channel_ai.learning_examples(db, channel_ai.LEARNING_LIMIT))}"
         )
@@ -613,7 +621,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             [("🔑 کلید Jarvis", "adm_chai_key")],
             [("📝 مدل متن", "adm_chai_tmodel"), ("🎨 مدل تصویر", "adm_chai_imodel")],
             [("🖼 لوگوی بنر", "adm_chai_logo"), ("🧠 یادگیری AI", "adm_chai_learn")],
-            [("🧩 پرامپت پایه بنر", "adm_chai_banner_prompt")],
+            [("🧩 پرامپت پایه بنر", "adm_chai_banner_prompt"), ("🎯 حالت لوگو", "adm_chai_logomode")],
             [("🧪 تست متن", "adm_chai_ttest"), ("🧪 تست تصویر (از اعتبار کم می‌شود)", "adm_chai_itest")],
             [("⬅️ بازگشت", _BACK)],
         )
@@ -673,6 +681,15 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await _chai_log(message.from_user.id, "پرامپت پایه بنر به‌روزرسانی شد" if value != "-" else "پرامپت پایه بنر به پیش‌فرض برگشت")
         await state.clear()
         await _show_chai(message, edit=False)
+
+    @router.callback_query(F.data == "adm_chai_logomode")
+    async def cb_chai_logomode(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        new = await asyncio.to_thread(channel_ai.toggle_logo_mode, db)
+        await _chai_log(call.from_user.id, f"حالت لوگوی بنر: {new}")
+        await _show_chai(call.message)
+        await call.answer("🎯 لوگوی دقیق (پیشنهادی)" if new == "exact" else "🎯 تصویر مرجع به مدل AI (اگر درگاه پشتیبانی نکند خودکار به حالت دقیق برمی‌گردد)", show_alert=True)
 
     @router.callback_query(F.data == "adm_chai_logo")
     async def cb_chai_logo(call: CallbackQuery, state: FSMContext):
