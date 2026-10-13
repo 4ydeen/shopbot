@@ -30,6 +30,7 @@ LEARNING_LIMIT = 40
 LEARNING_IN_PROMPT = 8
 COLORS_KEY = "channel_banner_colors"
 BANNER_BASE_PROMPT_KEY = "channel_banner_base_prompt"
+STYLE_REF_PATH = os.path.join(config.BASE_DIR, "channel_banner_style_ref.jpg")
 LOGO_MODE_KEY = "channel_banner_logo_mode"
 LOGO_MODES = ("exact", "ai")
 DEFAULT_BANNER_BASE_PROMPT = (
@@ -51,6 +52,23 @@ BANNER_RULES = (
     "Keep every text element inside the central safe area with at least 10 percent margin from all edges. "
     "Do not add any other text: no English words, no watermark, no QR code, no real brand names, no human faces."
 )
+BANNER_RULES_TEMPLATE = (
+    "Style: premium modern advertising banner, strong contrast so every text is easy to read on a phone screen. "
+    "Primary text must be Persian (Farsi), right-to-left, spelled exactly as written in quotes, large bold readable font, "
+    "perfectly connected letters, no extra letters and no garbled characters. "
+    "Secondary text exactly as in the style template (such as short English UI labels or platform names) is allowed, but never add any new text. "
+    "No watermark, no QR code, no real brand names other than those in the template."
+)
+STYLE_RULES = (
+    "STYLE TEMPLATE: the FIRST attached image is a finished banner that defines the exact target look. Recreate the same design system: "
+    "identical layout structure and element positions, same dark-navy cinematic background with glowing world-map network lines, "
+    "same neon blue-violet-cyan lighting and glow intensity, same focal subject style (tilted smartphone with glowing connected power button on dark rocks, "
+    "hooded faceless silhouette with glowing blue eyes behind it), same typography weight and gradient treatment of the key headline word, "
+    "same angled glowing discount ribbon at the lower left, same glass-style info chips on the right edge, same platform strip at the lower left, "
+    "same rounded glowing call-to-action button at the lower right, same small tagline row at the bottom. "
+    "Replace only the texts, price and offer with the ones given in this request; keep every other design decision from the template. "
+    "Do not copy the template's logo or brand name."
+)
 LOGO_RULES = {
     "exact": (
         "MANDATORY LOGO AREA: do NOT draw, invent or imitate any logo, emblem, brand mark or app icon anywhere in the image. "
@@ -58,7 +76,7 @@ LOGO_RULES = {
         "and no important elements; the official logo is placed there afterwards. Keep the headline and key subjects out of that corner."
     ),
     "ai": (
-        "MANDATORY LOGO: the attached image is the official brand logo. Reproduce it EXACTLY: same icon, shapes, colors and lettering. "
+        "MANDATORY LOGO: the LAST attached image is the official brand logo. Reproduce it EXACTLY: same icon, shapes, colors and lettering. "
         "Never redraw, restyle, simplify, translate or crop it. Place it top-left inside a circular glowing badge (about 22 percent of "
         "the image width) with a thin neon rim light matching the scene palette, integrated with the scene lighting but sharp and unchanged. "
         "Keep the headline and key subjects away from the badge."
@@ -238,7 +256,7 @@ def _logo_reference_png() -> bytes:
     return out.getvalue()
 
 
-async def _image_with_reference(db, key: str, model: str, prompt: str, reference: bytes) -> bytes:
+async def _image_with_reference(db, key: str, model: str, prompt: str, references: list) -> bytes:
     """دو روش را امتحان می‌کند: images/edits (استاندارد OpenAI) و chat/completions تصویری (قالب Gemini)."""
     import aiohttp as _aiohttp
     headers = {"Authorization": f"Bearer {key}"}
@@ -251,7 +269,8 @@ async def _image_with_reference(db, key: str, model: str, prompt: str, reference
         size = jarvis_image_size(db)
         if size:
             form.add_field("size", size)
-        form.add_field("image", reference, filename="logo.png", content_type="image/png")
+        for index, reference in enumerate(references):
+            form.add_field("image" if len(references) == 1 else "image[]", reference, filename=f"ref{index}.png", content_type="image/png")
         data = await _request("POST", f"{jarvis_base(db)}/images/edits", headers=headers, timeout=180, form=form)
         found = await _extract_image(data)
         if found:
@@ -261,15 +280,11 @@ async def _image_with_reference(db, key: str, model: str, prompt: str, reference
         if any(code in str(exc) for code in _AUTH_CODES):
             raise
     try:
-        data_url = "data:image/png;base64," + base64.b64encode(reference).decode()
-        payload = {
-            "model": model,
-            "modalities": ["image", "text"],
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ]}],
-        }
+        parts = [{"type": "text", "text": prompt}] + [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(reference).decode()}}
+            for reference in references
+        ]
+        payload = {"model": model, "modalities": ["image", "text"], "messages": [{"role": "user", "content": parts}]}
         data = await _request("POST", f"{jarvis_base(db)}/chat/completions", headers=headers, payload=payload, timeout=180)
         found = await _extract_image(data)
         if found:
@@ -281,7 +296,7 @@ async def _image_with_reference(db, key: str, model: str, prompt: str, reference
     raise _RefUnsupported(_err(last) if last else "پاسخ بدون تصویر")
 
 
-async def _jarvis_image(db, prompt: str, reference: bytes = None) -> bytes:
+async def _jarvis_image(db, prompt: str, reference=None) -> bytes:
     keys = jarvis_keys(db)
     if not keys:
         raise ChannelAIError("کلید Jarvis تنظیم نشده")
@@ -290,12 +305,13 @@ async def _jarvis_image(db, prompt: str, reference: bytes = None) -> bytes:
     size = jarvis_image_size(db)
     if size:
         body["size"] = size
+    references = [reference] if isinstance(reference, (bytes, bytearray)) else list(reference or [])
     last = None
     for key in keys:
-        if reference:
+        if references:
             try:
                 async with _semaphore():
-                    return await _image_with_reference(db, key, model, prompt, reference)
+                    return await _image_with_reference(db, key, model, prompt, references)
             except _RefUnsupported:
                 raise
             except Exception as exc:
@@ -320,6 +336,34 @@ async def _jarvis_image(db, prompt: str, reference: bytes = None) -> bytes:
     raise ChannelAIError(f"jarvis/{model}: {_err(last)}")
 
 
+def has_style_ref() -> bool:
+    return os.path.isfile(STYLE_REF_PATH)
+
+
+def save_style_ref(raw: bytes) -> None:
+    """بنر نمونه‌ی سبک مطلوب؛ برای مدل به‌عنوان تصویر مرجع اول فرستاده می‌شود."""
+    from PIL import Image
+    with Image.open(io.BytesIO(raw)) as img:
+        pic = img.convert("RGB")
+    pic.thumbnail((1280, 1280), Image.LANCZOS)
+    pic.save(STYLE_REF_PATH, "JPEG", quality=92)
+
+
+def remove_style_ref() -> bool:
+    if os.path.isfile(STYLE_REF_PATH):
+        os.remove(STYLE_REF_PATH)
+        return True
+    return False
+
+
+def _style_reference_png() -> bytes:
+    from PIL import Image
+    with Image.open(STYLE_REF_PATH) as img:
+        out = io.BytesIO()
+        img.convert("RGB").save(out, "PNG")
+    return out.getvalue()
+
+
 def _normalize(raw: bytes) -> bytes:
     from PIL import Image
     img = Image.open(io.BytesIO(raw)).convert("RGB")
@@ -341,7 +385,7 @@ def save_banner_base_prompt(db, value: str) -> None:
     db.set_setting(BANNER_BASE_PROMPT_KEY, "" if value == "-" else value[:3000])
 
 
-def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "", logo_mode: str = "exact") -> str:
+def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "", logo_mode: str = "exact", style_ref: bool = False) -> str:
     """پرامپت بنر فارسی. متن‌ها عیناً داخل پرامپت می‌آیند تا مدل تصویر خودش آن‌ها را فارسی بکشد."""
     overlay = overlay or {}
     texts = []
@@ -359,7 +403,8 @@ def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_p
         f"Brand colors requested by the admin: {palette}.",
         f"Scene and mood: {(scene or '').strip()[:300] or DEFAULT_IMAGE_PROMPT}.",
         "CUSTOMIZABLE BASE PROMPT: " + ((base_prompt or "").strip()[:3000] or DEFAULT_BANNER_BASE_PROMPT),
-        BANNER_RULES,
+        BANNER_RULES_TEMPLATE if style_ref else BANNER_RULES,
+        STYLE_RULES if style_ref else "",
         LOGO_RULES.get(logo_mode, LOGO_RULES["none"]),
     ]
     return " ".join(p for p in parts if p)
@@ -391,20 +436,26 @@ def toggle_logo_mode(db) -> str:
 
 
 async def make_banner(db, overlay: dict, scene: str, colors: str, base_prompt: str) -> tuple:
-    """(بایت JPEG، منبع، حالت لوگوی واقعاً استفاده‌شده). اگر درگاه تصویر مرجع را نپذیرد خودکار به حالت «دقیق» برمی‌گردد."""
+    """(بایت JPEG، منبع، حالت لوگوی واقعاً استفاده‌شده). تصویر مرجع سبک و/یا لوگو را به مدل می‌دهد؛ اگر درگاه نپذیرد خودکار به حالت بدون مرجع (لوگوی دقیق) برمی‌گردد."""
     if not jarvis_keys(db):
         raise ChannelAIError("کلید Jarvis تنظیم نشده")
-    wanted = logo_mode(db) if has_logo() else "none"
-    mode = wanted
+    mode = logo_mode(db) if has_logo() else "none"
+    use_style = has_style_ref()
+    references = []
+    if use_style:
+        references.append(await asyncio.to_thread(_style_reference_png))
+    if mode == "ai":
+        references.append(await asyncio.to_thread(_logo_reference_png))
     raw = None
-    if wanted == "ai":
+    if references:
         try:
-            reference = await asyncio.to_thread(_logo_reference_png)
-            prompt = build_banner_prompt(overlay, scene, colors, base_prompt, "ai")
-            raw = await _jarvis_image(db, prompt, reference)
+            prompt = build_banner_prompt(overlay, scene, colors, base_prompt, mode, use_style)
+            raw = await _jarvis_image(db, prompt, references)
         except _RefUnsupported as exc:
-            _log.warning("jarvis image reference unsupported, falling back to exact logo mode: %s", _err(exc)[:200])
-            mode = "exact"
+            _log.warning("jarvis image reference unsupported, falling back to text-only: %s", _err(exc)[:200])
+            use_style = False
+            if mode == "ai":
+                mode = "exact"
         except Exception as exc:
             _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
             raise ChannelAIError(_err(exc)) from exc
@@ -414,7 +465,7 @@ async def make_banner(db, overlay: dict, scene: str, colors: str, base_prompt: s
         except Exception as exc:
             _log.warning("channel image via jarvis failed: %s", _err(exc)[:200])
             raise ChannelAIError(_err(exc)) from exc
-    source = f"jarvis/{jarvis_image_model(db)}" + (" + مرجع لوگو" if mode == "ai" else (" + لوگوی دقیق" if mode == "exact" else ""))
+    source = f"jarvis/{jarvis_image_model(db)}" + (" + بنر مرجع سبک" if use_style else "") + (" + مرجع لوگو" if mode == "ai" else (" + لوگوی دقیق" if mode == "exact" else ""))
     return await asyncio.to_thread(_normalize, raw), source, mode
 
 

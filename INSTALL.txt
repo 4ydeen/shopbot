@@ -1,0 +1,3 @@
+Copy all .py files (and README.fa.md) into the bot folder (e.g. /root/v2ray_bot), overwriting existing files.
+jarvis_guide.py is a NEW file. states.py MUST be updated together with admin_campaign.py.
+Then restart the bot.
