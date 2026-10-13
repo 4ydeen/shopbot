@@ -298,7 +298,10 @@ else
     echo "⚠️ بات اجرا نشد. برای دیدن جزئیات خطا:"
     echo "   sudo journalctl -u $SERVICE_NAME -n 50 --no-pager"
 fi
+sudo bash -c "printf '#!/bin/bash\nif [ \"\$(id -u)\" -ne 0 ] && command -v sudo >/dev/null 2>&1; then\n    exec sudo env HOME=\"%s\" bash \"%s/manage.sh\" \"\$@\"\nfi\nexec bash \"%s/manage.sh\" \"\$@\"\n' '$HOME' '$INSTALL_DIR' '$INSTALL_DIR' > /usr/local/bin/shopvpn && chmod 755 /usr/local/bin/shopvpn" 2>/dev/null || true
+
 echo ""
+echo "پنل مدیریت:   shopvpn"
 echo "دستورات مفید:"
 echo "  وضعیت بات:    sudo systemctl status $SERVICE_NAME"
 echo "  لاگ زنده:      sudo journalctl -u $SERVICE_NAME -f"

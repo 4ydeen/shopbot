@@ -2663,6 +2663,24 @@ PY
     echo -e "${GREEN}${BOLD}$(t rl_done)${RESET}"
 }
 
+install_shell_command() {
+    local bin="/usr/local/bin/shopvpn"
+    local script="$INSTALL_DIR/manage.sh"
+    [ -f "$script" ] || return 0
+    local content
+    content=$'#!/bin/bash\nif [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then\n    exec sudo env HOME="'"$HOME"$'" bash "'"$script"$'" "$@"\nfi\nexec bash "'"$script"$'" "$@"\n'
+    if [ -f "$bin" ] && [ "$(cat "$bin" 2>/dev/null)" = "${content%$'\n'}" ]; then
+        return 0
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        printf '%s' "$content" > "$bin" 2>/dev/null && chmod 755 "$bin" 2>/dev/null
+    else
+        printf '%s' "$content" | sudo tee "$bin" >/dev/null 2>&1 && sudo chmod 755 "$bin" 2>/dev/null
+    fi
+    return 0
+}
+install_shell_command
+
 # ---------------------------------------------------------------------------
 # Main menu / منوی اصلی
 # ---------------------------------------------------------------------------
