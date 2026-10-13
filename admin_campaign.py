@@ -9,13 +9,13 @@ import re
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-import ai_support
 import campaign_ai
+import channel_ai
 from i18n import tr
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
-from states import AdminCampaign
+from states import AdminCampaign, AdminChannelAI
 
 _log = logging.getLogger("admin_campaign")
 _BACK = "adm_deeplink_tools"
@@ -101,8 +101,8 @@ def register(router: Router, db, senior_admin_only, deny_mid):
     async def cb_start(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        if not ai_support.is_configured(db):
-            await call.answer("دستیار هوشمند تنظیم نشده؛ ابتدا کلید API را از بخش دستیار هوشمند وارد کن.", show_alert=True)
+        if not channel_ai.text_configured(db):
+            await call.answer("مدل متن کانال تنظیم نشده؛ از «مدل‌های AI کانال» کلید Jarvis را وارد کن.", show_alert=True)
             return
         await state.clear()
         await _ask_goal(call, state)
@@ -148,9 +148,10 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             return
         await state.update_data(variant=variant, photo_id=None)
         await state.set_state(AdminCampaign.waiting_photo)
+        rows = [[("🎨 ساخت تصویر با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
         await call.message.answer(
             "🖼 عکس پست را بفرست، یا اگر پست بدون عکس می‌خواهی دکمه‌ی زیر را بزن.",
-            reply_markup=_kb([("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
+            reply_markup=_kb(*rows, [("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
         )
         await call.answer()
 
@@ -176,6 +177,33 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             return await deny_mid(call)
         await state.update_data(photo_id=None)
         await call.answer()
+        await _after_photo(call.message, state, bot)
+
+    @router.callback_query(F.data == "adm_camp_genimg")
+    async def cb_genimg(call: CallbackQuery, state: FSMContext, bot: Bot):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        variant = (await state.get_data()).get("variant")
+        if not variant:
+            await call.answer("ابتدا یک نسخه انتخاب کن.", show_alert=True)
+            return
+        await call.answer()
+        status = await call.message.answer("🎨 در حال ساخت تصویر با AI (ممکن است چند دقیقه طول بکشد)...")
+        try:
+            raw, source = await channel_ai.generate_image(db, variant.get("image_prompt") or "")
+        except Exception as exc:
+            _log.warning("ساخت تصویر ناموفق بود: %s", exc)
+            await status.edit_text(
+                "❌ ساخت تصویر انجام نشد: " + html.escape(str(exc)),
+                reply_markup=_kb([("🔄 تلاش دوباره", "adm_camp_genimg")], [("📝 بدون عکس", "adm_camp_nophoto")], [("❌ لغو", "adm_camp_cancel")]),
+            )
+            return
+        try:
+            await status.delete()
+        except Exception:
+            pass
+        sent = await call.message.answer_photo(BufferedInputFile(raw, filename="post.jpg"), caption="🎨 تصویر ساخته‌شده: " + source)
+        await state.update_data(photo_id=sent.photo[-1].file_id)
         await _after_photo(call.message, state, bot)
 
     async def _ask_channel(target: Message, state: FSMContext):
@@ -230,10 +258,12 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await target.answer("❌ ساخت پیش‌نمایش ناموفق بود: " + html.escape(str(exc)), reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
             await state.clear()
             return
+        image_rows = [[("🎨 تصویر جدید با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
         await target.answer(
             "این پست به کانال ارسال شود؟",
             reply_markup=_kb(
                 [("📣 ارسال به کانال", "adm_camp_send")],
+                *image_rows,
                 [("📢 تغییر کانال", "adm_camp_channel"), ("🔄 نسخه‌ی دیگر", "adm_camp_regen")],
                 [("❌ لغو", "adm_camp_cancel")],
             ),
@@ -263,6 +293,193 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         )
         await call.message.answer("✅ پست در کانال ارسال شد.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
         await call.answer()
+
+    def _chai_text() -> str:
+        has_key = bool(channel_ai.jarvis_keys(db))
+        return (
+            "⚙️ <b>مدل‌های AI کانال</b>\n"
+            "جدا از دستیار پشتیبانی، دستیار ادمین و بقیه‌ی ایجنت‌ها؛ تغییر این بخش روی آن‌ها اثری ندارد.\n\n"
+            f"🔑 کلید Jarvis: {'✅ ثبت شده' if has_key else '❌ ثبت نشده'}\n\n"
+            "📝 <b>مدل متن</b>\n"
+            f"مسیر: {channel_ai.TEXT_MODE_LABELS[channel_ai.text_mode(db)]}\n"
+            f"مدل Jarvis: <code>{html.escape(channel_ai.jarvis_text_model(db))}</code>\n\n"
+            "🎨 <b>مدل تصویر</b>\n"
+            f"مسیر: {channel_ai.IMAGE_MODE_LABELS[channel_ai.image_mode(db)]}\n"
+            f"مدل Jarvis: <code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n"
+            f"مدل Gemini: <code>{html.escape(channel_ai.gemini_image_model(db))}</code>"
+        )
+
+    def _chai_kb() -> InlineKeyboardMarkup:
+        return _kb(
+            [("🔑 کلید Jarvis", "adm_chai_key")],
+            [("📝 مدل متن", "adm_chai_tmodel"), ("🎨 مدل تصویر", "adm_chai_imodel")],
+            [("🔀 مسیر متن", "adm_chai_tmode"), ("🔀 مسیر تصویر", "adm_chai_imode")],
+            [("🧪 تست متن", "adm_chai_ttest"), ("🧪 تست تصویر (از اعتبار کم می‌شود)", "adm_chai_itest")],
+            [("⬅️ بازگشت", _BACK)],
+        )
+
+    def _chai_back_kb() -> InlineKeyboardMarkup:
+        return _kb([("⬅️ بازگشت", "adm_chai")])
+
+    async def _show_chai(target: Message, edit: bool = True):
+        if edit:
+            try:
+                await target.edit_text(_chai_text(), reply_markup=_chai_kb())
+                return
+            except Exception:
+                pass
+        await target.answer(_chai_text(), reply_markup=_chai_kb())
+
+    async def _chai_log(admin_id: int, detail: str):
+        await asyncio.to_thread(db.log_admin_action, admin_id, "channel_ai_change", detail)
+
+    @router.callback_query(F.data == "adm_chai")
+    async def cb_chai(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.clear()
+        await _show_chai(call.message)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_tmode")
+    async def cb_chai_tmode(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        modes = channel_ai.TEXT_MODES
+        new = modes[(modes.index(channel_ai.text_mode(db)) + 1) % len(modes)]
+        await asyncio.to_thread(db.set_setting, "channel_text_provider", new)
+        await _chai_log(call.from_user.id, f"مسیر متن کانال: {new}")
+        await _show_chai(call.message)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_imode")
+    async def cb_chai_imode(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        modes = channel_ai.IMAGE_MODES
+        new = modes[(modes.index(channel_ai.image_mode(db)) + 1) % len(modes)]
+        await asyncio.to_thread(db.set_setting, "channel_image_provider", new)
+        await _chai_log(call.from_user.id, f"مسیر تصویر کانال: {new}")
+        await _show_chai(call.message)
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_key")
+    async def cb_chai_key(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await state.set_state(AdminChannelAI.waiting_key)
+        await call.message.answer(
+            "🔑 کلید(های) Jarvis را بفرست؛ هر خط یک کلید (با pmai_ شروع می‌شود). بعد از ذخیره، پیام تو پاک می‌شود.\n"
+            "برای حذف کلید: <code>-</code>",
+            reply_markup=_chai_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminChannelAI.waiting_key, F.text)
+    async def msg_chai_key(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        raw = (message.text or "").strip()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        keys = [] if raw == "-" else list(dict.fromkeys(k.strip() for k in raw.replace(",", "\n").splitlines() if k.strip()))
+        if raw != "-" and not keys:
+            await message.answer("کلیدی پیدا نشد؛ دوباره بفرست.", reply_markup=_chai_back_kb())
+            return
+        base = channel_ai.jarvis_base(db)
+        rejected = [str(i) for i, key in enumerate(keys, 1) if not (await channel_ai.check_jarvis_key(base, key))[0]]
+        if rejected:
+            await message.answer(
+                "❌ Jarvis این کلیدها را رد کرد (شماره‌ی خط): " + ", ".join(rejected) + "\nکلید را بررسی و دوباره بفرست.",
+                reply_markup=_chai_back_kb(),
+            )
+            return
+        await asyncio.to_thread(db.set_setting, "jarvis_api_key", "\n".join(keys))
+        await _chai_log(message.from_user.id, "کلید Jarvis ذخیره شد" if keys else "کلید Jarvis حذف شد")
+        await state.clear()
+        await _show_chai(message, edit=False)
+
+    async def _ask_model(call: CallbackQuery, state: FSMContext, kind: str):
+        text_ids, image_ids = [], []
+        try:
+            text_ids, image_ids = await channel_ai.list_jarvis_models(db)
+        except Exception as exc:
+            _log.warning("دریافت فهرست مدل‌های Jarvis ناموفق بود: %s", exc)
+        ids = text_ids if kind == "text" else image_ids
+        current = channel_ai.jarvis_text_model(db) if kind == "text" else channel_ai.jarvis_image_model(db)
+        title = "📝 مدل متن" if kind == "text" else "🎨 مدل تصویر"
+        listing = ("\n\nمدل‌های موجود در Jarvis:\n" + "\n".join(f"<code>{html.escape(i)}</code>" for i in ids[:15])) if ids else ""
+        await state.set_state(AdminChannelAI.waiting_text_model if kind == "text" else AdminChannelAI.waiting_image_model)
+        await call.message.answer(
+            f"{title}\nمدل فعلی: <code>{html.escape(current)}</code>{listing}\n\n"
+            "شناسه‌ی دقیق مدل را بفرست؛ برای برگشت به پیش‌فرض: <code>-</code>",
+            reply_markup=_chai_back_kb(),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_tmodel")
+    async def cb_chai_tmodel(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await _ask_model(call, state, "text")
+
+    @router.callback_query(F.data == "adm_chai_imodel")
+    async def cb_chai_imodel(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await _ask_model(call, state, "image")
+
+    async def _save_model(message: Message, state: FSMContext, kind: str):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        value = "" if (message.text or "").strip() == "-" else (message.text or "").strip()
+        if value and any(ch.isspace() for ch in value):
+            await message.answer("شناسه‌ی مدل نباید فاصله داشته باشد.", reply_markup=_chai_back_kb())
+            return
+        if kind == "text" and value and not channel_ai.is_text_model(value):
+            await message.answer("این شناسه مدل متنی نیست (شامل image/embed/tts و مانند آن است).", reply_markup=_chai_back_kb())
+            return
+        key = "jarvis_text_model" if kind == "text" else "jarvis_image_model"
+        await asyncio.to_thread(db.set_setting, key, value)
+        await _chai_log(message.from_user.id, f"{key}: {value or 'پیش‌فرض'}")
+        await state.clear()
+        await _show_chai(message, edit=False)
+
+    @router.message(AdminChannelAI.waiting_text_model, F.text)
+    async def msg_chai_text_model(message: Message, state: FSMContext):
+        await _save_model(message, state, "text")
+
+    @router.message(AdminChannelAI.waiting_image_model, F.text)
+    async def msg_chai_image_model(message: Message, state: FSMContext):
+        await _save_model(message, state, "image")
+
+    @router.callback_query(F.data == "adm_chai_ttest")
+    async def cb_chai_ttest(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await call.answer("⏳ در حال تست...")
+        try:
+            _data, source = await channel_ai.ask_json(db, 'فقط این JSON را برگردان: {"ok": true}', "ping")
+        except Exception as exc:
+            await call.message.answer("❌ تست متن ناموفق بود: " + html.escape(str(exc)), reply_markup=_chai_back_kb())
+            return
+        await call.message.answer(f"✅ مدل متن کانال کار می‌کند: <code>{html.escape(source)}</code>", reply_markup=_chai_back_kb())
+
+    @router.callback_query(F.data == "adm_chai_itest")
+    async def cb_chai_itest(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        await call.answer("⏳ در حال ساخت تصویر آزمایشی...")
+        try:
+            raw, source = await channel_ai.generate_image(db, "")
+        except Exception as exc:
+            await call.message.answer("❌ تست تصویر ناموفق بود: " + html.escape(str(exc)), reply_markup=_chai_back_kb())
+            return
+        await call.message.answer_photo(BufferedInputFile(raw, filename="test.jpg"), caption="✅ مدل تصویر کانال کار می‌کند: " + source, reply_markup=_chai_back_kb())
 
     @router.callback_query(F.data == "adm_camp_cancel")
     async def cb_cancel(call: CallbackQuery, state: FSMContext):

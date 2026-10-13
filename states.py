@@ -284,6 +284,12 @@ class AdminCampaign(StatesGroup):
     confirming = State()
 
 
+class AdminChannelAI(StatesGroup):
+    waiting_key = State()
+    waiting_text_model = State()
+    waiting_image_model = State()
+
+
 class AdminAddAdmin(StatesGroup):
     waiting_id = State()
 

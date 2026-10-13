@@ -7,7 +7,7 @@ import json
 import re
 from datetime import datetime
 
-import ai_text
+import channel_ai
 
 CAPTION_LIMIT = 1024
 _PARAM_RE = re.compile(r"^[A-Za-z0-9_]{1,40}$")
@@ -25,9 +25,10 @@ _SYSTEM_PROMPT = """تو کپی‌رایتر کانال تلگرامی یک فر
 ۵. deeplink یکی از این‌هاست: {"type":"none"}، {"type":"test"}، {"type":"wheel"}، {"type":"discount","code":"<دقیقاً یکی از کدهای فهرست discount_codes>"}، {"type":"campaign","param":"<حروف انگلیسی/عدد/زیرخط، حداکثر ۴۰ کاراکتر>"}. نوع discount فقط اگر کدی در فهرست هست و متن حتماً همان درصد/مبلغ را بگوید. نوع test فقط اگر test_enabled برابر true است؛ wheel فقط اگر wheel_enabled برابر true است.
 ۶. button_text متن دکمه‌ی زیر پست است، کوتاه (حداکثر ۴۰ کاراکتر).
 ۷. note_for_admin یک جمله‌ی کوتاه فارسی است که زاویه‌ی نسخه و پیشنهاد زمان انتشار را می‌گوید.
+۸. image_prompt توصیف انگلیسی یک تصویر پس‌زمینه‌ی تبلیغاتی متناسب با زاویه‌ی نسخه است (حداکثر دو جمله، فقط صحنه و حال‌وهوا). در آن هرگز متن، حرف، عدد، قیمت، لوگو، نام برند، چهره‌ی آدم یا ادعای سرعت/تعداد سرور نیاور.
 
 خروجی فقط یک آبجکت JSON با این شکل باشد:
-{"variants":[{"angle":"...","caption":"...","button_text":"...","deeplink":{...},"note_for_admin":"..."}]}"""
+{"variants":[{"angle":"...","caption":"...","button_text":"...","deeplink":{...},"note_for_admin":"...","image_prompt":"..."}]}"""
 
 
 def _is_active_code(row: dict, now: datetime) -> bool:
@@ -128,6 +129,7 @@ def _validate_variant(raw, facts: dict):
         "button_text": button,
         "deeplink": deeplink,
         "note_for_admin": str(raw.get("note_for_admin") or "").strip()[:200],
+        "image_prompt": str(raw.get("image_prompt") or "").strip()[:400],
     }
 
 
@@ -152,7 +154,7 @@ async def generate_campaigns(db, goal: str = "", count: int = 3, facts: dict = N
     payload = {"count": count, "admin_goal": goal.strip()[:300], **facts}
     last_error = None
     for _ in range(2):
-        raw = await ai_text.generate_json(db, _SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False, default=str))
+        raw = await channel_ai.generate_json(db, _SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False, default=str))
         items = raw.get("variants")
         if not isinstance(items, list):
             last_error = ValueError("AI خروجی variants برنگرداند.")
