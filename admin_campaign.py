@@ -14,6 +14,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton
 import admin_channel_posts
 import campaign_ai
 import channel_ai
+import post_image
 from i18n import tr
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 from states import AdminCampaign, AdminChannelAI, AdminChannelPost
@@ -22,6 +23,7 @@ _log = logging.getLogger("admin_campaign")
 _BACK = "adm_deeplink_tools"
 _CHANNEL_SETTING = "promo_channel_id"
 _CHANNEL_RE = re.compile(r"^(-100\d{5,}|@[A-Za-z][A-Za-z0-9_]{3,})$")
+_EDU_GOAL = "یک پست آموزشی کوتاه و کاربردی (مثلاً روش اتصال و استفاده از کانفیگ، یا یک نکته‌ی امنیتی و حریم خصوصی) بنویس؛ لحن دوستانه، بدون ادعای تبلیغاتی جدید و بدون قیمت یا عدد ساختگی."
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
@@ -195,7 +197,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             "image_prompt": "",
             "manual": True,
         }
-        await state.update_data(variant=variant, photo_id=None)
+        await state.update_data(variant=variant, photo_id=None, raw_bg=None)
         await _ask_photo(target, state)
 
     @router.callback_query(F.data.startswith("adm_camp_dl:"))
@@ -259,6 +261,54 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             deeplink = {"type": "campaign", "param": raw}
         await _finish_manual(message, state, deeplink)
 
+    @router.callback_query(F.data == "adm_camp_edu")
+    async def cb_edu(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        if not await asyncio.to_thread(channel_ai.text_configured, db):
+            await call.answer("مدل متن کانال تنظیم نشده؛ از «⚙️ مدل‌های AI کانال» کلید را وارد کن.", show_alert=True)
+            return
+        await state.clear()
+        await call.answer()
+        await _generate_and_show(call.message, state, _EDU_GOAL)
+
+    def _suggest_goal(kind: str, ref: int) -> str:
+        if kind == "d":
+            code = next((dict(r)["code"] for r in db.list_discount_codes() if r["id"] == ref), None)
+            return f"معرفی و اطلاع‌رسانی کد تخفیف {code}" if code else ""
+        product = db.get_product(ref)
+        if not product:
+            return ""
+        if kind == "p":
+            return f"معرفی محصول جدید «{product['name']}»"
+        return f"آخرین موجودی محصول «{product['name']}»؛ تأکید بر محدود بودن موجودی و فوریت خرید"
+
+    @router.callback_query(F.data.startswith("adm_sugg:"))
+    async def cb_suggest(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            _, kind, ref = call.data.split(":")
+            goal = await asyncio.to_thread(_suggest_goal, kind, int(ref)) if kind in ("p", "d", "l") else ""
+        except ValueError:
+            goal = ""
+        if not goal:
+            await call.answer("این مورد دیگر موجود نیست.", show_alert=True)
+            return
+        await state.clear()
+        await call.answer()
+        await _generate_and_show(call.message, state, goal)
+
+    @router.callback_query(F.data == "adm_sugg_skip")
+    async def cb_suggest_skip(call: CallbackQuery):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.answer()
+
     @router.callback_query(F.data == "adm_camp_regen")
     async def cb_regen(call: CallbackQuery, state: FSMContext):
         if not senior_admin_only(call.from_user.id):
@@ -278,7 +328,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         except (ValueError, IndexError):
             await call.answer("این نسخه دیگر معتبر نیست؛ دوباره تولید کن.", show_alert=True)
             return
-        await state.update_data(variant=variant, photo_id=None)
+        await state.update_data(variant=variant, photo_id=None, raw_bg=None)
         await _ask_photo(call.message, state)
         await call.answer()
 
@@ -303,14 +353,14 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         if not senior_admin_only(message.from_user.id):
             await state.clear()
             return
-        await state.update_data(photo_id=message.photo[-1].file_id)
+        await state.update_data(photo_id=message.photo[-1].file_id, raw_bg=None)
         await _after_photo(message, state, bot)
 
     @router.callback_query(F.data == "adm_camp_nophoto")
     async def cb_nophoto(call: CallbackQuery, state: FSMContext, bot: Bot):
         if not senior_admin_only(call.from_user.id):
             return await deny_mid(call)
-        await state.update_data(photo_id=None)
+        await state.update_data(photo_id=None, raw_bg=None)
         await call.answer()
         await _after_photo(call.message, state, bot)
 
@@ -337,9 +387,51 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await status.delete()
         except Exception:
             pass
-        sent = await call.message.answer_photo(BufferedInputFile(raw, filename="post.jpg"), caption="🎨 تصویر ساخته‌شده: " + source)
-        await state.update_data(photo_id=sent.photo[-1].file_id)
+        data = await state.get_data()
+        overlay_on = data.get("overlay_on")
+        if overlay_on is None:
+            overlay_on = await asyncio.to_thread(post_image.overlay_default, db)
+        img_size = data.get("img_size") or await asyncio.to_thread(post_image.default_size, db)
+        token = await asyncio.to_thread(post_image.save_raw, raw)
+        await state.update_data(raw_bg=token, overlay_on=overlay_on, img_size=img_size)
+        await _compose_and_send(call.message, state, "🎨 تصویر ساخته‌شده: " + source)
         await _after_photo(call.message, state, bot)
+
+    async def _compose_and_send(target: Message, state: FSMContext, label: str) -> bool:
+        data = await state.get_data()
+        raw = await asyncio.to_thread(post_image.load_raw, data.get("raw_bg"))
+        if raw is None:
+            return False
+        overlay = (data.get("variant") or {}).get("overlay") if data.get("overlay_on") else None
+        size = data.get("img_size") or "post"
+        out, note = raw, ""
+        try:
+            brand = await asyncio.to_thread(post_image.load_brand, db)
+            out = await asyncio.to_thread(post_image.render, raw, overlay, size, brand)
+        except Exception as exc:
+            _log.warning("نوشتن متن روی تصویر ناموفق بود: %s", exc)
+            note = "\n⚠️ متن روی تصویر نوشته نشد: " + str(exc)[:200]
+        sent = await target.answer_photo(BufferedInputFile(out, filename="post.jpg"), caption=tr(label) + note)
+        await state.update_data(photo_id=sent.photo[-1].file_id)
+        return True
+
+    @router.callback_query(F.data.in_({"adm_camp_size", "adm_camp_ovr"}))
+    async def cb_image_tweak(call: CallbackQuery, state: FSMContext, bot: Bot):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        data = await state.get_data()
+        if not data.get("raw_bg") or not data.get("variant"):
+            await call.answer("تصویر AI برای تغییر وجود ندارد؛ دوباره بساز.", show_alert=True)
+            return
+        if call.data == "adm_camp_size":
+            await state.update_data(img_size=post_image.next_size(data.get("img_size") or "post"))
+        else:
+            await state.update_data(overlay_on=not data.get("overlay_on"))
+        await call.answer()
+        if not await _compose_and_send(call.message, state, "🎨 تصویر بازسازی شد"):
+            await call.message.answer("❌ تصویر پایه پاک شده؛ «تصویر جدید با AI» را بزن.")
+            return
+        await _show_preview(call.message, state, bot)
 
     async def _ask_channel(target: Message, state: FSMContext):
         await state.set_state(AdminCampaign.waiting_channel)
@@ -394,6 +486,11 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await state.clear()
             return
         image_rows = [[("🎨 تصویر جدید با AI", "adm_camp_genimg")]] if channel_ai.image_configured(db) else []
+        if data.get("raw_bg"):
+            tweak = [(post_image.SIZE_LABELS[data.get("img_size") or "post"], "adm_camp_size")]
+            if data["variant"].get("overlay"):
+                tweak.append(("🔤 متن روی تصویر: روشن" if data.get("overlay_on") else "🔤 متن روی تصویر: خاموش", "adm_camp_ovr"))
+            image_rows.insert(0, tweak)
         await target.answer(
             "این پست به کانال ارسال شود؟",
             reply_markup=_kb(

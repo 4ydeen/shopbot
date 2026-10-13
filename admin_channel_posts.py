@@ -3,6 +3,7 @@
 
 import asyncio
 import html
+import inspect
 import json
 import logging
 from datetime import datetime, timezone
@@ -87,6 +88,20 @@ async def deliver(bot: Bot, chat_id, caption: str, button_text: str, deeplink: d
     return await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
 
 
+async def deliver_poll(bot: Bot, chat_id, poll: dict, kind: str, button_text: str, deeplink: dict, post_id: int = None) -> Message:
+    markup = await build_markup(bot, deeplink, button_text, post_id)
+    kwargs = {"chat_id": chat_id, "question": poll["question"], "options": list(poll["options"]), "is_anonymous": True, "reply_markup": markup}
+    if kind == "quiz":
+        params = inspect.signature(bot.send_poll).parameters
+        kwargs["type"] = "quiz"
+        kwargs["explanation"] = poll.get("explanation") or None
+        if "correct_option_ids" in params and "correct_option_id" not in params:
+            kwargs["correct_option_ids"] = [poll["correct_index"]]
+        else:
+            kwargs["correct_option_id"] = poll["correct_index"]
+    return await bot.send_poll(**kwargs)
+
+
 def create_from_data(db, admin_id: int, data: dict, status: str = "draft") -> int:
     variant = data["variant"]
     return db.create_channel_post(
@@ -98,7 +113,10 @@ def create_from_data(db, admin_id: int, data: dict, status: str = "draft") -> in
 async def publish_record(bot: Bot, db, post_id: int) -> tuple:
     post = await asyncio.to_thread(db.get_channel_post, post_id)
     try:
-        msg = await deliver(bot, post["channel_id"], post["caption"], post["button_text"], post_deeplink(post), post["photo_id"], post_id)
+        if post["kind"] in ("poll", "quiz"):
+            msg = await deliver_poll(bot, post["channel_id"], json.loads(post["poll_json"]), post["kind"], post["button_text"], post_deeplink(post), post_id)
+        else:
+            msg = await deliver(bot, post["channel_id"], post["caption"], post["button_text"], post_deeplink(post), post["photo_id"], post_id)
     except Exception as exc:
         await asyncio.to_thread(db.update_channel_post, post_id, status="error", error=str(exc)[:300])
         return False, str(exc)
@@ -141,6 +159,12 @@ def _view_text(post, stats: dict = None) -> str:
     lines.append(f"🔗 دیپ‌لینک: <code>{html.escape(param)}</code>")
     if post["photo_id"]:
         lines.append("🖼 دارای عکس")
+    if post["kind"] in ("poll", "quiz"):
+        try:
+            poll = json.loads(post["poll_json"] or "{}")
+        except ValueError:
+            poll = {}
+        lines.append(("🗳 نظرسنجی" if post["kind"] == "poll" else "❓ کوییز") + ": " + " | ".join(html.escape(o) for o in poll.get("options", [])))
     if post["status"] == "sent":
         lines.append(_stats_text(stats))
     return "\n".join(lines)
@@ -149,19 +173,20 @@ def _view_text(post, stats: dict = None) -> str:
 def _view_kb(post) -> InlineKeyboardMarkup:
     pid = post["id"]
     edit_row = [("✏️ ویرایش متن", f"adm_cpost_edit:{pid}:c"), ("🔘 ویرایش دکمه", f"adm_cpost_edit:{pid}:b")]
+    edit_rows = [] if post["kind"] in ("poll", "quiz") else [edit_row]
     back = [("⬅️ لیست پست‌ها", "adm_cpost_list:all:0")]
     if post["status"] == "sent":
         pin = ("📍 برداشتن پین", f"adm_cpost_unpin:{pid}") if post["is_pinned"] else ("📌 پین در کانال", f"adm_cpost_pin:{pid}")
-        return _kb(edit_row, [pin], [("🗑 حذف از کانال", f"adm_cpost_del:{pid}")], back)
+        return _kb(*edit_rows, [pin], [("🗑 حذف از کانال", f"adm_cpost_del:{pid}")], back)
     if post["status"] == "scheduled":
         return _kb(
             [("📣 ارسال همین حالا", f"adm_cpost_send:{pid}")],
             [("⏰ تغییر زمان", f"adm_cpost_sched:{pid}"), ("🚫 لغو زمان‌بندی", f"adm_cpost_unsched:{pid}")],
-            edit_row, [("🗑 حذف", f"adm_cpost_rm:{pid}")], back,
+            *edit_rows, [("🗑 حذف", f"adm_cpost_rm:{pid}")], back,
         )
     return _kb(
         [("📣 ارسال به کانال", f"adm_cpost_send:{pid}"), ("⏰ زمان‌بندی", f"adm_cpost_sched:{pid}")],
-        edit_row, [("🗑 حذف پیش‌نویس", f"adm_cpost_rm:{pid}")], back,
+        *edit_rows, [("🗑 حذف پیش‌نویس", f"adm_cpost_rm:{pid}")], back,
     )
 
 
@@ -208,7 +233,8 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             [(FILTER_LABELS["scheduled"], "adm_cpost_list:scheduled:0")],
             [(FILTER_LABELS["sent"], "adm_cpost_list:sent:0"), (FILTER_LABELS["error"], "adm_cpost_list:error:0")],
             [("🤖 ساخت پست جدید", "adm_camp_start"), ("🗓 برنامه‌ی هفتگی با AI", "adm_cplan")],
-            [("📊 آمار پست‌ها", "adm_cpost_stats")],
+            [("🧩 نظرسنجی، کوییز و آموزشی", "adm_cengage")],
+            [("📊 آمار پست‌ها", "adm_cpost_stats"), ("🎨 قالب برند تصاویر", "adm_pbrand")],
             [("⬅️ بازگشت", "adm_deeplink_tools")],
         ))
         await call.answer()

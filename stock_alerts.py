@@ -42,6 +42,12 @@ async def check_and_notify_low_stock(send_fn, db, product_id: int, bot_token: st
     if not should_alert:
         return
 
+    try:
+        import channel_suggestions
+        channel_suggestions.queue_low_stock(db, product_id)
+    except Exception:
+        logger.warning("ثبت پیشنهاد پست برای موجودی کم ناموفق بود.", exc_info=True)
+
     product = db.get_product(product_id)
     product_name = product["name"] if product else "نامشخص"
     text = (

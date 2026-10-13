@@ -303,6 +303,17 @@ class AdminChannelAI(StatesGroup):
     waiting_image_model = State()
 
 
+class AdminChannelEngage(StatesGroup):
+    waiting_topic = State()
+    confirming = State()
+
+
+class AdminPostBrand(StatesGroup):
+    waiting_color = State()
+    waiting_logo = State()
+    waiting_font = State()
+
+
 class AdminAddAdmin(StatesGroup):
     waiting_id = State()
 
