@@ -65,11 +65,19 @@ async def execute_renewal(db, order) -> str:
             if mode == "full" and add_volume and before.get("total_bytes"):
                 reset_usage = False
                 preserve_remaining = False
+            # پلن با حجم ۰ یعنی «نامحدود»: در تمدید کامل/حجم باید سقف حجم سرویس هم نامحدود شود
+            # (قبلاً add_volume=0 فقط «بدون تغییر حجم» تلقی می‌شد و فقط زمان اضافه می‌شد).
+            unlimited_volume = mode in ("full", "volume") and not add_volume
+            if unlimited_volume:
+                preserve_remaining = False
             await provider.update_user(
                 cc["username"], add_volume_gb=add_volume, add_days=add_days, reset_usage=reset_usage,
-                preserve_remaining=preserve_remaining, **provider_kwargs(provider, renewal_users),
+                preserve_remaining=preserve_remaining, unlimited_volume=unlimited_volume,
+                **provider_kwargs(provider, renewal_users),
             )
-            if mode == "full" and add_volume:
+            if unlimited_volume:
+                set_volume_gb = 0
+            elif mode == "full" and add_volume:
                 # سقف واقعیِ بعد از preserve_remaining را از خود پنل می‌خوانیم تا رکورد‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 # محلی دقیقاً هم‌سو با پنل بماند (نه با محاسبه‌ی جداگانه و احتمالاً ناهم‌خوان).‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
                 usage = await provider.get_user_usage(cc["username"])
