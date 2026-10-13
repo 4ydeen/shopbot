@@ -224,7 +224,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await state.clear()
         counts = {name: await asyncio.to_thread(db.count_channel_posts, None if name == "all" else name) for name in FILTERS}
         text = (
-            "🗂 <b>پست‌های کانال</b>\n\n"
+            "🤖 <b>مرکز مدیریت محتوای کانال با AI</b>\n\n"
             f"همه: {counts['all']} | پیش‌نویس: {counts['draft']} | زمان‌بندی‌شده: {counts['scheduled']} | "
             f"ارسال‌شده: {counts['sent']} | خطا: {counts['error']}"
         )
@@ -234,8 +234,9 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             [(FILTER_LABELS["sent"], "adm_cpost_list:sent:0"), (FILTER_LABELS["error"], "adm_cpost_list:error:0")],
             [("🤖 ساخت پست جدید", "adm_camp_start"), ("🗓 برنامه‌ی هفتگی با AI", "adm_cplan")],
             [("🧩 نظرسنجی، کوییز و آموزشی", "adm_cengage")],
-            [("📊 آمار پست‌ها", "adm_cpost_stats"), ("🎨 قالب برند تصاویر", "adm_pbrand")],
-            [("⬅️ بازگشت", "adm_deeplink_tools")],
+            [("⚙️ تنظیمات AI و یادگیری", "adm_chai"), ("🎨 قالب برند تصاویر", "adm_pbrand")],
+            [("🔗 ابزار دیپ‌لینک تبلیغاتی", "adm_deeplink_tools")],
+            [("⬅️ بازگشت به بازاریابی و رشد", "adm_cat:marketing")],
         ))
         await call.answer()
 

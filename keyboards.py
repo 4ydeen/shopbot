@@ -1649,8 +1649,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_admins_menu", "👤 مدیریت ادمین‌ها", "adm_admins_menu"),
     ("adm_broadcast", "📢 پیام همگانی", "adm_broadcast"),
     ("adm_deeplink_tools", "🔗 دیپ‌لینک و پست کانال", "adm_deeplink_tools"),
-    ("adm_camp_start", "🤖 ساخت پست کانال با AI", "adm_camp_start"),
-    ("adm_cposts", "🗂 مدیریت پست‌های کانال", "adm_cposts"),
+    ("adm_cposts", "🤖 مدیریت محتوای کانال با AI", "adm_cposts"),
     ("adm_stats", "📊 آمار فروش", "adm_stats"),
     ("adm_user_search", "👥 مدیریت کاربران", "adm_stats_user"),
     ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
@@ -1728,12 +1727,10 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_referral_settings",
         "adm_signup_gift_settings",
         "adm_broadcast",
-        "adm_deeplink_tools",
-        "adm_camp_start",
-        "adm_cposts",
         "adm_forcejoin_menu",
         "adm_terms_menu",
         "adm_temp_message",
+        "adm_cposts",
     ]),
     ("finance", "💰 مالی و پرداخت", [
         "adm_set_card",
@@ -2006,7 +2003,10 @@ def admin_category_item_keys(db, cat_key: str) -> list:
     if defaults is None:
         return []
     overrides = db.get_admin_item_cat_overrides()
-    base = [k for k in defaults if overrides.get(k, cat_key) == cat_key]
+    base = [
+        k for k in defaults
+        if (overrides.get(k, cat_key) == cat_key or (cat_key == "marketing" and k == "adm_cposts"))
+    ]
     moved_in = [
         k for k, c in overrides.items()
         if c == cat_key and k not in defaults and _admin_item_exists(k)
@@ -2549,9 +2549,6 @@ def admin_cfg_transfer_confirm_kb(tg_id: int, cc_id: int, target_id: int) -> Inl
 def deeplink_tools_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=tr("🔗 ساخت دیپ‌لینک تبلیغاتی"), callback_data="adm_dl_build")],
-        [InlineKeyboardButton(text=tr("🤖 ساخت پست کانال با AI"), callback_data="adm_camp_start")],
-        [InlineKeyboardButton(text=tr("🗂 مدیریت پست‌های کانال"), callback_data="adm_cposts")],
-        [InlineKeyboardButton(text=tr("⚙️ مدل‌های AI کانال"), callback_data="adm_chai")],
         [InlineKeyboardButton(text=tr("🖼 افزودن دکمه به پست کانال"), callback_data="adm_dl_addbtn")],
         [InlineKeyboardButton(text=tr("📋 پارامترهای اصلی منوی کاربر"), callback_data="adm_dl_params_list")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
