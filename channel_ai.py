@@ -29,6 +29,8 @@ LEARNING_KEY = "channel_ai_learning"
 LEARNING_LIMIT = 40
 LEARNING_IN_PROMPT = 8
 COLORS_KEY = "channel_banner_colors"
+BANNER_BASE_PROMPT_KEY = "channel_banner_base_prompt"
+DEFAULT_BANNER_BASE_PROMPT = "بنر تبلیغاتی حرفه‌ای، پرانرژی و سینمایی برای برند VPN؛ کنتراست بالا، نورپردازی نئونی آبی و بنفش، عمق سه‌بعدی، ترکیب‌بندی پویا و سلسله‌مراتب بصری واضح. لوگوی مرجع را بدون تغییر حفظ کن و برای تیتر فارسی فضای خوانا در نظر بگیر."
 DEFAULT_IMAGE_PROMPT = "A glowing shield and a fast rocket over a futuristic network of light, symbolizing private fast internet"
 BANNER_RULES = (
     "Style: premium modern advertising banner, glossy gradients, soft glow, floating sparkles and subtle "
@@ -209,7 +211,19 @@ def _normalize(raw: bytes) -> bytes:
     return out.getvalue()
 
 
-def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "") -> str:
+def saved_banner_base_prompt(db) -> str:
+    """پرامپت پایه‌ی قابل ویرایش توسط مدیر؛ خالی بودن آن به معنی استفاده از مقدار پیش‌فرض است."""
+    custom = (db.get_setting(BANNER_BASE_PROMPT_KEY, "") or "").strip()
+    return custom or DEFAULT_BANNER_BASE_PROMPT
+
+
+def save_banner_base_prompt(db, value: str) -> None:
+    """ذخیره‌ی دستورالعمل پایه‌ی بنر؛ مقدار '-' تنظیم سفارشی را پاک می‌کند."""
+    value = (value or "").strip()
+    db.set_setting(BANNER_BASE_PROMPT_KEY, "" if value == "-" else value[:3000])
+
+
+def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "") -> str:
     """پرامپت بنر فارسی. متن‌ها عیناً داخل پرامپت می‌آیند تا مدل تصویر خودش آن‌ها را فارسی بکشد."""
     overlay = overlay or {}
     texts = []
@@ -226,6 +240,7 @@ def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "") -> str
         ("Persian texts to render exactly: " + "; ".join(texts) + ".") if texts else "",
         f"Brand colors requested by the admin: {palette}.",
         f"Scene and mood: {(scene or '').strip()[:300] or DEFAULT_IMAGE_PROMPT}.",
+        "CUSTOMIZABLE BASE PROMPT: " + ((base_prompt or "").strip()[:3000] or DEFAULT_BANNER_BASE_PROMPT),
         BANNER_RULES,
     ]
     return " ".join(p for p in parts if p)

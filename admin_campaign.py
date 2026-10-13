@@ -415,7 +415,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             await target.answer("اطلاعات پست کامل نیست؛ از اول شروع کن.", reply_markup=_kb([("⬅️ بازگشت", _BACK)]))
             return
         status = await target.answer("🎨 در حال ساخت بنر فارسی با AI (ممکن است چند دقیقه طول بکشد)...")
-        prompt = channel_ai.build_banner_prompt(variant.get("overlay") or {}, variant.get("image_prompt") or "", colors)
+        prompt = channel_ai.build_banner_prompt(variant.get("overlay") or {}, variant.get("image_prompt") or "", colors, await asyncio.to_thread(channel_ai.saved_banner_base_prompt, db))
         try:
             raw, source = await channel_ai.generate_image(db, prompt)
         except Exception as exc:
@@ -604,6 +604,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             "🎨 <b>مدل تصویر (بنر فارسی)</b>\n"
             f"<code>{html.escape(channel_ai.jarvis_image_model(db))}</code>\n\n"
             f"🖼 لوگوی بنر: {'✅ دارد' if channel_ai.has_logo() else '❌ ندارد'}\n"
+            f"🧩 پرامپت پایه‌ی سفارشی: {'✅ تنظیم شده' if (db.get_setting(channel_ai.BANNER_BASE_PROMPT_KEY, '') or '').strip() else 'پیش‌فرض'}\n"
             f"🧠 پست‌های تأییدشده‌ی یادگرفته‌شده: {len(channel_ai.learning_examples(db, channel_ai.LEARNING_LIMIT))}"
         )
 
@@ -612,6 +613,7 @@ def register(router: Router, db, senior_admin_only, deny_mid):
             [("🔑 کلید Jarvis", "adm_chai_key")],
             [("📝 مدل متن", "adm_chai_tmodel"), ("🎨 مدل تصویر", "adm_chai_imodel")],
             [("🖼 لوگوی بنر", "adm_chai_logo"), ("🧠 یادگیری AI", "adm_chai_learn")],
+            [("🧩 پرامپت پایه بنر", "adm_chai_banner_prompt")],
             [("🧪 تست متن", "adm_chai_ttest"), ("🧪 تست تصویر (از اعتبار کم می‌شود)", "adm_chai_itest")],
             [("⬅️ بازگشت", _BACK)],
         )
@@ -638,6 +640,39 @@ def register(router: Router, db, senior_admin_only, deny_mid):
         await state.clear()
         await _show_chai(call.message)
         await call.answer()
+
+    @router.callback_query(F.data == "adm_chai_banner_prompt")
+    async def cb_chai_banner_prompt(call: CallbackQuery, state: FSMContext):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        current = (await asyncio.to_thread(db.get_setting, channel_ai.BANNER_BASE_PROMPT_KEY, "") or "").strip()
+        preview = current if current else channel_ai.DEFAULT_BANNER_BASE_PROMPT
+        await state.set_state(AdminChannelAI.waiting_banner_base_prompt)
+        await call.message.answer(
+            "🧩 <b>پرامپت پایه‌ی بنر</b>\n\n"
+            "دستورالعمل ثابت برند را بفرست. این متن در کنار اطلاعات داینامیک هر پست (موضوع، محصول، قیمت و تخفیف) به مدل تصویرساز داده می‌شود.\n"
+            "حداکثر ۳۰۰۰ کاراکتر. برای برگشت به پرامپت پیش‌فرض فقط - بفرست.\n\n"
+            "<b>پرامپت فعلی:</b>\n" + html.escape(preview[:1800]),
+            reply_markup=_chai_back_kb(),
+        )
+        await call.answer()
+
+    @router.message(AdminChannelAI.waiting_banner_base_prompt, F.text)
+    async def msg_chai_banner_prompt(message: Message, state: FSMContext):
+        if not senior_admin_only(message.from_user.id):
+            await state.clear()
+            return
+        value = (message.text or "").strip()
+        if not value:
+            await message.answer("متن پرامپت خالی است. متن بفرست یا برای پیش‌فرض - بفرست.", reply_markup=_chai_back_kb())
+            return
+        if len(value) > 3000:
+            await message.answer("پرامپت حداکثر ۳۰۰۰ کاراکتر باشد.", reply_markup=_chai_back_kb())
+            return
+        await asyncio.to_thread(channel_ai.save_banner_base_prompt, db, value)
+        await _chai_log(message.from_user.id, "پرامپت پایه بنر به‌روزرسانی شد" if value != "-" else "پرامپت پایه بنر به پیش‌فرض برگشت")
+        await state.clear()
+        await _show_chai(message, edit=False)
 
     @router.callback_query(F.data == "adm_chai_logo")
     async def cb_chai_logo(call: CallbackQuery, state: FSMContext):
