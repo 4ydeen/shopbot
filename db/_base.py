@@ -1627,6 +1627,8 @@ class DatabaseBase:
             ("support_messages", "is_read_by_admin", "INTEGER DEFAULT 0"),
             ("tickets", "claimed_by", "INTEGER"),
             ("channel_posts", "scheduled_at", "TEXT"),
+            ("channel_posts", "kind", "TEXT DEFAULT 'post'"),
+            ("channel_posts", "poll_json", "TEXT"),
             ("tickets", "department_id", "INTEGER"),
             ("orders", "quantity", "INTEGER DEFAULT 1"),
             ("orders", "config_name", "TEXT"),

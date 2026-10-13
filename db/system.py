@@ -1770,13 +1770,26 @@ class SystemMixin:
 
 
     def create_channel_post(self, admin_id: int, channel_id: str, caption: str, button_text: str, deeplink: str,
-                            photo_id: str = None, angle: str = "", status: str = "draft") -> int:
+                            photo_id: str = None, angle: str = "", status: str = "draft", kind: str = "post",
+                            poll_json: str = None) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO channel_posts(admin_id,channel_id,caption,button_text,deeplink,photo_id,angle,status) VALUES(?,?,?,?,?,?,?,?)",
-                (admin_id, channel_id, caption, button_text, deeplink, photo_id, angle, status),
+                "INSERT INTO channel_posts(admin_id,channel_id,caption,button_text,deeplink,photo_id,angle,status,kind,poll_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (admin_id, channel_id, caption, button_text, deeplink, photo_id, angle, status, kind, poll_json),
             )
             return cur.lastrowid
+
+    def get_catalog_max_ids(self) -> tuple:
+        with self._get_conn() as conn:
+            product = conn.execute("SELECT COALESCE(MAX(id),0) FROM products").fetchone()[0]
+            code = conn.execute("SELECT COALESCE(MAX(id),0) FROM discount_codes").fetchone()[0]
+            return product, code
+
+    def list_products_after(self, last_id: int, limit: int = 5):
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id,name,is_active FROM products WHERE id>? ORDER BY id LIMIT ?", (last_id, limit),
+            ).fetchall()
 
     def get_channel_post(self, post_id: int):
         with self._get_conn() as conn:
