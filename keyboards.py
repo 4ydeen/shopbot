@@ -1662,6 +1662,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_ai_support_settings", "🤖 دستیار پشتیبانی و سوالات متداول", "adm_ai_support_settings"),
     ("adm_ai_agents", "🧬 هوش مصنوعی", "adm_ai_agents"),
     ("adm_business_settings", "💼 تلگرام بیزنس", "adm_business_settings"),
+    ("adm_userbot", "🤖 یوزربات (پاسخ‌گوی پیوی مدیر)", "adm_userbot"),
     ("adm_translation_settings", "🌐 ترجمه خودکار", "adm_translation_settings"),
     ("adm_lang_settings", "🌐 زبان ادمین/کاربران", "adm_lang_settings"),
 ]
@@ -1764,6 +1765,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_ai_agents",
         "adm_ai_admin_chat",
         "adm_business_settings",
+        "adm_userbot",
         "adm_translation_settings",
         "adm_lang_settings",
     ]),
@@ -1839,6 +1841,9 @@ def _is_item_visible(db, key: str, is_main_bot: bool) -> bool:
         # فقط داخل بات اختصاصی نمایندگی VIP (اعتبار حجمی)؛ نه بات اصلی، نه طلایی
         return (not is_main_bot) and _is_volume_credit_owner(db)
     if key.startswith(("adm_set_xgw_", "adm_xgw_pay_")) and not is_main_bot:
+        return False
+    if key == "adm_userbot" and not is_main_bot:
+        # یوزربات فقط به اکانت تلگرام مالک بات اصلی وصل می‌شود
         return False
     if key in ("adm_resellers_menu", "adm_credit_resellers_menu", "adm_reseller_requests_menu", "adm_commission_resellers_menu") and not is_main_bot:
         # بات‌های نمایندگی خودشان اجازه‌ی ساخت زیرنماینده، فروش اعتبار یا مدیریت

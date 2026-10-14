@@ -30,6 +30,7 @@ from config import (
 from database import Database
 from handlers_user import create_user_router
 from business_chat import create_business_router
+from userbot_admin import create_userbot_router
 from handlers_admin import create_admin_router
 from renewal_reminders import renewal_reminder_loop
 from connect_alerts import connect_alert_loop
@@ -412,6 +413,7 @@ class BotManager:
 
         if is_main_bot:
             dp.include_router(create_business_router(db, language_mw))
+            dp.include_router(create_userbot_router(db))
         dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
         dp.include_router(create_user_router(db, is_main_bot=is_main_bot, bot_manager=self))
 

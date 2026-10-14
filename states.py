@@ -77,6 +77,13 @@ class AdminBusiness(StatesGroup):
     waiting_exception_id = State()
 
 
+class AdminUserbot(StatesGroup):
+    waiting_first_message = State()
+    waiting_persona = State()
+    waiting_exception_id = State()
+    waiting_hours = State()
+
+
 class AdminTutorialDeviceAdd(StatesGroup):
     waiting_name = State()
 

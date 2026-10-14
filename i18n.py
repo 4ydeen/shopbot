@@ -891,6 +891,7 @@ _PHRASE_TRANSLATIONS.update({
     # ADMIN_PANEL_ITEMS
     "📂 مدیریت دسته‌بندی‌ها": "📂 Manage categories",
     "💼 تلگرام بیزنس": "💼 Telegram Business",
+    "🤖 یوزربات (پاسخ‌گوی پیوی مدیر)": "🤖 Userbot (owner PV auto-reply)",
     "📦 مدیریت محصولات": "📦 Manage products",
     "📊 حجم و پنل من": "📊 My volume & panel",
     "🔗 افزودن کانفیگ به محصول": "🔗 Add configs to a product",
