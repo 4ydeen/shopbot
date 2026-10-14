@@ -385,23 +385,71 @@ def save_banner_base_prompt(db, value: str) -> None:
     db.set_setting(BANNER_BASE_PROMPT_KEY, "" if value == "-" else value[:3000])
 
 
+# قالب‌های طراحی بنر بر اساس نوع پست. emphasis همیشه در پرامپت می‌آید؛ layout فقط وقتی بنر مرجع سبک
+# نداریم (چون با بنر مرجع، چیدمان را خودِ مرجع تعیین می‌کند و نباید با آن تضاد پیدا کند).
+BANNER_TEMPLATES = {
+    "discount": {
+        "emphasis": "This is a SALE banner: the discount percentage is the hero of the design and must be the first thing the eye sees.",
+        "layout": (
+            "LAYOUT TEMPLATE (sale): a very large glowing discount badge on one side as the dominant element, "
+            "the headline across the upper-center, and below it a clear price block where the old price is smaller with a visible strikethrough line "
+            "and the new price is much larger, bold and in the accent color. Any urgency chip is a small ribbon near the price, clearly smaller than the price."
+        ),
+    },
+    "code": {
+        "emphasis": "This is a DISCOUNT CODE banner: the discount badge is the hero. Do not write any code text in the image; the code is given in the post caption.",
+        "layout": (
+            "LAYOUT TEMPLATE (code): a very large glowing discount badge in the center-right as the dominant element, the headline above it, "
+            "and a calm empty glass-style ribbon area below the badge that suggests a coupon. Any urgency chip is a small ribbon beside the coupon area."
+        ),
+    },
+    "product": {
+        "emphasis": "This is a PRODUCT banner: the headline and the price are the hero; calm, premium and trustworthy, not shouting.",
+        "layout": (
+            "LAYOUT TEMPLATE (product): one clear focal subject on one side, the headline large on the opposite side, "
+            "and the price inside a rounded glass card under the headline."
+        ),
+    },
+    "test": {
+        "emphasis": "This is a FREE TRIAL banner: friendly and inviting, no price anywhere; the headline is the hero.",
+        "layout": (
+            "LAYOUT TEMPLATE (free trial): a glowing unlocked-gift or connected-power-button motif as the focal subject, "
+            "the headline very large above or beside it, and a soft rounded glowing button shape without any text near the bottom."
+        ),
+    },
+    "wheel": {
+        "emphasis": "This is a LUCKY WHEEL banner: playful and energetic yet still inside the brand palette; the headline is the hero.",
+        "layout": (
+            "LAYOUT TEMPLATE (lucky wheel): a glossy colorful prize wheel with plain unlabeled segments as the focal subject on one side, "
+            "light sparkles around it, and the headline very large on the opposite side."
+        ),
+    },
+}
+
+
 def build_banner_prompt(overlay: dict, scene: str = "", colors: str = "", base_prompt: str = "", logo_mode: str = "exact", style_ref: bool = False) -> str:
     """پرامپت بنر فارسی. متن‌ها عیناً داخل پرامپت می‌آیند تا مدل تصویر خودش آن‌ها را فارسی بکشد."""
     overlay = overlay or {}
     texts = []
     if overlay.get("title"):
         texts.append(f"headline «{overlay['title']}»")
+    if overlay.get("original_price_toman") and overlay.get("price_toman"):
+        texts.append(f"old price «{post_image.fa_number(overlay['original_price_toman'])} تومان» drawn smaller with a clear strikethrough line")
     if overlay.get("price_toman"):
-        texts.append(f"price «{post_image.fa_number(overlay['price_toman'])} تومان»")
+        texts.append(f"price «{post_image.fa_number(overlay['price_toman'])} تومان»" + (" (the new price, largest of the two prices)" if overlay.get("original_price_toman") else ""))
     badge = post_image._badge_text(overlay)
     if badge:
         texts.append(f"discount badge «{badge}»")
+    for chip in (overlay.get("urgency") or [])[:2]:
+        texts.append(f"small urgency chip «{chip}»")
+    template = BANNER_TEMPLATES.get(overlay.get("template") or "")
     palette = (colors or "").strip()[:150] or "a modern harmonious palette that suits the scene"
     parts = [
         "Design a Persian advertising banner for a fast and private VPN internet service.",
         ("Persian texts to render exactly: " + "; ".join(texts) + ".") if texts else "",
         f"Brand colors requested by the admin: {palette}.",
         f"Scene and mood: {(scene or '').strip()[:300] or DEFAULT_IMAGE_PROMPT}.",
+        ("TEMPLATE PRIORITY (overrides any conflicting visual hierarchy stated elsewhere in this prompt): " + template["emphasis"] + ("" if style_ref else " " + template["layout"])) if template else "",
         "CUSTOMIZABLE BASE PROMPT: " + ((base_prompt or "").strip()[:3000] or DEFAULT_BANNER_BASE_PROMPT),
         BANNER_RULES_TEMPLATE if style_ref else BANNER_RULES,
         STYLE_RULES if style_ref else "",

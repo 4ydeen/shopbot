@@ -232,6 +232,17 @@ def _draw_overlay(canvas, overlay: dict, size: str, brand: dict, logo: bool):
         text = f"{fa_number(price)} تومان"
         box = _pill(canvas, draw, text, price_font, (width + _width(draw, text, price_font) + 2 * pad) // 2, int(bottom - price_font.size - 2 * pad), accent, accent_ink, pad)
         bottom = box[1] - int(width * 0.04)
+        original = overlay.get("original_price_toman")
+        if original and int(original) > int(price):
+            # قیمت قبل از تخفیف: بالای قیمت جدید، با خط روی آن
+            old_font = _font(width * 0.04)
+            old_text = f"{fa_number(original)} تومان"
+            old_w = _width(draw, old_text, old_font)
+            old_y = bottom - old_font.size
+            draw.text((width / 2, old_y), _display(old_text), font=old_font, fill=ink, anchor="ma", **_text_kwargs())
+            line_y = old_y + old_font.size * 0.78
+            draw.line((width / 2 - old_w / 2 - 4, line_y, width / 2 + old_w / 2 + 4, line_y), fill=ink, width=max(2, int(width * 0.004)))
+            bottom = old_y - int(width * 0.025)
 
     title_font, lines = _fit_title(draw, overlay["title"], width - 2 * margin, int(width * 0.085), int(width * 0.04))
     step = int(title_font.size * 1.4)
