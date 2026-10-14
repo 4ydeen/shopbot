@@ -288,9 +288,20 @@ def fetch_api_credentials(phone: str):
         if found:
             print(f"Using your existing app (api_id={found[0]}).")
             return found
-        m = re.search(r'name="hash"\s+value="([^"]+)"', html)
+        m = (re.search(r'name="hash"\s+value="([^"]+)"', html)
+             or re.search(r'value="([^"]+)"[^>]*name="hash"', html))
         if not m:
-            print("Could not find the create-app form on my.telegram.org/apps.")
+            time.sleep(2)
+            html = call("/apps", referer="/")
+            found = _parse_mytg_app(html)
+            if found:
+                print(f"Using your existing app (api_id={found[0]}).")
+                return found
+            m = (re.search(r'name="hash"\s+value="([^"]+)"', html)
+                 or re.search(r'value="([^"]+)"[^>]*name="hash"', html))
+        if not m:
+            print("Could not find the create-app form on my.telegram.org/apps. First 300 chars of the page:")
+            print(html[:300])
             return None
         short = "shop" + "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(10))
         raw = call("/apps/create", {
