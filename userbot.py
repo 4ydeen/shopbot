@@ -221,6 +221,99 @@ def _ask(prompt: str, secret: bool = False) -> str:
     return (getpass.getpass(prompt) if secret else input(prompt)).strip()
 
 
+# ---- automatic api_id / api_hash from my.telegram.org ---------------------------------------------
+_MYTG = "https://my.telegram.org"
+_MYTG_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36")
+
+
+def _parse_mytg_app(html: str):
+    m_id = re.search(r"App api_id:.*?<strong>\s*(\d+)\s*</strong>", html, re.S)
+    m_hash = re.search(r"App api_hash:.*?>\s*([0-9a-f]{32})\s*<", html, re.S)
+    if m_id and m_hash:
+        return int(m_id.group(1)), m_hash.group(1)
+    return None
+
+
+def fetch_api_credentials(phone: str):
+    """Log in to my.telegram.org with the phone + code and return (api_id, api_hash).
+
+    Reuses the account's existing app or creates one. Returns None on any failure
+    (my.telegram.org answers "ERROR" for some IPs, e.g. known VPN / datacenter ranges).
+    """
+    import http.cookiejar
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def call(path, data=None, referer="/auth"):
+        body = urllib.parse.urlencode(data).encode() if data is not None else None
+        req = urllib.request.Request(_MYTG + path, data=body, headers={
+            "User-Agent": _MYTG_UA,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Origin": _MYTG,
+            "Referer": _MYTG + referer,
+            "X-Requested-With": "XMLHttpRequest",
+        })
+        try:
+            with opener.open(req, timeout=30) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.read().decode("utf-8", "replace")
+
+    phone = phone.strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    try:
+        print("Requesting a my.telegram.org login code...")
+        raw = call("/auth/send_password", {"phone": phone})
+        try:
+            random_hash = json.loads(raw)["random_hash"]
+        except (ValueError, KeyError, TypeError):
+            print(f"my.telegram.org refused the request: {raw[:200]}")
+            return None
+        print("A code was sent to your Telegram app (chat 'Telegram') or by SMS.")
+        code = _ask("my.telegram.org login code: ", secret=True).replace(" ", "")
+        raw = call("/auth/login", {"phone": phone, "random_hash": random_hash, "password": code})
+        if raw.strip().lower() != "true" or not any(c.name == "stel_token" for c in jar):
+            print(f"my.telegram.org login failed: {raw[:200]}")
+            return None
+
+        html = call("/apps", referer="/")
+        found = _parse_mytg_app(html)
+        if found:
+            print(f"Using your existing app (api_id={found[0]}).")
+            return found
+        m = re.search(r'name="hash"\s+value="([^"]+)"', html)
+        if not m:
+            print("Could not find the create-app form on my.telegram.org/apps.")
+            return None
+        short = "shop" + "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(10))
+        raw = call("/apps/create", {
+            "hash": m.group(1),
+            "app_title": "ShopSupport",
+            "app_shortname": short,
+            "app_url": "",
+            "app_platform": "desktop",
+            "app_desc": "Support assistant",
+        }, referer="/apps")
+        if raw.strip().upper().startswith("ERROR"):
+            print("my.telegram.org answered ERROR for this server IP (checking once more in case the app was created).")
+        found = _parse_mytg_app(call("/apps", referer="/"))
+        if found:
+            print(f"Created your app (api_id={found[0]}).")
+            return found
+        print("No app was created.")
+        return None
+    except (OSError, ValueError) as exc:
+        print(f"Network error talking to my.telegram.org: {exc}")
+        return None
+
+
 async def interactive_login() -> bool:
     from telethon import TelegramClient
     from telethon.errors import (
@@ -229,14 +322,32 @@ async def interactive_login() -> bool:
     )
     from telethon.sessions import StringSession
 
-    print("Get api_id and api_hash from https://my.telegram.org (API development tools).")
-    try:
-        api_id = int(_ask("api_id: "))
-    except ValueError:
-        print("api_id must be a number.")
-        return False
-    api_hash = _ask("api_hash: ")
-    phone = _ask("Phone number with country code (e.g. +98912...): ")
+    print("api_id / api_hash: type them, or press Enter to get them automatically from my.telegram.org.")
+    raw_id = _ask("api_id (Enter = automatic): ")
+    if raw_id:
+        try:
+            api_id = int(raw_id)
+        except ValueError:
+            print("api_id must be a number.")
+            return False
+        api_hash = _ask("api_hash: ")
+        phone = _ask("Phone number with country code (e.g. +98912...): ")
+    else:
+        phone = _ask("Phone number with country code (e.g. +98912...): ")
+        auto = fetch_api_credentials(phone) if phone else None
+        if auto is None:
+            print("Automatic api_id failed. You can enter api_id / api_hash manually (empty = cancel).")
+            raw_id = _ask("api_id: ")
+            if not raw_id:
+                return False
+            try:
+                api_id = int(raw_id)
+            except ValueError:
+                print("api_id must be a number.")
+                return False
+            api_hash = _ask("api_hash: ")
+        else:
+            api_id, api_hash = auto
     if not api_hash or not phone:
         print("api_hash and phone are required.")
         return False
