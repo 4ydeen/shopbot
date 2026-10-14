@@ -658,6 +658,41 @@ class DatabaseBase:
                     PRIMARY KEY (conn_row, chat_id, message_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS userbot_chats (
+                    chat_id INTEGER PRIMARY KEY,
+                    mode TEXT DEFAULT 'auto',
+                    greeted INTEGER DEFAULT 0,
+                    first_name TEXT DEFAULT '',
+                    username TEXT DEFAULT '',
+                    msg_count INTEGER DEFAULT 0,
+                    ai_count INTEGER DEFAULT 0,
+                    human_since TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS userbot_ai_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_userbot_ai_chat ON userbot_ai_messages (chat_id, id);
+
+                CREATE TABLE IF NOT EXISTS userbot_exceptions (
+                    user_id INTEGER PRIMARY KEY,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS userbot_stats (
+                    day TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    n INTEGER DEFAULT 0,
+                    PRIMARY KEY (day, key)
+                );
+
                 CREATE TABLE IF NOT EXISTS ai_faq_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     question TEXT NOT NULL,

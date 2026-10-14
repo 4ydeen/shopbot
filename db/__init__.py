@@ -31,6 +31,7 @@ from .tickets import TicketsMixin
 from .resellers import ResellersMixin
 from .system import SystemMixin
 from .business import BusinessMixin
+from .userbot_store import UserbotMixin
 
 class Database(
     DatabaseBase,
@@ -43,6 +44,7 @@ class Database(
     ResellersMixin,
     SystemMixin,
     BusinessMixin,
+    UserbotMixin,
 ):
     pass
 
