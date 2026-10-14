@@ -129,6 +129,7 @@ def create_userbot_router(db) -> Router:
             [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_MEDIA_UNDERSTAND))} {tr('فهم ویس و عکس مشتری')}", callback_data="adm_ub_t:" + userbot.KEY_MEDIA_UNDERSTAND)],
             [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_MEDIA_ACK))} {tr('تأیید دریافت فایل')}", callback_data="adm_ub_t:" + userbot.KEY_MEDIA_ACK)],
             [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_SALES_CARD))} {tr('ارسال مشخصات و لینک خرید')}", callback_data="adm_ub_t:" + userbot.KEY_SALES_CARD)],
+            [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_SEND_CONFIGS))} {tr('ارسال کانفیگ مشتری داخل چت')}", callback_data="adm_ub_t:" + userbot.KEY_SEND_CONFIGS)],
             [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_SKIP_CONTACTS))} {tr('نادیده‌گرفتن مخاطب‌های ذخیره‌شده')}", callback_data="adm_ub_t:" + userbot.KEY_SKIP_CONTACTS)],
             [InlineKeyboardButton(text=f"{_onoff(_flag(userbot.KEY_MARK_READ))} {tr('علامت‌گذاری خوانده‌شده')}", callback_data="adm_ub_t:" + userbot.KEY_MARK_READ)],
             [InlineKeyboardButton(

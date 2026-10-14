@@ -504,6 +504,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         data = await state.get_data()
         actions = data.get("pending_post_start_actions") or []
         await state.update_data(pending_terms=False, pending_post_start_actions=[])
+        if message.from_user is not None and message.from_user.id != user_id:
+            # message ممکن است call.message باشد (فرستنده = خودِ بات)؛ اکشن‌های دیپ‌لینک باید به نام کاربر اجرا شوند.
+            message = message.model_copy(update={"from_user": message.from_user.model_copy(update={"id": user_id})})
         for action in actions:
             if action == "__open_test__":
                 await get_test_config(message)
@@ -513,6 +516,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await show_categories(message, state)
             elif action.startswith("__open_product__:"):
                 await _open_product_from_deeplink(message, state, int(action.split(":", 1)[1]))
+            elif action == "__open_svc__":
+                await my_orders(message)
+            elif action == "__open_wallet__":
+                await wallet_menu(message)
+            elif action == "__open_invite__":
+                await referral_menu(message, bot)
+            elif action.startswith("__open_svcitem__:"):
+                await _open_service_from_deeplink(message, action.split(":", 1)[1])
             else:
                 await message.answer(action)
 
@@ -751,6 +762,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 prod_part = token[len("prod_"):]
                 if prod_part.isdigit():
                     post_start_actions.append(f"__open_product__:{int(prod_part)}")
+            elif token == "svc":
+                post_start_actions.append("__open_svc__")
+            elif token == "wallet":
+                post_start_actions.append("__open_wallet__")
+            elif token == "invite":
+                post_start_actions.append("__open_invite__")
+            elif token.startswith("svc_") and len(token) > 4:
+                post_start_actions.append(f"__open_svcitem__:{token[4:]}")
             elif token == "nofj":
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
             elif _CHANNEL_POST_TOKEN.fullmatch(token):
@@ -818,8 +837,37 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             elif action.startswith("__open_product__:"):
                 product_id = int(action.split(":", 1)[1])
                 await _open_product_from_deeplink(message, state, product_id)
+            elif action == "__open_svc__":
+                await my_orders(message)
+            elif action == "__open_wallet__":
+                await wallet_menu(message)
+            elif action == "__open_invite__":
+                await referral_menu(message, bot)
+            elif action.startswith("__open_svcitem__:"):
+                await _open_service_from_deeplink(message, action.split(":", 1)[1])
             else:
                 await message.answer(action)
+
+    async def _open_service_from_deeplink(message: Message, cb_id: str):
+        """دیپ‌لینک ?start=svc_<cb_id>: صفحه‌ی همان سرویس (با دکمه‌های تمدید/مدیریت) به‌صورت پیام جدید."""
+        user_id = message.from_user.id
+        item = await asyncio.to_thread(_find_my_orders_item, user_id, cb_id)
+        if not item:
+            await my_orders(message)
+            return
+        try:
+            text = await _my_orders_item_text(item)
+        except Exception:
+            logging.getLogger("handlers_user").exception("deeplink service page failed (cb_id=%s, user=%s)", cb_id, user_id)
+            await my_orders(message)
+            return
+        deletable = item["kind"] in ("config", "custom")
+        markup = kb.service_detail_kb(
+            db, cb_id, item["kind"], deletable, _item_has_individual_links(item), **_svc_kb_kwargs(item)
+        )
+        if len(text) > 4000:
+            text = text[:3950] + "\n\n… (فهرست کوتاه شد؛ تعداد کانفیگ‌ها زیاد است)"
+        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
 
     async def _open_product_from_deeplink(message: Message, state: FSMContext, product_id: int):
         """معادلِ کلیک روی یک محصول از منو، ولی به‌صورت پیام جدید (برای بازکردن

@@ -11,6 +11,7 @@ Login/logout still happen from the server (``python userbot.py login`` / manage.
 import asyncio
 import getpass
 import html
+import io
 import json
 import logging
 import os
@@ -25,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 SESSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "userbot_session.json")
 SERVICE_USER_ID = 777000
-FALLBACK_REPLY = "یه مشکلی پیش اومد؛ پیامت رو برای پشتیبانی انسانی می‌فرستم."
-MEDIA_ACK_TEXT = "فایلت رسید 🙏 فروشنده بررسی می‌کنه و جواب می‌ده؛ اگه سؤالی داری همین‌جا بنویس."
+FALLBACK_REPLY = "اوه، یه اشکال کوچولو پیش اومد 😅 پیامت رو همین الان به پشتیبان انسانی می‌سپارم تا زودتر حلش کنه."
+MEDIA_ACK_TEXT = "فایلت رسید 🙏 فروشنده خودش بررسی می‌کنه و جواب می‌ده؛ تا اون موقع اگه سؤالی داری همین‌جا بنویس، در خدمتم 😊"
 
 # ---- settings keys (all independent from the business_* keys) --------------------------------
 KEY_ENABLED = "userbot_enabled"
@@ -37,6 +38,7 @@ KEY_MARK_READ = "userbot_mark_read"
 KEY_FIRST_MESSAGE = "userbot_first_message"
 KEY_PERSONA = "userbot_persona"
 KEY_SALES_CARD = "userbot_sales_card"
+KEY_SEND_CONFIGS = "userbot_send_configs"          # send the customer's own config/QR inside the chat
 KEY_MEDIA_UNDERSTAND = "userbot_media_understand"  # voice -> text, image -> description
 KEY_MEDIA_ACK = "userbot_media_ack"
 KEY_DEBOUNCE = "userbot_debounce_seconds"
@@ -56,6 +58,7 @@ DEFAULTS = {
     KEY_FIRST_MESSAGE: "",
     KEY_PERSONA: "",
     KEY_SALES_CARD: "1",
+    KEY_SEND_CONFIGS: "1",
     KEY_MEDIA_UNDERSTAND: "1",
     KEY_MEDIA_ACK: "1",
     KEY_DEBOUNCE: "3",
@@ -510,10 +513,15 @@ def _migrate_once(db):
         logger.warning("userbot: migration from business tables failed", exc_info=True)
 
 
-def _extra_system(db, sender) -> str:
+def _extra_system(db, sender, history=None, registered=None) -> str:
     now = datetime.now(IRAN_TZ)
     name = (getattr(sender, "first_name", "") or "").strip()
-    lines = [f"زمینه‌ی گفتگو: نام مشتری در تلگرام «{name or 'نامشخص'}»؛ اکنون ساعت {now:%H:%M} به وقت ایران است."]
+    part = "صبح" if 5 <= now.hour < 12 else "ظهر" if now.hour < 15 else "عصر" if now.hour < 19 else "شب"
+    lines = [f"زمینه‌ی گفتگو: نام مشتری در تلگرام «{name or 'نامشخص'}»؛ اکنون ساعت {now:%H:%M} ({part}) به وقت ایران است."]
+    if not history:
+        lines.append("این اولین پیامِ این گفتگوست: کوتاه و گرم خوش‌آمد بگو و مستقیم برو سراغ نیازش.")
+    if registered is not None:
+        lines.append("مشتری در ربات فروشگاه ثبت‌نام کرده است." if registered else "مشتری هنوز در ربات فروشگاه ثبت‌نام نکرده است.")
     if setting(db, KEY_SCHEDULE_MODE) == "off_hours":
         lines.append(
             "الان خارج از ساعات حضور فروشنده است "
@@ -591,11 +599,39 @@ async def run(db, bot_token: str):
         task.add_done_callback(tasks.discard)
         return task
 
-    async def _send(chat_id, text: str):
+    async def _send(chat_id, text: str, rich: bool = False):
+        """rich=True: HTML (hyperlinks/bold) without link preview; falls back to plain text on any parse error."""
+        import config_delivery
         if len(own_send) > 5000:
             own_send.clear()
         own_send[chat_id] = time.monotonic()
-        msg = await client.send_message(chat_id, _clip(text), parse_mode=None)
+        if rich:
+            try:
+                msg = await client.send_message(chat_id, text[:MAX_TEXT], parse_mode="html", link_preview=False)
+            except Exception:
+                logger.warning("userbot: html send failed, falling back to plain text", exc_info=True)
+                msg = await client.send_message(
+                    chat_id, _clip(config_delivery.strip_html(text)), parse_mode=None, link_preview=False,
+                )
+        else:
+            msg = await client.send_message(chat_id, _clip(text), parse_mode=None)
+        own_ids.append(msg.id)
+        own_send[chat_id] = time.monotonic()
+        return msg
+
+    async def _send_photo(chat_id, data: bytes, caption: str):
+        import config_delivery
+        bio = io.BytesIO(data)
+        bio.name = "config_qr.png"
+        own_send[chat_id] = time.monotonic()
+        try:
+            msg = await client.send_file(chat_id, bio, caption=caption, parse_mode="html")
+        except Exception:
+            logger.warning("userbot: photo html caption failed, retrying plain", exc_info=True)
+            bio.seek(0)
+            msg = await client.send_file(
+                chat_id, bio, caption=config_delivery.strip_html(caption)[:1000], parse_mode=None,
+            )
         own_ids.append(msg.id)
         own_send[chat_id] = time.monotonic()
         return msg
@@ -688,38 +724,152 @@ async def run(db, bot_token: str):
         ])
         await _notify_admins("\n".join(lines), markup)
 
-    async def _send_product_text(chat_id: int, product_id) -> bool:
-        """A personal account cannot send inline buttons, so the product card is plain text + deep link."""
+    def _esc(value) -> str:
+        return html.escape(str(value or ""), quote=False)
+
+    async def _deep(param: str) -> str:
+        if not ctx.get("bot_username"):
+            ctx["bot_username"] = (await bot.me()).username
+        return f"https://t.me/{ctx['bot_username']}?start={param}"
+
+    async def _load_product(product_id):
         try:
             product_id = int(product_id)
         except (TypeError, ValueError):
-            return False
+            return None
         product = await asyncio.to_thread(db.get_product, product_id)
         if not product or not product["is_active"]:
-            return False
+            return None
         auto = bool(product["is_auto_provision"])
-        stock = 0 if auto else await asyncio.to_thread(db.count_available_configs, product_id)
-        if not auto and stock <= 0:
-            await _send(chat_id, tr("⛔️ موجودی این محصول در حال حاضر تمام شده."))
-            return True
-        lines = [
-            f"📦 {product['name']}",
-            f"💰 {tr('قیمت')}: {ul.price_for_users(product, 0):,} {tr('تومان')}",
-        ]
+        stock = 1 if auto else await asyncio.to_thread(db.count_available_configs, product_id)
+        return {"id": product_id, "row": product, "auto": auto, "in_stock": stock > 0}
+
+    def _product_specs(item) -> str:
+        product = item["row"]
         specs = []
-        if auto and product["auto_provision_volume_gb"]:
-            specs.append(f"📦 {tr('حجم')}: {product['auto_provision_volume_gb']} {tr('گیگ')}")
+        if item["auto"] and product["auto_provision_volume_gb"]:
+            specs.append(f"📦 {tr('حجم')}: <b>{product['auto_provision_volume_gb']}</b> {tr('گیگ')}")
         if product["duration_days"]:
-            specs.append(f"⏳ {tr('مدت')}: {product['duration_days']} {tr('روز')}")
-        if specs:
-            lines.append(" | ".join(specs))
-        if product["description"]:
-            lines.append(f"📝 {product['description']}")
-        me_bot = await bot.me()
-        lines.append("")
-        lines.append(f"🛒 {tr('ادامه‌ی خرید در ربات')}:\nhttps://t.me/{me_bot.username}?start=prod_{product_id}")
-        await _send(chat_id, "\n".join(lines))
+            specs.append(f"⏳ {tr('مدت')}: <b>{product['duration_days']}</b> {tr('روز')}")
+        return "   ".join(specs)
+
+    async def _send_product_cards(chat_id: int, product_ids) -> bool:
+        """One premium card per product (or a single catalog when there are 3+), each with a deep link into the bot."""
+        items, seen_ids = [], set()
+        for pid in product_ids:
+            item = await _load_product(pid)
+            if item and item["id"] not in seen_ids:
+                seen_ids.add(item["id"])
+                items.append(item)
+            if len(items) >= 4:
+                break
+        if not items:
+            return False
+        line = "┄┄┄┄┄┄┄┄┄┄┄┄┄┄"
+        if len(items) >= 3:
+            rows = [f"🛍 <b>{tr('پلن‌های پیشنهادی')}</b>", line]
+            for item in items:
+                price = ul.price_for_users(item["row"], 0)
+                url = await _deep(f"prod_{item['id']}")
+                state = "" if item["in_stock"] else f" · ⛔️ {tr('ناموجود')}"
+                rows.append(f"▫️ <b>{_esc(item['row']['name'])}</b>{state}\n   💰 {price:,} {tr('تومان')}   {_product_specs(item)}\n   👉 <a href=\"{url}\">{tr('خرید سریع')}</a>")
+            await _send(chat_id, "\n".join(rows[:2]) + "\n" + "\n\n".join(rows[2:]), rich=True)
+            return True
+        for item in items:
+            product = item["row"]
+            url = await _deep(f"prod_{item['id']}")
+            price = ul.price_for_users(product, 0)
+            rows = [f"🛍 <b>{_esc(product['name'])}</b>", line, f"💰 {tr('قیمت')}: <b>{price:,}</b> {tr('تومان')}"]
+            specs = _product_specs(item)
+            if specs:
+                rows.append(specs)
+            if product["description"]:
+                desc = str(product["description"]).strip()
+                rows.append(f"📝 {_esc(desc[:160] + ('…' if len(desc) > 160 else ''))}")
+            rows.append(f"✅ {tr('آماده‌ی تحویل')}" if item["in_stock"] else f"⛔️ {tr('موجودی فعلاً تمام شده')}")
+            rows.append(line)
+            rows.append(f"🛒 <a href=\"{url}\">{tr('خرید سریع در ربات')}</a>")
+            await _send(chat_id, "\n".join(rows), rich=True)
         return True
+
+    async def _send_bot_link(chat_id: int, action: dict):
+        url = await _deep(str(action.get("param") or "buy"))
+        emoji = action.get("emoji") or "🔗"
+        title = action.get("title") or tr("ربات فروشگاه")
+        button = action.get("button") or tr("باز کردن ربات")
+        await _send(chat_id, f"{emoji} <b>{_esc(title)}</b>\n👉 <a href=\"{url}\">{_esc(tr(button))}</a>", rich=True)
+
+    async def _send_referral(chat_id: int, user_id: int):
+        own = await _deep(f"ref{user_id}")
+        more = await _deep("invite")
+        await _send(
+            chat_id,
+            f"🎁 <b>{tr('دعوت دوستان')}</b>\n{tr('لینک اختصاصی تو')} ({tr('بزن تا کپی بشه')}):\n<code>{own}</code>\n"
+            f"👉 <a href=\"{more}\">{tr('آمار و پاداش‌ها در ربات')}</a>",
+            rich=True,
+        )
+
+    async def _deliver_services(chat_id: int, user_id: int, service_ids) -> bool:
+        """Sends the customer's OWN service(s) (QR + info + links) in this chat; ownership is verified per service."""
+        import config_delivery
+        sent = 0
+        ids = [s for s in dict.fromkeys(service_ids or []) if s][:5]
+        for idx, sid in enumerate(ids, 1):
+            target = await ai_support._resolve_service_target(db, user_id, sid)
+            if not target:
+                continue
+            if target["kind"] == "config":
+                link, name = target["config"]["link"] or "", ""
+            else:
+                cc = target["custom"]
+                link, name = cc["subscription_url"] or "", (cc["display_name"] or cc["username"] or "")
+            if not link:
+                continue
+            caption, extras = await config_delivery.prepare_delivery(
+                link, name, idx, len(ids), db=db, user_tg_id=user_id,
+                header_text=f"{tr('کانفیگت آماده‌ست')} 🚀",
+            )
+            if f"<code>{html.escape(link)}" not in caption + "".join(extras) and "<code>" not in caption + "".join(extras):
+                extras = list(extras) + [f"🌐 subscription : <code>{html.escape(link)}</code>"]
+            try:
+                qr = await asyncio.to_thread(config_delivery.build_qr_bytes, link, db)
+            except Exception:
+                logger.warning("userbot: QR build failed", exc_info=True)
+                qr = None
+            if qr:
+                await _send_photo(chat_id, qr, caption)
+            else:
+                await _send(chat_id, caption, rich=True)
+            for extra in extras:
+                await _send(chat_id, extra, rich=True)
+            sent += 1
+        if not sent:
+            await _send(chat_id, tr("⛔️ سرویسی با این مشخصات پیدا نشد."))
+        return bool(sent)
+
+    async def _run_actions(chat_id: int, user_id: int, actions):
+        product_ids = [a.get("product_id") for a in actions if a.get("type") == "show_product"]
+        if product_ids and flag(db, KEY_SALES_CARD):
+            if not await _send_product_cards(chat_id, product_ids):
+                await _send(chat_id, tr("⛔️ موجودی این محصول در حال حاضر تمام شده."))
+        for action in actions:
+            kind = action.get("type")
+            try:
+                if kind == "send_service_config":
+                    if flag(db, KEY_SEND_CONFIGS):
+                        await _deliver_services(chat_id, user_id, action.get("service_ids"))
+                    else:
+                        await _notify_admins(tr("⚠️ مشتری کانفیگ خواست ولی «ارسال کانفیگ در چت» خاموش است.") + f" ({user_id})")
+                elif kind == "bot_link" and flag(db, KEY_SALES_CARD):
+                    await _send_bot_link(chat_id, action)
+                elif kind == "deliver_test_config":
+                    await _send_bot_link(chat_id, {"param": "test", "emoji": "🧪", "title": tr("کانفیگ تست"), "button": "دریافت کانفیگ تست"})
+                elif kind == "show_referral_info":
+                    await _send_referral(chat_id, user_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("userbot: action %s failed", kind)
 
     async def _media_to_text(msg, kind: str) -> str:
         info = msg.file
@@ -763,12 +913,13 @@ async def run(db, bot_token: str):
                 await asyncio.to_thread(db.mark_userbot_chat_greeted, chat_id)
                 await _send(chat_id, first)
             history = await asyncio.to_thread(db.get_userbot_ai_conversation, chat_id)
+            registered = bool(await asyncio.to_thread(db.get_user, sender_id))
             mode = ai_support.BUSINESS_USERBOT if flag(db, KEY_SALES_CARD) else ai_support.BUSINESS_USERBOT_PLAIN
             started = time.monotonic()
             try:
                 async with client.action(chat_id, "typing"):
                     result = await ai_support.get_reply(
-                        db, sender_id, history, text, business_mode=mode, extra_system=_extra_system(db, sender),
+                        db, sender_id, history, text, business_mode=mode, extra_system=_extra_system(db, sender, history, registered),
                     )
             except asyncio.CancelledError:
                 raise
@@ -799,16 +950,9 @@ async def run(db, bot_token: str):
             if result.get("escalate"):
                 await _handoff(chat_id, sender, history, text, reply)
                 return
-            action = (result.get("ui_action") or {}).get("type")
-            if action == "show_product" and flag(db, KEY_SALES_CARD):
-                await _send_product_text(chat_id, result["ui_action"].get("product_id"))
-            elif action == "deliver_test_config":
-                me_bot = await bot.me()
-                await _send(
-                    chat_id,
-                    tr("🧪 برای دریافت کانفیگ تست وارد ربات بشید و دکمه‌ی «کانفیگ تست» را بزنید:")
-                    + f"\nhttps://t.me/{me_bot.username}",
-                )
+            actions = result.get("ui_actions") or ([result["ui_action"]] if result.get("ui_action") else [])
+            if actions:
+                await _run_actions(chat_id, sender_id, actions)
 
     async def _drain(chat_id: int):
         """Waits until the customer stopped typing (debounce), then answers all buffered messages at once."""
