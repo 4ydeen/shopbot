@@ -19,6 +19,7 @@ from aiogram import BaseMiddleware
 
 import ai_support
 import global_switch
+import userbot
 import user_limit as ul
 from i18n import tr
 from spam_guard import ThrottleMiddleware
@@ -444,8 +445,10 @@ def create_business_router(db, language_mw=None) -> Router:
             [InlineKeyboardButton(text=f"{_onoff(sales)} {tr('کارت خرید داخل چت بیزنس')}", callback_data="adm_biz_sales")],
             [InlineKeyboardButton(text=tr("🔗 اتصال‌ها"), callback_data="adm_biz_conns")],
             [InlineKeyboardButton(text=f"{tr('🤝 چت‌های تحویل‌شده به انسان')} ({humans})", callback_data="adm_biz_humans")],
-            [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:access")],
         ]
+        if userbot.STATE.get("db_path") == db.db_path:
+            rows.append([InlineKeyboardButton(text=tr("🤖 یوزربات (اکانت شخصی)"), callback_data="adm_ub")])
+        rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:access")])
         await _show(call, text, _admin_kb_rows(rows))
 
     @router.callback_query(F.data == "adm_business_settings")
@@ -472,6 +475,71 @@ def create_business_router(db, language_mw=None) -> Router:
     _toggle_handler("adm_biz_markread", KEY_MARK_READ, "0", "business_markread_toggle")
     _toggle_handler("adm_biz_notify", KEY_NOTIFY_CHANGES, "1", "business_notify_toggle")
     _toggle_handler("adm_biz_sales", KEY_SALES_CARD, "0", "business_sales_toggle")
+
+    async def _show_ub(call: CallbackQuery):
+        conns = await asyncio.to_thread(db.list_business_connections)
+        ub_conn = next((c for c in conns if str(c["connection_id"]).startswith(userbot.CONN_PREFIX)), None)
+        enabled = _flag(db, userbot.KEY_ENABLED, "1")
+        pause = _flag(db, userbot.KEY_PAUSE_WHEN_ACTIVE, "1")
+        minutes = userbot.get_away_minutes(db)
+        if ub_conn is None:
+            status = tr("⚪️ وارد نشده")
+        elif userbot.STATE["connected"]:
+            status = tr("🟢 متصل")
+        else:
+            status = tr("🔴 قطع")
+        text = (
+            f"{tr('🤖 یوزربات (اکانت شخصی)')}\n\n"
+            f"{tr('وضعیت اتصال')}: {status}\n"
+            f"{tr('مدیر الان فعال است')}: {'✅' if userbot.admin_active(db) else '❌'}\n\n"
+            + tr("ورود به اکانت از منوی سرور (گزینه «ورود به اکانت تلگرام») انجام می‌شود.")
+            + "\n"
+            + tr("وقتی مدیر در تلگرام فعال باشد (پیام می‌فرستد یا چت می‌خواند)، پشتیبان هوش مصنوعی جواب نمی‌دهد.")
+        )
+        rows = [
+            [InlineKeyboardButton(text=f"{_onoff(enabled)} {tr('پاسخ‌دهی یوزربات')}", callback_data="adm_ub_on")],
+            [InlineKeyboardButton(text=f"{_onoff(pause)} {tr('توقف وقتی مدیر فعال است')}", callback_data="adm_ub_pause")],
+            [InlineKeyboardButton(text=f"⏱ {tr('مدت فعال‌ماندن مدیر')}: {minutes} {tr('دقیقه')}", callback_data="adm_ub_min")],
+        ]
+        if ub_conn is not None:
+            rows.append([InlineKeyboardButton(text=tr("⚙️ تنظیمات اتصال"), callback_data=f"adm_biz_conn:{ub_conn['id']}")])
+        rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_business_settings")])
+        await _show(call, text, _admin_kb_rows(rows))
+
+    @router.callback_query(F.data == "adm_ub")
+    async def cb_ub(call: CallbackQuery):
+        if not db.is_full_admin(call.from_user.id):
+            return await _deny(call)
+        await _show_ub(call)
+        await call.answer()
+
+    def _ub_toggle_handler(callback_data: str, key: str, log_action: str):
+        @router.callback_query(F.data == callback_data)
+        async def _handler(call: CallbackQuery):
+            if not db.is_full_admin(call.from_user.id):
+                return await _deny(call)
+            new_value = "0" if _flag(db, key, "1") else "1"
+            await asyncio.to_thread(db.set_setting, key, new_value)
+            await asyncio.to_thread(db.log_admin_action, call.from_user.id, log_action, f"{key}={new_value}")
+            await _show_ub(call)
+            await call.answer()
+        return _handler
+
+    _ub_toggle_handler("adm_ub_on", userbot.KEY_ENABLED, "userbot_toggle")
+    _ub_toggle_handler("adm_ub_pause", userbot.KEY_PAUSE_WHEN_ACTIVE, "userbot_pause_toggle")
+
+    @router.callback_query(F.data == "adm_ub_min")
+    async def cb_ub_min(call: CallbackQuery):
+        if not db.is_full_admin(call.from_user.id):
+            return await _deny(call)
+        current = userbot.get_away_minutes(db)
+        new_value = next((m for m in userbot.AWAY_CHOICES if m > current), userbot.AWAY_CHOICES[0])
+        await asyncio.to_thread(db.set_setting, userbot.KEY_AWAY_MINUTES, str(new_value))
+        await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "userbot_away_minutes", f"{userbot.KEY_AWAY_MINUTES}={new_value}"
+        )
+        await _show_ub(call)
+        await call.answer()
 
     @router.callback_query(F.data == "adm_biz_conns")
     async def cb_conns(call: CallbackQuery):

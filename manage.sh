@@ -588,6 +588,24 @@ MSG_EN[menu_28]="Remove LibreTranslate"
 MSG_FA[menu_28]="حذف LibreTranslate"
 MSG_EN[menu_30]="Remove unwanted translation languages (free disk space)"
 MSG_FA[menu_30]="حذف زبان‌های ناخواسته (آزاد کردن فضا)"
+MSG_EN[sec_userbot]="TELEGRAM USERBOT"
+MSG_FA[sec_userbot]="یوزربات تلگرام"
+MSG_EN[menu_31]="Login Telegram account (AI support in your private chats)"
+MSG_FA[menu_31]="ورود به اکانت تلگرام (پشتیبان هوش مصنوعی در پی‌وی)"
+MSG_EN[menu_32]="Logout Telegram account (userbot)"
+MSG_FA[menu_32]="خروج از اکانت تلگرام (یوزربات)"
+MSG_EN[ub_need_update]="⛔️ userbot.py not found. Update the bot first (option 2)."
+MSG_FA[ub_need_update]="⛔️ فایل userbot.py پیدا نشد. اول بات را آپدیت کن (گزینه ۲)."
+MSG_EN[ub_installing]="📦 Installing Telegram client library..."
+MSG_FA[ub_installing]="📦 نصب کتابخانه کلاینت تلگرام..."
+MSG_EN[ub_pip_failed]="✗ Failed to install telethon."
+MSG_FA[ub_pip_failed]="✗ نصب telethon ناموفق بود."
+MSG_EN[ub_login_ok]="✅ Logged in and bot restarted. AI support is now active in your private chats."
+MSG_FA[ub_login_ok]="✅ ورود انجام شد و بات ری‌استارت شد. پشتیبان هوش مصنوعی حالا در پی‌وی شما فعال است."
+MSG_EN[ub_login_failed]="✗ Login failed."
+MSG_FA[ub_login_failed]="✗ ورود ناموفق بود."
+MSG_EN[ub_removed]="✅ Userbot session removed and bot restarted."
+MSG_FA[ub_removed]="✅ نشست یوزربات حذف شد و بات ری‌استارت شد."
 MSG_EN[rl_header]="Remove translation languages"
 MSG_FA[rl_header]="حذف زبان‌های ترجمه"
 MSG_EN[rl_none]="No removable extra language is installed."
@@ -2663,6 +2681,48 @@ PY
     echo -e "${GREEN}${BOLD}$(t rl_done)${RESET}"
 }
 
+setup_userbot() {
+    if [ ! -f "$INSTALL_DIR/main.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"
+        return
+    fi
+    if [ ! -x "$INSTALL_DIR/venv/bin/python3" ]; then
+        echo -e "${RED}$(t venv_missing)${RESET}"
+        return
+    fi
+    if [ ! -f "$INSTALL_DIR/userbot.py" ]; then
+        echo -e "${RED}$(t ub_need_update)${RESET}"
+        return
+    fi
+    cd "$INSTALL_DIR" || return
+    echo -e "${CYAN}$(t ub_installing)${RESET}"
+    if ! venv/bin/pip install --quiet "telethon>=1.36.0"; then
+        echo -e "${RED}$(t ub_pip_failed)${RESET}"
+        return
+    fi
+    if venv/bin/python3 userbot.py login; then
+        sudo systemctl restart "$SERVICE_NAME"
+        sleep 1
+        echo -e "${GREEN}$(t ub_login_ok)${RESET}"
+    else
+        echo -e "${RED}$(t ub_login_failed)${RESET}"
+    fi
+}
+
+remove_userbot() {
+    if [ ! -x "$INSTALL_DIR/venv/bin/python3" ] || [ ! -f "$INSTALL_DIR/userbot.py" ]; then
+        echo -e "${RED}$(t ub_need_update)${RESET}"
+        return
+    fi
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+    cd "$INSTALL_DIR" || return
+    venv/bin/python3 userbot.py logout
+    sudo systemctl restart "$SERVICE_NAME"
+    sleep 1
+    echo -e "${GREEN}$(t ub_removed)${RESET}"
+}
+
 install_shell_command() {
     local bin="/usr/local/bin/shopvpn"
     local script="$INSTALL_DIR/manage.sh"
@@ -2726,6 +2786,9 @@ while true; do
     menu_item 21 menu_21
     menu_item 22 menu_22
     menu_item 23 menu_23
+    menu_section sec_userbot
+    menu_item 31 menu_31
+    menu_item 32 menu_32 "$RED"
     draw_rule
     menu_item L menu_lang "$MAGENTA"
     menu_item 0 menu_0 "$DIM"
@@ -2764,6 +2827,8 @@ while true; do
         28) remove_libretranslate; pause ;;
         29) factory_reset; pause ;;
         30) remove_translation_languages; pause ;;
+        31) setup_userbot; pause ;;
+        32) remove_userbot; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;
         *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;

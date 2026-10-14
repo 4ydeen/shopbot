@@ -16,6 +16,7 @@ asyncssh>=2.14.0
 google-genai>=0.5.0
 PyJWT>=2.8.0
 cryptography>=41.0.0
+telethon>=1.36.0
 
 # Automatic multi-language translation
 # Local/offline translation engine. Language models are downloaded automatically by install/update scripts.

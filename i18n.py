@@ -969,5 +969,20 @@ _PHRASE_TRANSLATIONS.update({
     "⚠️ زبان همه‌ی کاربران ربات عوض می‌شه، نه فقط زبان تو. یکی رو انتخاب کن:": "⚠️ This changes the language for every bot user, not just yours. Pick one:",
     "✅ زبان همه‌ی کاربران ربات تغییر کرد.": "✅ Every bot user's language was changed.",
 })
+_PHRASE_TRANSLATIONS.update({
+"🤖 یوزربات (اکانت شخصی)":"🤖 Userbot (personal account)",
+"⚪️ وارد نشده":"⚪️ Not logged in",
+"🟢 متصل":"🟢 Connected",
+"🔴 قطع":"🔴 Disconnected",
+"وضعیت اتصال":"Connection status",
+"مدیر الان فعال است":"Admin is active now",
+"ورود به اکانت از منوی سرور (گزینه «ورود به اکانت تلگرام») انجام می‌شود.":"Account login is done from the server menu (the \"Login Telegram account\" option).",
+"وقتی مدیر در تلگرام فعال باشد (پیام می‌فرستد یا چت می‌خواند)، پشتیبان هوش مصنوعی جواب نمی‌دهد.":"While the admin is active on Telegram (sending messages or reading chats), the AI support does not reply.",
+"پاسخ‌دهی یوزربات":"Userbot replies",
+"توقف وقتی مدیر فعال است":"Pause while admin is active",
+"مدت فعال‌ماندن مدیر":"Admin active window",
+"دقیقه":"minutes",
+"⚙️ تنظیمات اتصال":"⚙️ Connection settings",
+})
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 # 		   		 		  	 	 		 		   		  	 	 		 			  		 				 			  	 

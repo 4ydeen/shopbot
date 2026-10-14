@@ -15,6 +15,7 @@ env/
 .env
 .env.*
 !.env.example
+userbot_session.json
 
 # Databases
 *.db

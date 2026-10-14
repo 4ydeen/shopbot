@@ -106,6 +106,8 @@ async def main():
     reconcile_task = asyncio.create_task(
         manager.reconcile_resellers_loop(main_db, BOT_TOKEN, interval=10)
     )
+    import userbot
+    userbot_task = asyncio.create_task(userbot.run(main_db, BOT_TOKEN))
 
     try:
         await manager.wait_all()
@@ -122,6 +124,11 @@ async def main():
         reconcile_task.cancel()
         try:
             await reconcile_task
+        except (Exception, asyncio.CancelledError):
+            pass
+        userbot_task.cancel()
+        try:
+            await userbot_task
         except (Exception, asyncio.CancelledError):
             pass
         await manager.stop_all()
