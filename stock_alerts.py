@@ -9,7 +9,7 @@
 وقتی موجودی دوباره بالای آستانه برود، وضعیت ریست می‌شود تا برای افت بعدی دوباره
 هشدار بدهد.
 
-اگر گروه گزارش تنظیم شده باشد (report_router)، هشدار در تاپیک «سرویس» همان گروه
+اگر گروه گزارش تنظیم شده باشد (report_router)، هشدار در تاپیک «موجودی و انبار» همان گروه
 پست می‌شود؛ در غیر این صورت (یا اگر ارسال به گروه ناموفق بود) مثل قبل به همه‌ی
 ادمین‌ها پیام خصوصی می‌رود.
 
@@ -28,7 +28,7 @@ import report_router
 logger = logging.getLogger(__name__)
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
-SERVICE_TOPIC_KEY = "service"
+SERVICE_TOPIC_KEY = "stock"
 
 
 async def check_and_notify_low_stock(send_fn, db, product_id: int, bot_token: str = None) -> None:

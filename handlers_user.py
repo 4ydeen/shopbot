@@ -1440,6 +1440,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             db.log_admin_action, 0, "order_ai_auto_reject",
             f"سفارش #{order_id} | کاربر {order['user_id']} | دلیل: {ai_result.get('reject_reason') or ''}",
         ))
+        await report_router.notify(bot, db, "fraud", report_router.build_fraud_event(
+            "order_ai", order_id, order["user_id"], ai_result.get("reject_reason") or "",
+            order["final_price"], "ربات"))
         rejected_note = "🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n" + (ai_result.get("reject_reason") or "")
         await _notify_admins_of_order(
             bot, order_id, receipt_file_id=file_id, receipt_type=receipt_type,
@@ -4098,6 +4101,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                         f"🗑 حذف کانفیگ\n\n👤 کاربر: {user_tg_id}\n🔗 سرویس #{item_id}\n📌 نام کاربری پنل: {cc_row['username']}\n📌 نوع: کانفیگ پنلی"
                     )
                 if refunded > 0:
+                    await report_router.notify(bot, db, "refund", report_router.build_refund_event(
+                        user_tg_id, cc_row["username"], quote, refunded, "ربات"))
                     await call.answer(tr(f"✅ کانفیگ برای همیشه حذف شد و {refund_result_text(quote, refunded)}"), show_alert=True)
                 else:
                     await call.answer(db.get_text('handlers_user.auto_67b7397c', '✅ کانفیگ برای همیشه حذف شد.'), show_alert=True)
@@ -5593,6 +5598,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"{await _switch_warning_line(user_id, 'bronze')}\n\n"
             "این نمایندگی بدون حجم و بدون محصول آماده است؛ فقط کمیسیون دائمی روی خریدهای زیرمجموعه."
         )
+        await report_router.notify(bot, db, "reseller", report_router.format_event(
+            "درخواست نمایندگی کمیسیونی", [
+                ("درخواست", report_router.code(f"#{request_id}")),
+                ("کاربر", report_router.user_link(user_id, first_name, username if username != "---" else "")),
+                ("درصد پیشنهادی", f"{percent}٪"),
+            ], icon="💼", note="برای بررسی از پیام خصوصی ادمین‌ها یا پنل مدیریت اقدام کنید."))
         for admin_id in _senior_admin_ids():
             try:
                 await bot.send_message(admin_id, caption, reply_markup=kb.commission_reseller_request_review_kb(request_id))
@@ -6195,6 +6206,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 "\n\n🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n"
                 + (ai_result.get("reject_reason") or "")
             )
+            await report_router.notify(bot, db, "fraud", report_router.build_fraud_event(
+                "topup_ai", topup_id, message.from_user.id, ai_result.get("reject_reason") or "", amount, "ربات"))
             if not await _report_topup_to_group(bot, topup_id, file_id, receipt_type, rejected_caption, kb.user_quick_actions_kb(message.from_user.id)):
                 for admin_id in (await asyncio.to_thread(db.list_admins)):
                     factory = lambda aid=admin_id: _send_receipt_to_admin(
@@ -6311,6 +6324,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 آیدی عددی: {user_id}"
             f"{await _switch_warning_line(user_id, tier['code'])}"
         )
+        await report_router.notify(message.bot, db, "reseller", report_router.format_event(
+            "درخواست ارتقای سطح نمایندگی", [
+                ("درخواست", report_router.code(f"#{request_id}")),
+                ("سطح", f"{tier['icon']} {tier['title']}"),
+                ("کاربر", report_router.user_link(user_id, first_name, username if username != "---" else "")),
+            ], icon="🏅", note="برای بررسی از پیام خصوصی ادمین‌ها یا پنل مدیریت اقدام کنید."))
         for admin_id in _senior_admin_ids():
             try:
                 await message.bot.send_message(admin_id, caption, reply_markup=kb.tier_request_review_kb(request_id))
@@ -6687,6 +6706,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 f"🧩 مدل تامین: {supply_label}\n\n"
                 f"📝 متن درخواست:\n{request_text}"
             )
+            await report_router.notify(bot_obj, db, "reseller", report_router.format_event(
+                "درخواست نمایندگی جدید", [
+                    ("درخواست", report_router.code(f"#{request_id}")),
+                    ("کاربر", report_router.user_link(user_id, first_name, username if username != "---" else "")),
+                    ("مدل تامین", supply_label),
+                    ("بات", bot_choice_label),
+                    ("متن", (request_text or "")[:300]),
+                ], icon="🏪", note="برای بررسی از پیام خصوصی ادمین‌ها یا پنل مدیریت اقدام کنید."))
             for admin_id in _senior_admin_ids():
                 try:
                     await bot_obj.send_message(admin_id, caption, reply_markup=kb.reseller_request_review_kb(request_id))
@@ -7467,6 +7494,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 {user.id}\n\n"
             f"✉️ {message.text or '(بدون متن / رسانه)'}"
         )
+        await report_router.notify(bot, db, "support", report_router.format_event(
+            "پیام جدید از کاربر (چت مستقیم)", [
+                ("کاربر", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+                ("متن", (message.text or "(بدون متن / رسانه)")[:300]),
+            ], icon="📩"))
         # فقط به اولین ادمین/مالک آنلاین اطلاع بده تا مکالمه به او اختصاص یابد؛
         # اگر هیچ‌کس آنلاین نبود، طبق روال قدیم به همه‌ی ادمین‌ها اطلاع بده.
         target_admin = (await asyncio.to_thread(db.resolve_support_admin_for_message, user.id))
@@ -7501,6 +7533,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             for row in history:
                 who = "👤 کاربر" if row["role"] == "user" else "🤖 دستیار"
                 lines.append(f"{who}: {row['message']}")
+        await report_router.notify(bot, db, "support", report_router.format_event(
+            "ارجاع از دستیار هوشمند به انسان", [
+                ("کاربر", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+                ("دلیل", reason),
+                ("تعداد پیام‌های گفتگو", len(history) if history else 0),
+            ], icon="🤖"))
         text = "\n".join(lines)
         target_admin = (await asyncio.to_thread(db.resolve_support_admin_for_message, user.id))
         admin_ids = [target_admin] if target_admin else (await asyncio.to_thread(db.list_admins))
@@ -7590,6 +7628,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             logging.getLogger("handlers_user").exception(
                 "خطای غیرمنتظره در دستیار هوشمند برای کاربر %s.", user.id
             )
+            await report_router.notify(bot, db, "ai", report_router.format_event(
+                "خطای غیرمنتظره در دستیار هوشمند", [
+                    ("کاربر", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+                ], icon="🤖", note="گفتگو به پشتیبانی انسانی ارجاع داده شد؛ لاگ سرور را بررسی کنید."))
             result = {
                 "reply": "یه مشکلی پیش اومد؛ پیامت رو برای پشتیبانی انسانی می‌فرستم.",
                 "escalate": True,
@@ -8074,6 +8116,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                        f"شناسه سرویس: {cc['id']}\nپنل: {cc['panel_server_id'] or '-'}")
         ticket_id = await asyncio.to_thread(db.create_ticket, call.from_user.id, subject, ticket_text, dep["id"] if dep else None)
         await call.message.answer(tr(f"✅ گزارش اختلال ثبت شد. شماره تیکت: #{ticket_id}\nبخش فنی در حال بررسی است."))
+        await report_router.notify(bot, db, "support", report_router.format_event(
+            "گزارش اختلال سرویس", [
+                ("تیکت", report_router.code(f"#{ticket_id}")),
+                ("کاربر", report_router.user_link(call.from_user.id, call.from_user.first_name or "", call.from_user.username or "")),
+                ("سرویس", cc["display_name"] or cc["username"]),
+                ("بخش", dep["name"] if dep else "عمومی"),
+            ], icon="⚠️"))
         for admin_id in await asyncio.to_thread(db.list_ticket_admin_ids_for_department, dep["id"] if dep else None):
             try:
                 await bot.send_message(admin_id, tr(f"⚠️ گزارش اختلال جدید #{ticket_id}\n👤 {call.from_user.id}\n📌 {subject}\n\n{ticket_text}"), reply_markup=kb.ticket_admin_notify_kb(ticket_id))
@@ -8178,6 +8227,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🧩 بخش: {(department['name'] if department else 'عمومی')}\n\n"
             f"✉️ {message.text}"
         )
+        await report_router.notify(bot, db, "support", report_router.format_event(
+            "تیکت جدید", [
+                ("شماره", report_router.code(f"#{ticket_id}")),
+                ("کاربر", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+                ("بخش", department["name"] if department else "عمومی"),
+                ("موضوع", subject),
+                ("متن", (message.text or "")[:300]),
+            ], icon="🎫"))
         for admin_id in (await asyncio.to_thread(db.list_ticket_admin_ids_for_department, department_id)):
             try:
                 await bot.send_message(admin_id, text, reply_markup=kb.ticket_admin_notify_kb(ticket_id))
@@ -8278,6 +8335,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             f"🆔 {user.id}\n\n"
             f"✉️ {message.text}"
         )
+        await report_router.notify(bot, db, "support", report_router.format_event(
+            "پیام جدید در تیکت", [
+                ("شماره", report_router.code(f"#{ticket_id}")),
+                ("کاربر", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+                ("موضوع", ticket["subject"]),
+                ("متن", (message.text or "")[:300]),
+            ], icon="💬"))
         admin_ids = [ticket["claimed_by"]] if ticket["claimed_by"] else (await asyncio.to_thread(db.list_ticket_admin_ids_for_department, ticket["department_id"]))
         for admin_id in admin_ids:
             try:

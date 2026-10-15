@@ -8,6 +8,7 @@ from datetime import datetime
 
 import admin_channel_posts
 import channel_suggestions
+import report_router
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 20
@@ -40,8 +41,14 @@ async def channel_post_loop(bot, db):
                         f"پست زمان‌بندی‌شده #{post['id']} ارسال شد", "channel_post", post["id"],
                     )
                     await _notify(bot, post["admin_id"], f"✅ پست زمان‌بندی‌شده #{post['id']} در کانال ارسال شد.")
+                    await report_router.notify(bot, db, "campaign", report_router.format_event(
+                        "پست زمان‌بندی‌شده در کانال ارسال شد", [("پست", report_router.code(f"#{post['id']}"))], icon="📢"))
                 else:
                     await _notify(bot, post["admin_id"], f"❌ ارسال پست زمان‌بندی‌شده #{post['id']} ناموفق بود: {html.escape(error)}")
+                    await report_router.notify(bot, db, "campaign", report_router.format_event(
+                        "ارسال پست زمان‌بندی‌شده ناموفق بود", [
+                            ("پست", report_router.code(f"#{post['id']}")), ("خطا", str(error)[:300]),
+                        ], icon="❌"))
             await channel_suggestions.tick(bot, db)
         except asyncio.CancelledError:
             raise

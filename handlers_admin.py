@@ -3528,6 +3528,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             "order_fake_receipt",
             f"فیش فیک سفارش #{order_id} | کاربر {order['user_id']} | {result['deleted_configs']} کانفیگ حذف شد و کاربر بلاک شد",
         )
+        await report_router.notify(bot, db, "fraud", report_router.build_fraud_event(
+            "order_manual", order_id, order["user_id"],
+            f"{result['deleted_configs']} کانفیگ مرتبط حذف شد", order["final_price"],
+            f"مدیر {call.from_user.id}"))
 
         try:
             await bot.send_message(
@@ -13977,9 +13981,12 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     def _report_group_text() -> str:
         chat_id = report_router.get_chat_id(db)
         status = f"فعال (آیدی: {chat_id})" if chat_id is not None else "غیرفعال؛ گزارش‌ها به پیام خصوصی مدیران می‌روند"
+        prefs = report_router.load_prefs(db)
+        active = sum(1 for sp in report_router.TOPIC_SPECS if report_router.is_enabled(db, sp.key, prefs))
         return (
             "📣 گروه گزارش تاپیک‌دار\n\n"
-            f"وضعیت: {status}\n\n"
+            f"وضعیت: {status}\n"
+            f"تاپیک‌های فعال: {active} از {len(report_router.TOPIC_SPECS)}\n\n"
             "مراحل راه‌اندازی:\n"
             "1. یک سوپرگروه بساز و در تنظیمات گروه، حالت «Topics» را روشن کن.\n"
             "2. بات را به گروه اضافه کن، ادمین کن و دسترسی «Manage Topics» بده.\n"
@@ -14041,12 +14048,16 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if chat_id is None:
             await call.answer(db.get_text('handlers_admin.auto_f3306533', 'گروه گزارشی تنظیم نشده است.'), show_alert=True)
             return
-        result = await _apply_report_group(bot, chat_id)
+        await call.answer(tr("⏳ در حال همگام‌سازی تاپیک‌ها..."))
+        try:
+            rep = await report_router.full_sync(bot, db, chat_id)
+            result = f"✅ همگام‌سازی انجام شد: {rep.summary()}."
+        except report_router.SetupError as e:
+            result = f"❌ {e}"
         await safe_edit(
             call, result + "\n\n" + _report_group_text(),
             reply_markup=kb.admin_report_group_kb(report_router.get_chat_id(db) is not None),
         )
-        await call.answer()
 
     @router.callback_query(F.data == "adm_report_clear")
     async def cb_report_group_clear(call: CallbackQuery):
@@ -14064,31 +14075,272 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
     # نام‌گذاری تاپیک‌ها توسط مدیر (فاز ۱ - زیرساخت بقیه فازها)
     # -------------------------------------------------------------------
 
-    def _report_topics_display(chat_id: int) -> dict:
-        labels = db.get_report_topic_labels(chat_id)
-        return {
-            key: (labels.get(key) or default_name)
-            for key, default_name in report_router.TOPICS.items()
-        }
+    def _rt_group_rows() -> list:
+        prefs = report_router.load_prefs(db)
+        rows = []
+        for gkey, title in report_router.TOPIC_GROUPS.items():
+            specs = [sp for sp in report_router.TOPIC_SPECS if sp.group == gkey]
+            active = sum(1 for sp in specs if report_router.is_enabled(db, sp.key, prefs))
+            rows.append((gkey, title, active, len(specs)))
+        return rows
+
+    def _rt_items(group: str, chat_id) -> list:
+        prefs = report_router.load_prefs(db)
+        labels = db.get_report_topic_labels(chat_id) if chat_id is not None else {}
+        return [
+            (sp.key, labels.get(sp.key) or sp.name,
+             report_router.is_enabled(db, sp.key, prefs), report_router.is_silent(db, sp.key, prefs))
+            for sp in report_router.TOPIC_SPECS if sp.group == group
+        ]
+
+    def _rt_card_text(key: str, chat_id) -> str:
+        sp = report_router.SPECS[key]
+        labels = db.get_report_topic_labels(chat_id) if chat_id is not None else {}
+        threads = db.get_report_topics(chat_id) if chat_id is not None else {}
+        prefs = report_router.load_prefs(db)
+        enabled = report_router.is_enabled(db, key, prefs)
+        silent = report_router.is_silent(db, key, prefs)
+        name = labels.get(key) or sp.name
+        status = "🟢 فعال" if enabled else "⚪️ غیرفعال (گزارش‌هایش به «سایر» می‌رود)"
+        if sp.locked:
+            status += " — ضروری؛ غیرفعال‌شدنی نیست"
+        thread = threads.get(key)
+        return (
+            f"{name}\n\n"
+            f"📖 {sp.description}\n\n"
+            f"وضعیت: {status}\n"
+            f"نوتیفیکیشن: {'🔕 بی‌صدا' if silent else '🔔 عادی'}\n"
+            f"ساخته‌شده در تلگرام: {'✅ بله (thread ' + str(thread) + ')' if thread else '⏳ هنوز نه (با اولین گزارش یا همگام‌سازی ساخته می‌شود)'}\n"
+            f"کلید داخلی: {key}"
+        )
+
+    async def _rt_show_card(call: CallbackQuery, key: str, note: str = ""):
+        chat_id = report_router.get_chat_id(db)
+        sp = report_router.SPECS[key]
+        labels = db.get_report_topic_labels(chat_id) if chat_id is not None else {}
+        prefs = report_router.load_prefs(db)
+        text = (note + "\n\n" if note else "") + _rt_card_text(key, chat_id)
+        await replace_admin_view(
+            call, text,
+            reply_markup=kb.admin_report_topic_card_kb(
+                key, sp.group, report_router.is_enabled(db, key, prefs),
+                report_router.is_silent(db, key, prefs), sp.locked,
+                chat_id is not None, key in labels,
+            ),
+        )
 
     @router.callback_query(F.data == "adm_report_topics")
     async def cb_report_topics_menu(call: CallbackQuery, state: FSMContext):
         if not owner_only(call.from_user.id):
             return await deny_support(call)
         await state.clear()
+        await replace_admin_view(
+            call,
+            tr(
+                "🗂 مدیریت تاپیک‌ها\n\n"
+                "تاپیک‌ها در ۵ دسته‌اند. هر دسته را باز کن و برای هر تاپیک می‌توانی آن را روشن/خاموش، "
+                "بی‌صدا، نام‌گذاری، تست یا از نو بسازی.\n\n"
+                "🟢 فعال  •  🔕 فعال و بی‌صدا  •  ⚪️ غیرفعال (گزارش‌هایش به «سایر» می‌رود)\n\n"
+                "💡 اگر تاپیک‌ها برایت زیاد است، از «🎛 پروفایل‌های آماده» یک پروفایل سبک‌تر انتخاب کن."
+            ),
+            reply_markup=kb.admin_report_topics_list_kb(_rt_group_rows()),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_grp:"))
+    async def cb_rt_group(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        gkey = call.data.split(":", 1)[1]
+        if gkey not in report_router.TOPIC_GROUPS:
+            await call.answer(tr("دسته نامعتبر است."), show_alert=True)
+            return
+        chat_id = report_router.get_chat_id(db)
+        await replace_admin_view(
+            call,
+            f"{report_router.TOPIC_GROUPS[gkey]}\n\nیک تاپیک را برای مدیریت انتخاب کن:",
+            reply_markup=kb.admin_report_topic_group_kb(_rt_items(gkey, chat_id)),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_open:"))
+    async def cb_rt_open(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        key = call.data.split(":", 1)[1]
+        if key not in report_router.SPECS:
+            await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
+            return
+        await _rt_show_card(call, key)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_tgl:"))
+    async def cb_rt_toggle(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":", 1)[1]
+        if key not in report_router.SPECS:
+            await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
+            return
+        new_state = not report_router.is_enabled(db, key)
+        try:
+            await asyncio.to_thread(report_router.set_pref, db, key, enabled=new_state)
+        except report_router.SetupError as e:
+            await call.answer(str(e), show_alert=True)
+            return
+        await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "report_topic_toggle",
+            f"تاپیک {key} → {'فعال' if new_state else 'غیرفعال'}",
+        )
+        note = "✅ تاپیک فعال شد." if new_state else "⚪️ تاپیک غیرفعال شد؛ گزارش‌هایش به «سایر» می‌رود."
+        chat_id = report_router.get_chat_id(db)
+        if new_state and chat_id is not None:
+            try:
+                await report_router._thread_for(bot, db, chat_id, key)
+            except Exception:
+                note += "\n⚠️ ساخت تاپیک در تلگرام ناموفق بود؛ با اولین گزارش یا همگام‌سازی دوباره تلاش می‌شود."
+        await _rt_show_card(call, key, note)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_mute:"))
+    async def cb_rt_mute(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":", 1)[1]
+        if key not in report_router.SPECS:
+            await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
+            return
+        new_silent = not report_router.is_silent(db, key)
+        await asyncio.to_thread(report_router.set_pref, db, key, silent=new_silent)
+        await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "report_topic_mute",
+            f"تاپیک {key} → {'بی‌صدا' if new_silent else 'نوتیفیکیشن عادی'}",
+        )
+        await _rt_show_card(call, key, "🔕 تاپیک بی‌صدا شد." if new_silent else "🔔 نوتیفیکیشن عادی شد.")
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_test:"))
+    async def cb_rt_test(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":", 1)[1]
+        if key not in report_router.SPECS:
+            await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
+            return
+        ok = await report_router.send_test(bot, db, key)
+        await call.answer(
+            tr("✅ پیام تست در تاپیک ارسال شد.") if ok else tr("❌ ارسال ناموفق بود؛ دسترسی بات و تنظیم گروه را بررسی کن."),
+            show_alert=not ok,
+        )
+
+    @router.callback_query(F.data.startswith("adm_rt_reset:"))
+    async def cb_rt_reset(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":", 1)[1]
+        chat_id = report_router.get_chat_id(db)
+        if key not in report_router.SPECS or chat_id is None:
+            await call.answer(tr("تاپیک نامعتبر است یا گروه تنظیم نشده."), show_alert=True)
+            return
+        await asyncio.to_thread(db.clear_report_topic_label, chat_id, key)
+        note = "↩️ نام به حالت پیش‌فرض برگشت."
+        thread_id = (await asyncio.to_thread(db.get_report_topics, chat_id)).get(key)
+        if thread_id:
+            try:
+                await bot.edit_forum_topic(chat_id, thread_id, name=report_router.SPECS[key].name)
+            except Exception:
+                note += "\n⚠️ تغییر نام خودِ تاپیک در تلگرام ناموفق بود."
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "report_topic_rename", f"تاپیک {key} → پیش‌فرض")
+        await _rt_show_card(call, key, note)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_rebuild:"))
+    async def cb_rt_rebuild(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        key = call.data.split(":", 1)[1]
+        chat_id = report_router.get_chat_id(db)
+        if key not in report_router.SPECS or chat_id is None:
+            await call.answer(tr("تاپیک نامعتبر است یا گروه تنظیم نشده."), show_alert=True)
+            return
+        await call.answer(tr("⏳ در حال ساخت دوباره..."))
+        try:
+            await report_router.rebuild_topic(bot, db, chat_id, key)
+            note = "♻️ تاپیک جدید ساخته شد؛ تاپیک قبلی فقط بسته شد (تاریخچه‌اش پاک نشده)."
+            await asyncio.to_thread(db.log_admin_action, call.from_user.id, "report_topic_rebuild", f"تاپیک {key}")
+        except report_router.SetupError as e:
+            note = f"❌ {e}"
+        await _rt_show_card(call, key, note)
+
+    @router.callback_query(F.data == "adm_rt_profiles")
+    async def cb_rt_profiles(call: CallbackQuery, state: FSMContext):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        await state.clear()
+        counts = {k: len(report_router._profile_keys(k)) for k in report_router.PROFILES}
+        lines = "\n".join(f"{label} ({counts[k]} تاپیک)" for k, label in report_router.PROFILES.items())
+        await replace_admin_view(
+            call,
+            tr("🎛 پروفایل‌های آماده\n\n" + lines + "\n\n"
+               "اعمال پروفایل فقط وضعیت روشن/خاموش تاپیک‌ها را عوض می‌کند (نام‌ها و حالت بی‌صدا دست‌نخورده می‌ماند). "
+               "تاپیک‌های خاموش حذف نمی‌شوند؛ گزارش‌هایشان به «سایر» می‌رود."),
+            reply_markup=kb.admin_report_profiles_kb(report_router.PROFILES),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_rt_prof:"))
+    async def cb_rt_profile_apply(call: CallbackQuery, bot: Bot):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
+        profile = call.data.split(":", 1)[1]
+        try:
+            n = await asyncio.to_thread(report_router.apply_profile, db, profile)
+        except report_router.SetupError as e:
+            await call.answer(str(e), show_alert=True)
+            return
+        await asyncio.to_thread(db.log_admin_action, call.from_user.id, "report_topic_profile", f"پروفایل {profile} ({n} تاپیک)")
+        note = f"✅ پروفایل اعمال شد ({n} تاپیک فعال)."
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is not None:
+            try:
+                rep = await report_router.full_sync(bot, db, chat_id)
+                note += f"\n🔁 همگام‌سازی: {rep.summary()}."
+            except report_router.SetupError as e:
+                note += f"\n⚠️ {e}"
+        await safe_edit(call, note + "\n\n" + _report_group_text(),
+                        reply_markup=kb.admin_report_group_kb(chat_id is not None))
+        await call.answer()
+
+    @router.callback_query(F.data == "adm_rt_stats")
+    async def cb_rt_stats(call: CallbackQuery):
+        if not owner_only(call.from_user.id):
+            return await deny_support(call)
         chat_id = report_router.get_chat_id(db)
         if chat_id is None:
             await call.answer(tr("اول باید گروه گزارش را تنظیم کنی."), show_alert=True)
             return
-        display = await asyncio.to_thread(_report_topics_display, chat_id)
+        stats = await asyncio.to_thread(db.get_report_topic_stats, chat_id, 7)
+        labels = await asyncio.to_thread(db.get_report_topic_labels, chat_id)
+        prefs = report_router.load_prefs(db)
+        lines, total = [], 0
+        for sp in report_router.TOPIC_SPECS:
+            st = stats.get(sp.key)
+            if not st:
+                continue
+            total += st["count"]
+            off = "" if report_router.is_enabled(db, sp.key, prefs) else " ⚪️"
+            lines.append((st["count"], f"{labels.get(sp.key) or sp.name}{off}: {st['count']} (امروز {st['today']})"))
+        lines.sort(key=lambda x: -x[0])
+        body = "\n".join(t for _, t in lines) if lines else "هنوز پیامی ثبت نشده است."
+        quiet = [labels.get(sp.key) or sp.name for sp in report_router.TOPIC_SPECS
+                 if report_router.is_enabled(db, sp.key, prefs) and sp.key not in stats]
+        extra = ("\n\n😴 بدون پیام در ۷ روز اخیر:\n" + "، ".join(quiet)) if quiet else ""
         await replace_admin_view(
             call,
-            tr(
-                "🏷 نام‌گذاری تاپیک‌ها\n\n"
-                "روی هر تاپیک بزن تا نام/ایموجی‌اش را عوض کنی. با تغییر، هم دیتابیس "
-                "آپدیت می‌شود هم نام واقعی تاپیک در تلگرام (در صورت وجود)."
-            ),
-            reply_markup=kb.admin_report_topics_list_kb(display),
+            tr(f"📊 آمار تاپیک‌ها — ۷ روز اخیر\n\nمجموع پیام: {total}\n\n{body}{extra}"),
+            reply_markup=kb.admin_back_kb("adm_report_group"),
         )
         await call.answer()
 
@@ -14100,17 +14352,19 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if topic_key not in report_router.TOPICS:
             await call.answer(tr("تاپیک نامعتبر است."), show_alert=True)
             return
+        chat_id = report_router.get_chat_id(db)
+        if chat_id is None:
+            await call.answer(tr("اول باید گروه گزارش را تنظیم کنی."), show_alert=True)
+            return
         await state.set_state(AdminReportGroup.waiting_topic_name)
         await state.update_data(rename_topic_key=topic_key)
         current = report_router.TOPICS[topic_key]
-        chat_id = report_router.get_chat_id(db)
-        if chat_id is not None:
-            labels = await asyncio.to_thread(db.get_report_topic_labels, chat_id)
-            current = labels.get(topic_key) or current
+        labels = await asyncio.to_thread(db.get_report_topic_labels, chat_id)
+        current = labels.get(topic_key) or current
         await safe_edit(
             call,
-            tr(f"نام/ایموجی جدید برای تاپیک «{current}» را بفرست:"),
-            reply_markup=kb.admin_back_kb("adm_report_topics"),
+            tr(f"نام/ایموجی جدید برای تاپیک «{current}» را بفرست (حداکثر ۱۲۸ کاراکتر):"),
+            reply_markup=kb.admin_back_kb(f"adm_rt_open:{topic_key}"),
         )
         await call.answer()
 
@@ -14131,6 +14385,9 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         if not new_name:
             await message.answer(tr("❌ نام نمی‌تواند خالی باشد."))
             return
+        if len(new_name) > 128:
+            await message.answer(tr("❌ نام تاپیک حداکثر ۱۲۸ کاراکتر می‌تواند باشد."))
+            return
         try:
             await report_router.rename_topic(bot, db, chat_id, topic_key, new_name)
             (await asyncio.to_thread(
@@ -14140,8 +14397,10 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             result = f"✅ نام تاپیک به «{new_name}» تغییر کرد."
         except report_router.SetupError as e:
             result = f"⚠️ {e}"
-        display = await asyncio.to_thread(_report_topics_display, chat_id)
-        await message.answer(result, reply_markup=kb.admin_report_topics_list_kb(display))
+        await message.answer(
+            result,
+            reply_markup=kb.admin_report_topic_group_kb(_rt_items(report_router.SPECS[topic_key].group, chat_id)),
+        )
 
     # -------------------------------------------------------------------
     # اکشن سریع روی کارت‌های گروه گزارش (فاز ۴): پروفایل کامل، بلاک سریع با

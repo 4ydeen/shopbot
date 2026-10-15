@@ -15,6 +15,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton
 
 import gift_card_render as gr
 import gift_cards as gc
+import report_router
 from i18n import tr
 from jalali import to_jalali_str
 
@@ -110,6 +111,13 @@ async def redeem_gift_for_message(db, message: Message, code: str):
         await message.answer(tr(reasons.get(result["error"], "❌ دریافت کارت ناموفق بود.")))
         return
     card = result["card"]
+    await report_router.notify(message.bot, db, "discount", report_router.format_event(
+        "گیفت‌کارت دریافت شد", [
+            ("دریافت‌کننده", report_router.user_link(user.id, user.first_name or "", user.username or "")),
+            ("نوع", "کیف پول" if card["kind"] == "wallet" else "کانفیگ"),
+            ("مبلغ", f"{gc.money(card['amount'])} تومان" if card["kind"] == "wallet" else ""),
+            ("فرستنده", report_router.code(card["sender_id"])),
+        ], icon="🎁"))
     if card["kind"] == "wallet":
         balance = await asyncio.to_thread(db.get_wallet_credit, user.id)
         await message.answer(tr(

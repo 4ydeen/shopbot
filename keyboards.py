@@ -2118,20 +2118,65 @@ def admin_backup_sync_menu_kb(db) -> InlineKeyboardMarkup:
 
 def admin_report_group_kb(configured: bool) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text=tr("✏️ تنظیم یا تغییر گروه"), callback_data="adm_report_set")]]
-    rows.append([InlineKeyboardButton(text=tr("🏷 نام‌گذاری تاپیک‌ها"), callback_data="adm_report_topics")])
+    rows.append([InlineKeyboardButton(text=tr("🗂 مدیریت تاپیک‌ها"), callback_data="adm_report_topics")])
+    rows.append([
+        InlineKeyboardButton(text=tr("🎛 پروفایل‌های آماده"), callback_data="adm_rt_profiles"),
+        InlineKeyboardButton(text=tr("📊 آمار تاپیک‌ها"), callback_data="adm_rt_stats"),
+    ])
     if configured:
-        rows.append([InlineKeyboardButton(text=tr("🔁 بررسی و ساخت تاپیک‌های ناموجود"), callback_data="adm_report_recheck")])
+        rows.append([InlineKeyboardButton(text=tr("🔁 همگام‌سازی و ترمیم تاپیک‌ها"), callback_data="adm_report_recheck")])
         rows.append([InlineKeyboardButton(text=tr("🚫 حذف گروه گزارش"), callback_data="adm_report_clear")])
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:management")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_report_topics_list_kb(topic_labels: dict) -> InlineKeyboardMarkup:
-    """topic_labels: دیکشنری topic_key -> نام فعلی (سفارشی یا پیش‌فرض) برای نمایش."""
+def admin_report_topics_list_kb(groups: list) -> InlineKeyboardMarkup:
+    """groups: لیست (group_key, عنوان گروه، تعداد فعال، کل) برای سطح اول مدیریت تاپیک‌ها."""
     rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"adm_report_topic_ren:{key}")]
-        for key, name in topic_labels.items()
+        [InlineKeyboardButton(text=f"{title} ({active}/{total})", callback_data=f"adm_rt_grp:{key}")]
+        for key, title, active, total in groups
     ]
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_report_group")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_report_topic_group_kb(items: list) -> InlineKeyboardMarkup:
+    """items: لیست (topic_key, نام نمایشی، enabled, silent) یک دسته؛ دو ستونه."""
+    buttons = []
+    for key, name, enabled, silent in items:
+        mark = "⚪️" if not enabled else ("🔕" if silent else "🟢")
+        buttons.append(InlineKeyboardButton(text=f"{mark} {name}", callback_data=f"adm_rt_open:{key}"))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_report_topics")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_report_topic_card_kb(key: str, group: str, enabled: bool, silent: bool, locked: bool,
+                               has_chat: bool, customized: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if not locked:
+        rows.append([InlineKeyboardButton(
+            text=tr("⚪️ غیرفعال‌کردن (انتقال به «سایر»)") if enabled else tr("🟢 فعال‌کردن"),
+            callback_data=f"adm_rt_tgl:{key}",
+        )])
+    rows.append([InlineKeyboardButton(
+        text=tr("🔔 برگرداندن به نوتیفیکیشن عادی") if silent else tr("🔕 بی‌صدا کردن"),
+        callback_data=f"adm_rt_mute:{key}",
+    )])
+    rows.append([InlineKeyboardButton(text=tr("✏️ تغییر نام/ایموجی"), callback_data=f"adm_report_topic_ren:{key}")])
+    if customized:
+        rows.append([InlineKeyboardButton(text=tr("↩️ بازگشت به نام پیش‌فرض"), callback_data=f"adm_rt_reset:{key}")])
+    if has_chat and enabled:
+        rows.append([
+            InlineKeyboardButton(text=tr("🧪 پیام تست"), callback_data=f"adm_rt_test:{key}"),
+            InlineKeyboardButton(text=tr("♻️ ساخت دوباره"), callback_data=f"adm_rt_rebuild:{key}"),
+        ])
+    rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data=f"adm_rt_grp:{group}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_report_profiles_kb(profiles: dict) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"adm_rt_prof:{key}")] for key, label in profiles.items()]
     rows.append([InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_report_group")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
