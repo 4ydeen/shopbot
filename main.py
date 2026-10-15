@@ -108,6 +108,8 @@ async def main():
     )
     import userbot
     userbot_task = asyncio.create_task(userbot.run(main_db, BOT_TOKEN))
+    import leak_index
+    leak_index_task = asyncio.create_task(leak_index.run(main_db))
 
     try:
         await manager.wait_all()
@@ -129,6 +131,11 @@ async def main():
         userbot_task.cancel()
         try:
             await userbot_task
+        except (Exception, asyncio.CancelledError):
+            pass
+        leak_index_task.cancel()
+        try:
+            await leak_index_task
         except (Exception, asyncio.CancelledError):
             pass
         await manager.stop_all()

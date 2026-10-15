@@ -559,6 +559,7 @@ async def run(db, bot_token: str):
 
     import ai_media
     import ai_support
+    import leak_scanner
     import global_switch
     import user_limit as ul
     from aiogram import Bot
@@ -999,6 +1000,7 @@ async def run(db, bot_token: str):
         sender_id = event.sender_id
         if not sender_id or sender_id == SERVICE_USER_ID or sender_id == ctx.get("me_id"):
             return
+        leak_scanner.note_customer_activity()
         if _dup((chat_id, msg.id)):
             return
         if not flag(db, KEY_ENABLED):
@@ -1126,6 +1128,7 @@ async def run(db, bot_token: str):
     client.add_event_handler(_safe(_on_outgoing), events.NewMessage(outgoing=True))
     client.add_event_handler(_safe(_on_read), events.MessageRead(inbox=True))
     maintenance_task = asyncio.create_task(_maintenance())
+    leak_started = False
 
     try:
         while True:
@@ -1135,6 +1138,10 @@ async def run(db, bot_token: str):
                     raise RuntimeError("AuthKeyUnregisteredError")
                 me = await client.get_me()
                 ctx["me_id"] = me.id
+                if not leak_started:
+                    # اسکنر تشخیص نشت روی همین کلاینت و همین سشن یوزربات کار می‌کند
+                    leak_started = True
+                    _spawn(leak_scanner.run(client, db, bot))
                 STATE["me"] = {"id": me.id, "first_name": me.first_name or "", "username": me.username or ""}
                 STATE["connected"] = True
                 STATE["connected_at"] = time.time()

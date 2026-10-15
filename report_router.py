@@ -82,6 +82,7 @@ TOPIC_SPECS = (
     TopicSpec("ai", "🤖 هوش مصنوعی", "خطاهای غیرمنتظره‌ی دستیار هوشمند پشتیبانی (مثلاً قطعی سرویس AI).", "ops", COLOR_PURPLE, True, profiles=()),
     # ---- امنیت و کنترل ----
     TopicSpec("security", "🛡 امنیت", "بلاک/آنبلاک کاربران، رفرال مشکوک و هشدارهای امنیتی.", "security", COLOR_RED, locked=False),
+    TopicSpec("leak", "🚨 نشت کانفیگ", "هشدار کانفیگ‌های نشت‌کرده در کانال‌ها و گروه‌های عمومی، با دکمه‌ی چرخاندن لینک، اخطار و نادیده‌گرفتن.", "security", COLOR_RED),
     TopicSpec("fraud", "🕵️ رسید مشکوک", "رسیدهای رد‌شده‌ی خودکار، فیش جعلی و تلاش‌های تقلب در پرداخت.", "security", COLOR_RED),
     TopicSpec("login", "🔐 ورود و نشست‌ها", "ورود موفق و تلاش‌های ناموفق ورود به پنل وب (با IP).", "security", COLOR_RED, profiles=("standard",)),
     TopicSpec("audit", "📝 لاگ مدیران", "ردپای کامل اقدامات مدیران (تغییر تنظیمات، قیمت‌ها، موجودی، کلیدها و...).", "security", COLOR_PURPLE, True, profiles=("standard",)),

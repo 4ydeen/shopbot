@@ -64,6 +64,7 @@ import report_router
 import tutorial
 import tutorial_hub
 from panel_providers import get_provider, PanelError, PanelUsernameTakenError
+import leak_index
 from reseller_auto_provision import provision_auto_config, provision_test_config, provision_reseller_fixed_product, is_volume_credit_bot, ProvisionError
 from direct_panel_provision import provision_direct, planned_usernames, ProvisionError as DirectProvisionError
 from test_config_provision import provision_test_plan, format_plan_amount, ProvisionError as TestPlanProvisionError
@@ -4195,6 +4196,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             return
         if result.subscription_url:
             (await asyncio.to_thread(db.update_custom_config_subscription_url, cc["id"], result.subscription_url))
+        leak_index.schedule_refresh(db, cc["id"])
         (await asyncio.to_thread(db.add_custom_config_history, cc["id"], "cut_access", "دسترسی قطع و لینک جدید صادر شد"))
         item2 = _find_my_orders_item(user_tg_id, cb_id)
         if item2:
