@@ -92,6 +92,7 @@ from aiogram.enums import ParseMode
 from backup import create_backup, restore_backup, is_valid_sqlite_db
 from jalali import to_jalali_str
 from stock_alerts import check_and_notify_low_stock
+import leak_index
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PROVIDERS,
     SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, parse_xui_inbound_ids,
@@ -975,6 +976,7 @@ async def api_custom_config_cut_access(custom_config_id: int, auth=Depends(get_v
         raise HTTPException(status_code=502, detail=tr(f"قطع دسترسی ناموفق بود: {e}"))
     if result.subscription_url:
         db.update_custom_config_subscription_url(cc["id"], result.subscription_url)
+    leak_index.schedule_refresh(db, cc["id"])
     db.add_custom_config_history(cc["id"], "cut_access", "دسترسی قطع و لینک جدید صادر شد")
     return {"status": "ok", "subscription_url": result.subscription_url}
 
