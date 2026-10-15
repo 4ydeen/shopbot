@@ -116,6 +116,8 @@ class GiftCardsMixin:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(gift_cards)")}
             if "stock_config_id" not in columns:
                 conn.execute("ALTER TABLE gift_cards ADD COLUMN stock_config_id INTEGER")
+            if "headline" not in columns:
+                conn.execute("ALTER TABLE gift_cards ADD COLUMN headline TEXT")
             if not conn.execute("SELECT 1 FROM gift_themes LIMIT 1").fetchone():
                 for order, (code, title, emoji, a, b) in enumerate(_DEFAULT_THEMES):
                     conn.execute(
@@ -364,6 +366,20 @@ class GiftCardsMixin:
         self._ensure_gift_tables()
         with self._get_conn() as conn:
             conn.execute("UPDATE gift_cards SET image_path=? WHERE id=?", (image_path, card_id))
+
+    def gift_set_text(self, card_id: int, message: str = None, headline: str = None):
+        self._ensure_gift_tables()
+        sets, args = [], []
+        if message is not None:
+            sets.append("message=?")
+            args.append(message[:400])
+        if headline is not None:
+            sets.append("headline=?")
+            args.append(headline[:60])
+        if not sets:
+            return
+        with self._get_conn() as conn:
+            conn.execute(f"UPDATE gift_cards SET {', '.join(sets)} WHERE id=?", (*args, card_id))
 
     def gift_redeem(self, code: str, receiver_id: int) -> dict:
         self._ensure_gift_tables()
