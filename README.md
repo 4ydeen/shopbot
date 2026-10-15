@@ -21,6 +21,7 @@
 - [📖 Overview](#overview)
 - [✨ Features](#features)
 - [🧠 AI Support Assistant](#ai-support)
+- [📣 AI Channel Posts](#channel-ai)
 - [💼 Telegram Business](#business)
 - [💳 Payment Gateways](#payment-gateways)
 - [📲 Telegram Mini App](#miniapp)
@@ -177,13 +178,49 @@ The project is designed for real-world operation, with wallets, referrals, disco
 
 The AI layer answers repetitive customer questions before escalating to human support.
 
-- 🔌 Selectable providers: Gemini, Groq or OpenRouter
+- 🔌 Selectable providers: Gemini, Groq, OpenRouter, OpenAI, Claude (Anthropic), Mistral, Cohere and Cloudflare Workers AI, plus custom providers with their own URL, model and keys; providers, keys (several per provider) and models are managed from the bot's admin menu (**AI settings**) without editing `.env` or restarting
 - 📚 Administrator-managed FAQ knowledge
 - 🔎 Real user-specific answers for services, expiration, wallet and orders
 - 🛒 Real purchase cards with current prices and payment buttons
 - 🔒 Wallet purchases/renewals and service changes run only through the bot's validated flows after explicit user confirmation; refunds and complaints go to human support
 - 🙋 Automatic escalation for financial complaints or explicit human-support requests
 - ⚡ If no API provider is configured, requests can go directly to human support
+- 🎙️ Customers can send voice messages, audio files or photos; Gemini turns them into text or a description before the assistant answers (images up to 8 MB, audio up to 10 MB and 180 seconds)
+- ⚡ Live answer streaming in private chats through Telegram's `sendMessageDraft` (Bot API 9.5+); the final message is always sent normally and a streaming error never blocks it
+- 🧠 **Admin AI assistant** — a read-only natural-language assistant for senior admins (`/ai` or the admin menu), by text or voice: sales trends, user lookup, pending orders and tickets, expiring services, panel and gateway status, and "which button do I press" guidance. It never changes anything; per-section help guides are also built into the admin panel
+
+</details>
+
+---
+
+<a id="channel-ai"></a>
+
+## 📣 AI Channel Posts
+
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+Captions and banners for the sales channel are generated through the [Jarvis](https://jarvis.you) gateway (default API URL `https://api.jarvis.you/v1`). This part is fully separate from the support assistant and the admin assistant.
+
+**Setup (inside the bot):** Marketing & Growth → channel posts / Deep-link & channel post tools → AI post → ⚙️ AI settings & learning
+
+1. Create a Jarvis account and an API key (keys start with `pmai_`), press "🔑 Jarvis key" and send it (several keys: one per line, rotated automatically on errors).
+2. Press "🧪 Test text". Change the text or image model if needed (defaults: `CLAUDE_6_5_HAIKU` and `gemini-3-1-flash-image`).
+3. For banner quality, send a transparent PNG logo and, optionally, a sample banner as the style reference.
+4. The full in-bot guide is under "📖 Jarvis guide".
+
+**Features**
+
+- ✍️ One complete caption (up to 1500 characters) on the admin's topic, built only from real products, prices, discounts and discount codes (plus whatever the admin wrote); rewrite and change-topic actions; a manual-caption mode works without any AI key
+- 🏷️ Correct pricing: the AI receives both the original and the discounted price, the real percentage, the real end date (never an hour countdown) and the remaining purchases/uses, plus test-config plans, lucky-wheel prizes and other offers as facts
+- 🖼️ Banners with a design template per post type (discount, code, product, test, wheel) and real urgency chips taken from the database (a deadline within 7 days, or few purchases/uses left)
+- 🎯 Logo mode: "exact" (default) places the original logo without AI interference; "AI reference" passes it as a reference image and falls back to exact automatically
+- 🖼 Style-reference banner, an editable base prompt and a brand template (colors, logo, Persian font, default size, preview)
+- 🗳 AI-generated polls and quizzes
+- 📅 Weekly plan: the AI proposes several posts with different angles and the admin approves them in one step
+- 🗂 Post manager: drafts, scheduled posts (sent automatically), send, edit, pin/unpin, delete and statistics
+- 💡 Automatic suggestions to admins to create a post when a new product is added, stock runs low or a public discount code is created
+- 🔗 Deep-link buttons (discount code, test config, lucky wheel or a custom campaign parameter) and the standalone tools `channel_post_tool.py` and `channel_add_button_tool.py`
 
 </details>
 
@@ -294,7 +331,7 @@ The `admin_panel/` package provides a standalone web administration panel indepe
 - 📊 Sales, orders, wallet and system dashboards
 - 🎨 Multiple visual themes
 - 📱 PWA installation on mobile
-- 🌍 Global server map and health checks
+- 🌍 Global server map: the master subscription link is scanned, server IPs are geolocated and real protocol-level health checks decide online/offline
 - 💱 Exchange-rate management
 - ✅ Order, wallet and payment approval
 - 🏢 Reseller management and analytics
@@ -595,7 +632,9 @@ Shopvpn/
 Manual card-to-card receipts are screened before they reach the admin chat. Most findings are advisory notes; the final decision stays with the admin.
 
 - 🔁 Exact-duplicate detection through the file SHA-256 hash and the receipt reference number, plus a perceptual hash (dHash) that flags re-compressed or cropped reuse (warning only)
-- 🤖 Multi-model vision analysis: Gemini, plus Groq and OpenRouter in parallel when their keys are configured
+- 🤖 Multi-model vision analysis: Gemini, plus every other configured agent in parallel (Groq, OpenRouter, Mistral, Cohere, Cloudflare Workers AI, OpenAI, Claude and custom providers)
+- 🏦 More advisory checks: the bank implied by the source card's prefix vs. the bank branding visible in the receipt, and the sent file's name (a screenshot timestamp far from the send time, or photo-editor keywords; only when the receipt is sent as a Telegram file)
+- 🏛️ Bank inquiry (optional, off by default): the IBAN's bank code is always compared with the card's bank, and you can plug in any official card/IBAN inquiry HTTP API (URL, headers, body and response paths are set in the settings) to verify card ↔ IBAN and the cardholder name; results are cached, an unavailable service is never treated as approval, and a definite destination mismatch is auto-rejected only when you enable that
 - 🔢 Deterministic OCR checks: card number (Luhn + known Iranian bank prefix), IBAN checksum, amount match in Toman or Rial, reference-number reuse
 - 🕵️ Forensics: Error Level Analysis on JPEGs, image-metadata scan, screenshot status-bar time vs. send time, bank/holder-name and amount-in-words consistency
 - ⚖️ Automatic rejection only for exact duplicates (when auto-reject is on) or when at least two independent signals agree
@@ -643,6 +682,46 @@ Beyond answering questions, the assistant can prepare account actions that the b
 - ⚠️ Users see the current state of a service (remaining time and traffic) before they confirm a renewal
 - 📣 Every renewal (full, volume, time or extra users) is logged to the admin report group with before/after values
 
+### 🎴 Gift Cards
+
+- 🎁 In **Wallet → Gift Card**, users send a gift as a ready-made card image: wallet credit, one of their existing configs, or a newly purchased config, with an optional recipient name and message
+- 🖼️ Admin-managed card themes: upload a base image, the AI detects where the text goes and exact Persian text is printed on it; a config's subscription link never appears on the image and is delivered only after redemption
+- 🔗 Recipients redeem with the code or a deep link; senders can cancel unredeemed cards; admins can disable/enable a card, revoke it (the amount and fee, or the config, goes back to the sender), view its image and log, and manage themes (upload, enable/disable, re-detect layout, preview, delete)
+- ⚙️ Settings (Marketing & Growth → Gift cards): master switch, switches for wallet/config/purchase gifts, minimum and maximum amount, fee percent, validity days and the maximum number of open cards per user; expired cards are closed automatically in the background
+
+### 🔔 Product Waitlist
+
+- ⏸️ Inactive products stay visible in the category list tagged "(inactive)"; tapping one puts the user on that product's waitlist
+- 🔔 When an admin activates the product (from the bot, the Mini App admin or the web panel), every waiting user receives a "now available" message with a quick-buy button; the list is then cleared, sending is throttled and nothing is sent while the product has no stock
+
+### 🤖 Telegram Userbot (AI Replies in Your Personal Chats)
+
+- 🤝 An alternative to Telegram Business: the bot logs in to the owner's own Telegram account (MTProto) and answers customers in the owner's private chats through the AI support assistant. It is fully independent of Business, with its own settings, tables and admin menu (**Admin & Access → Userbot**)
+- 🔑 Login and logout happen on the server: `python userbot.py login`, or `manage.sh` options 31 (login) and 32 (logout)
+- ⏸️ Pauses automatically while the owner is active (per chat or globally) and resumes after a configurable away time; can run always or only outside working hours
+- 🧑‍💼 Human-handoff chats with an optional automatic return timer, an exception list, an option to skip saved contacts, a first message and a persona text
+- 🛒 Optional product cards, sending a customer's own config/QR inside the chat, voice/image understanding with an acknowledgement for other files, merging of quick consecutive messages and optional mark-as-read
+
+### 📉 Churn Prediction & Win-back Offers
+
+- 📊 Finds customers whose time since their last purchase exceeds 90% of their own usual purchase interval (at least one confirmed purchase is required), considers their live service usage and sends a personal renewal offer with a unique, time-limited discount code
+- 🧠 Optional AI decision per customer (risk 0–100, offer or skip, discount percentage and expiry within your caps); with AI off a rule-based score is used
+- 🎛️ Settings (Reminders & Alerts → Churn prediction): on/off (off by default), AI on/off, minimum risk score, default and maximum discount percent, code validity in hours, per-user cooldown days, maximum offers per run and the default purchase cycle; every decision is recorded
+
+### 🧩 Custom Gateway Amount Options
+
+- 🔢 Each custom (generic) payment gateway can send the amount as Toman, Rial or USD (USD is calculated from the order amount and the dollar rate) and apply an amount multiplier
+- 🧾 Amount matching and tolerance checks still use the real Toman amount; the options are available in both the web panel and the Mini App gateway settings
+
+### 🖧 Panel & Service Improvements
+
+- 👥 Concurrent-user limit (`limitIp`) for panel-linked products on 3X-UI and Alireza: the base price includes one user, an extra-user price is set per product, and customers can add users later from the service page (increase only)
+- 🧬 3X-UI multi-inbound: a product or server can use several inbounds selected by checkbox, with a backward-compatible fallback to the old single inbound
+- ♾️ `0` GB or `0` days on panel-linked products means unlimited; a full renewal onto an unlimited plan now removes the old volume cap on the panel providers that support it
+- 🔐 Panel login reuse: Alireza and IBSng cookies and Marzban/Marzneshin/PasarGuard tokens are cached in memory until they expire instead of logging in on every API call
+- ⏯️ One button enables or disables all of a user's panel-linked configs (admin user view)
+- 🌍 World map: the master subscription link is scanned (URI lists, Xray JSON and sing-box outbounds), server IPs are geolocated and real protocol-level health checks (including `httpupgrade`) decide online/offline, with CDN fallbacks and a local cache
+
 ### 🧰 More `manage.sh` Options
 
 | Option | Action |
@@ -651,6 +730,8 @@ Beyond answering questions, the assistant can prepare account actions that the b
 | 28 | Remove LibreTranslate |
 | 29 | Full cleanup / factory reset |
 | 30 | Remove unwanted translation languages (free disk space) |
+| 31 | Log in the Telegram account for the userbot (AI support in your private chats) |
+| 32 | Log out the userbot Telegram account |
 
 </details>
 
@@ -696,6 +777,12 @@ Beyond answering questions, the assistant can prepare account actions that the b
 - 💳 Reseller postpaid credit
 - 📉 Reseller-tier quantity discounts
 - 🌐 Resellers without their own Telegram bot through the web API
+- 🎴 Gift cards
+- 🔔 Product waitlist notifications
+- 🤖 Telegram userbot AI replies
+- 📉 Churn prediction and win-back offers
+- 🧠 Admin AI assistant
+- 🏛️ Optional bank inquiry for receipt checks
 
 </details>
 
