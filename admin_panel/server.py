@@ -70,6 +70,7 @@ from direct_panel_provision import provision_direct, ProvisionError as DirectPro
 from stock_alerts import check_and_notify_low_stock
 import ai_support
 from renewal_engine import execute_renewal, RenewalError
+import leak_index
 from panel_providers import (
     get_provider, PanelError, PanelUsernameTakenError, PANEL_TYPE_LABELS,
     PROVIDERS, SUB_BASE_URL_PANEL_TYPES, INBOUND_SELECT_PANEL_TYPES, TEMPLATE_BASED_PANEL_TYPES,
@@ -3381,6 +3382,7 @@ async def api_admin_custom_config_cut_access(custom_config_id: int, admin=Depend
         raise HTTPException(502, tr(f"قطع دسترسی ناموفق بود: {e}"))
     if result.subscription_url:
         (await asyncio.to_thread(db.update_custom_config_subscription_url, cc["id"], result.subscription_url))
+    leak_index.schedule_refresh(db, cc["id"])
     (await asyncio.to_thread(db.add_custom_config_history, cc["id"], "cut_access",
         f"دسترسی قطع و لینک جدید صادر شد (پنل وب - {admin['username']})"))
     (await asyncio.to_thread(db.log_admin_action, admin["id"], "custom_config_cut_access",
