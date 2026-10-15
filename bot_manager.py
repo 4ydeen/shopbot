@@ -47,6 +47,8 @@ from daily_report import daily_report_loop
 from cleanup_loop import cleanup_loop
 from lottery_loop import lottery_loop
 from signup_gift import signup_gift_loop
+import gift_cards
+from gift_card_handlers import create_gift_router
 from report_router import ReportGroupGuardMiddleware
 from global_switch import GlobalBotSwitchMiddleware
 import keyboards as kb
@@ -414,6 +416,7 @@ class BotManager:
         if is_main_bot:
             dp.include_router(create_business_router(db, language_mw))
             dp.include_router(create_userbot_router(db))
+        dp.include_router(create_gift_router(db, is_main_bot=is_main_bot))
         dp.include_router(create_admin_router(db, is_main_bot=is_main_bot, bot_manager=self))
         dp.include_router(create_user_router(db, is_main_bot=is_main_bot, bot_manager=self))
 
@@ -476,6 +479,7 @@ class BotManager:
         lottery_task = asyncio.create_task(lottery_loop(bot, db))
         reseller_expiry_task = asyncio.create_task(db.reseller_expiry_loop(bot))
         signup_gift_task = asyncio.create_task(signup_gift_loop(bot, db))
+        gift_expiry_task = asyncio.create_task(gift_cards.expiry_loop(db, bot))
 
         self.instances[token] = {
             "bot": bot, "dp": dp, "task": task, "reminder_task": reminder_task,
@@ -486,6 +490,7 @@ class BotManager:
             "scheduled_broadcast_task": scheduled_broadcast_task, "channel_post_task": channel_post_task,
             "cleanup_task": cleanup_task, "lottery_task": lottery_task,
             "reseller_expiry_task": reseller_expiry_task, "signup_gift_task": signup_gift_task,
+            "gift_expiry_task": gift_expiry_task,
             "db_path": db_path,
         }
         logger.info("بات با db_path=%s راه‌اندازی شد.", db_path)
@@ -496,6 +501,7 @@ class BotManager:
         "scheduled_broadcast_task", "channel_post_task", "cache_refresh_task", "temp_msg_task",
         "extra_gateway_task", "panel_health_task", "daily_report_task",
         "cleanup_task", "lottery_task", "reseller_expiry_task", "signup_gift_task",
+        "gift_expiry_task",
     )
 
     async def stop_bot(self, token: str) -> bool:

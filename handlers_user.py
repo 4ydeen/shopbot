@@ -28,6 +28,7 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, Teleg
 from md_utils import escape_md, escape_html
 from price_display import price_label_plain
 import keyboards as kb
+from gift_card_handlers import redeem_gift_for_message
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, RenewalDiscountEntry, WalletTopup, WalletGiftCode, WalletTransfer, CoinConvert, CustomConfigFlow, AddServiceFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
 import ai_support
 import ai_media
@@ -524,6 +525,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await referral_menu(message, bot)
             elif action.startswith("__open_svcitem__:"):
                 await _open_service_from_deeplink(message, action.split(":", 1)[1])
+            elif action.startswith("__redeem_gift__:"):
+                await redeem_gift_for_message(db, message, action.split(":", 1)[1])
             else:
                 await message.answer(action)
 
@@ -770,6 +773,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 post_start_actions.append("__open_invite__")
             elif token.startswith("svc_") and len(token) > 4:
                 post_start_actions.append(f"__open_svcitem__:{token[4:]}")
+            elif token.startswith("gift_") and len(token) > 5:
+                post_start_actions.append(f"__redeem_gift__:{token[5:]}")
             elif token == "nofj":
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
             elif _CHANNEL_POST_TOKEN.fullmatch(token):
@@ -845,6 +850,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await referral_menu(message, bot)
             elif action.startswith("__open_svcitem__:"):
                 await _open_service_from_deeplink(message, action.split(":", 1)[1])
+            elif action.startswith("__redeem_gift__:"):
+                await redeem_gift_for_message(db, message, action.split(":", 1)[1])
             else:
                 await message.answer(action)
 
@@ -2567,6 +2574,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             custom_product_id=product_id, custom_duration_days=duration_days,
             tier_discount_amount=tier_info["amount"],
         ))
+        await asyncio.to_thread(db.gift_register_order, message.from_user.id, order_id)
         order = (await asyncio.to_thread(db.get_order, order_id))
         await state.update_data(order_id=order_id, custom_volume_gb=volume_gb)
 

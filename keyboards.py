@@ -1967,9 +1967,10 @@ USER_SCREENS = {
             ("wal_gift", "🎁 استفاده از گیفت‌کد", None, False),
             ("wal_transfer", "💸 انتقال موجودی به کاربر دیگر", "wallet_show_transfer", False),
             ("wal_coins", "🪙 سکه‌های من", "score_enabled", False),
+            ("wal_giftcard", "🎁 کارت هدیه", None, False),
             ("wal_history", "📜 تاریخچه تراکنش‌ها", None, False),
         ],
-        "default_rows": [["wal_topup"], ["wal_gift"], ["wal_transfer"], ["wal_coins"], ["wal_history"]],
+        "default_rows": [["wal_topup"], ["wal_gift"], ["wal_transfer"], ["wal_coins"], ["wal_giftcard"], ["wal_history"]],
     },
     "contact_menu": {
         "label": "ارتباط با پشتیبانی",
@@ -3604,6 +3605,7 @@ def discount_codes_kb(codes=None, db=None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr("➕ ساخت کد تخفیف جدید"), callback_data="adm_disc_add")],
         [InlineKeyboardButton(text=tr("🎯 کد تخفیف گروهی (بر اساس فیلتر)"), callback_data="adm_bulk_disc")],
         [InlineKeyboardButton(text=tr("🎁 گیفت‌کدهای شارژ کیف پول"), callback_data="adm_gift_menu")],
+        [InlineKeyboardButton(text=tr("🎴 کارت‌های هدیه"), callback_data="gc_adm")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -4502,6 +4504,7 @@ def wallet_menu_kb(db=None) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=tr("🎁 استفاده از گیفت‌کد"), callback_data="wallet_gift_code")],
             [InlineKeyboardButton(text=tr("💸 انتقال موجودی به کاربر دیگر"), callback_data="wallet_transfer")],
             [InlineKeyboardButton(text=tr("🪙 سکه‌های من"), callback_data="coins_menu")],
+            [InlineKeyboardButton(text=tr("🎁 کارت هدیه"), callback_data="gift_menu")],
             [InlineKeyboardButton(text=tr("📜 تاریخچه تراکنش‌ها"), callback_data="wallet_history")],
         ]
         return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -4516,6 +4519,8 @@ def wallet_menu_kb(db=None) -> InlineKeyboardMarkup:
         add("wal_transfer", "💸 انتقال موجودی به کاربر دیگر", "wallet_transfer")
     if db.get_setting("score_enabled", "1") == "1":
         add("wal_coins", "🪙 سکه‌های من", "coins_menu")
+    if db.get_setting("gift_enabled", "1") == "1":
+        add("wal_giftcard", "🎁 کارت هدیه", "gift_menu")
     add("wal_history", "📜 تاریخچه تراکنش‌ها", "wallet_history")
     rows = _layout_group_rows(db, "wallet_menu", entries, default_rows=USER_SCREENS["wallet_menu"]["default_rows"])
     return InlineKeyboardMarkup(inline_keyboard=rows)
