@@ -632,6 +632,12 @@ class OrdersMixin:
                 "SELECT COALESCE(SUM(COALESCE(o.final_price, p.price)),0) s FROM orders o "
                 "JOIN products p ON o.product_id=p.id WHERE o.status='approved'"
             ).fetchone()["s"]
+            # شارژ کیف پول تاییدشده هم ورودی واقعی پول است و جزو درآمد حساب می‌شود.
+            # (final_price سفارش‌ها = base_price - wallet_used - discount است، یعنی
+            # سهم کیف پول در آن نیست و با شارژ دوباره شمرده نمی‌شود.)
+            revenue += conn.execute(
+                "SELECT COALESCE(SUM(amount),0) s FROM wallet_topups WHERE status='approved'"
+            ).fetchone()["s"] or 0
             return {
                 "users": users_c,
                 "pending": pending_c,
@@ -708,13 +714,25 @@ class OrdersMixin:
                 approved = row["approved_c"] or 0
                 pending = row["pending_c"] or 0
                 rejected = row["rejected_c"] or 0
-                revenue = row["revenue"] or 0
+                orders_revenue = row["revenue"] or 0
+                topup_row = conn.execute(
+                    "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM wallet_topups "
+                    "WHERE status='approved' AND date(created_at) BETWEEN ? AND ?",
+                    (s, e),
+                ).fetchone()
+                topup_revenue = topup_row["s"] or 0
+                topup_count = topup_row["c"] or 0
+                # درآمد = فروش سفارش‌ها + شارژهای تاییدشده‌ی کیف پول
+                revenue = orders_revenue + topup_revenue
                 decided = approved + rejected
                 conversion = round(approved / decided * 100, 1) if decided else 0.0
-                aov = round(revenue / approved) if approved else 0
+                # میانگین سبد خرید فقط روی سفارش‌هاست، نه شارژ کیف پول
+                aov = round(orders_revenue / approved) if approved else 0
                 return {
                     "approved": approved, "pending": pending, "rejected": rejected,
-                    "revenue": revenue, "conversion_rate": conversion, "aov": aov,
+                    "revenue": revenue, "orders_revenue": orders_revenue,
+                    "topup_revenue": topup_revenue, "topup_count": topup_count,
+                    "conversion_rate": conversion, "aov": aov,
                 }
 
             current = _period_totals(start_date, end_date)
@@ -745,11 +763,23 @@ class OrdersMixin:
                 (start_date, end_date),
             ).fetchall()
             daily_map = {r["d"]: {"revenue": r["revenue"], "orders": r["orders"]} for r in daily_rows}
+            topup_daily_map = {
+                r["d"]: r["s"] for r in conn.execute(
+                    "SELECT date(created_at) d, COALESCE(SUM(amount),0) s FROM wallet_topups "
+                    "WHERE status='approved' AND date(created_at) BETWEEN ? AND ? "
+                    "GROUP BY date(created_at)",
+                    (start_date, end_date),
+                ).fetchall()
+            }
             daily_series = []
             for i in range(length_days):
                 d = conn.execute("SELECT date(?, ?) d", (start_date, f"+{i} days")).fetchone()["d"]
                 entry = daily_map.get(d, {"revenue": 0, "orders": 0})
-                daily_series.append({"date": d, "revenue": entry["revenue"], "orders": entry["orders"]})
+                topup_d = topup_daily_map.get(d, 0) or 0
+                daily_series.append({
+                    "date": d, "revenue": (entry["revenue"] or 0) + topup_d,
+                    "orders": entry["orders"], "topup": topup_d,
+                })
 
             category_rows = conn.execute(
                 "SELECT c.name name, COUNT(*) orders, COALESCE(SUM(COALESCE(o.final_price, p.price)),0) revenue "
@@ -914,9 +944,27 @@ class OrdersMixin:
                 f"GROUP BY {bucket_expr} ORDER BY bucket",
                 (start_date, end_date),
             ).fetchall()
+            trend_map = {
+                r["bucket"]: {"bucket": r["bucket"], "revenue": r["revenue"] or 0, "orders": r["orders"] or 0, "topup": 0}
+                for r in trend_rows
+            }
+            # شارژ کیف پول تاییدشده هم در همان بازه‌ی روزانه/هفتگی/ماهانه جمع می‌شود
+            topup_bucket_expr = bucket_expr.replace("o.created_at", "created_at")
+            topup_trend_rows = conn.execute(
+                f"SELECT {topup_bucket_expr} bucket, COALESCE(SUM(amount),0) s FROM wallet_topups "
+                "WHERE status='approved' AND date(created_at) BETWEEN ? AND ? "
+                f"GROUP BY {topup_bucket_expr}",
+                (start_date, end_date),
+            ).fetchall()
+            for r in topup_trend_rows:
+                pt = trend_map.setdefault(
+                    r["bucket"], {"bucket": r["bucket"], "revenue": 0, "orders": 0, "topup": 0}
+                )
+                pt["revenue"] += r["s"] or 0
+                pt["topup"] += r["s"] or 0
             revenue_trend = {
                 "granularity": granularity if granularity in ("week", "month") else "day",
-                "points": [{"bucket": r["bucket"], "revenue": r["revenue"], "orders": r["orders"]} for r in trend_rows],
+                "points": [trend_map[k] for k in sorted(trend_map)],
             }
 
             # ---------------------------------------------------------------
@@ -975,6 +1023,22 @@ class OrdersMixin:
                 gateway_breakdown.append({
                     "gateway": "کیف پول", "attempts": wallet_row["c"], "success": wallet_row["c"],
                     "failed": 0, "success_rate": 100.0, "revenue": wallet_row["rev"] or 0,
+                })
+            topup_gw = conn.execute(
+                "SELECT COUNT(*) attempts, "
+                "SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) success, "
+                "COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) rev "
+                "FROM wallet_topups WHERE date(created_at) BETWEEN ? AND ?",
+                (start_date, end_date),
+            ).fetchone()
+            if topup_gw["attempts"]:
+                t_att = topup_gw["attempts"] or 0
+                t_ok = topup_gw["success"] or 0
+                gateway_breakdown.append({
+                    "gateway": "شارژ کیف پول", "attempts": t_att, "success": t_ok,
+                    "failed": t_att - t_ok,
+                    "success_rate": round(t_ok / t_att * 100, 1) if t_att else 0.0,
+                    "revenue": topup_gw["rev"] or 0,
                 })
             gateway_breakdown.sort(key=lambda x: x["revenue"], reverse=True)
 

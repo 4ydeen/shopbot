@@ -1163,7 +1163,10 @@ class SystemMixin:
                 "COUNT(CASE WHEN o.status='approved' THEN 1 END) cnt "
                 "FROM orders o LEFT JOIN products p ON p.id=o.product_id"
             ).fetchone()
-        return {"revenue_toman": row["revenue"] or 0, "paid_orders": row["cnt"] or 0}
+            topup = conn.execute(
+                "SELECT COALESCE(SUM(amount),0) s FROM wallet_topups WHERE status='approved'"
+            ).fetchone()["s"] or 0
+        return {"revenue_toman": (row["revenue"] or 0) + topup, "paid_orders": row["cnt"] or 0}
 
 
     def queue_db_purge(self, bot_token: str, db_path: str):
