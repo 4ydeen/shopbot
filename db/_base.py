@@ -702,6 +702,53 @@ class DatabaseBase:
                     PRIMARY KEY (day, key)
                 );
 
+                CREATE TABLE IF NOT EXISTS credential_index (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hash TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'secret',
+                    panel_server_id INTEGER,
+                    username TEXT,
+                    user_id INTEGER,
+                    config_id INTEGER NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (config_id, hash)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_credential_index_hash ON credential_index (hash);
+
+                CREATE TABLE IF NOT EXISTS leak_channels (
+                    channel_id INTEGER PRIMARY KEY,
+                    title TEXT DEFAULT '',
+                    username TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    last_post_id INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS leak_seen_posts (
+                    channel_id INTEGER NOT NULL,
+                    post_id INTEGER NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (channel_id, post_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS leak_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    config_id INTEGER NOT NULL,
+                    channel_id INTEGER DEFAULT 0,
+                    channel_title TEXT DEFAULT '',
+                    post_link TEXT NOT NULL,
+                    matched_kind TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'new',
+                    warn_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TEXT,
+                    UNIQUE (config_id, post_link)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_leak_events_user ON leak_events (user_id);
+
                 CREATE TABLE IF NOT EXISTS ai_faq_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     question TEXT NOT NULL,
