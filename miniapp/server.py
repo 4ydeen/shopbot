@@ -778,7 +778,7 @@ async def api_delete_custom_config(custom_config_id: int, auth=Depends(get_verif
     """حذف کامل و برگشت‌ناپذیر یک کانفیگ شخصی متعلق به خود کاربر؛ قبل از حذف از
     دیتابیس، تلاش می‌شود کاربر از روی پنل VPN هم حذف شود (best-effort - در
     صورت خطا در ارتباط با پنل، رکورد همچنان از لیست کاربر حذف می‌شود)."""
-    tg_id, db, _ = auth
+    tg_id, db, tenant = auth
     rows = db.get_custom_configs_for_user(tg_id)
     cc_row = next((c for c in rows if c["id"] == custom_config_id), None)
     if not cc_row:
@@ -802,6 +802,9 @@ async def api_delete_custom_config(custom_config_id: int, auth=Depends(get_verif
         refunded = wallet_refund_amount(quote, panel_deleted) or await grant_service_refund_credit(
             main_db, tg_id, quote, panel_deleted, cc_row["username"],
         )
+    if refunded > 0:
+        await report_router.notify_raw(tenant.bot_token, db, "refund", report_router.build_refund_event(
+            tg_id, cc_row["username"], quote, refunded, "مینی‌اپ"))
     return {"status": "ok", "refund_text": refund_result_text(quote, refunded)}
 
 
@@ -4302,6 +4305,8 @@ async def api_topup_receipt(
             0, "topup_ai_auto_reject",
             f"شارژ #{topup_id} | کاربر {tg_id} | مبلغ: {topup['amount']:,} | دلیل: {ai_result.get('reject_reason') or ''}",
         )
+        await report_router.notify_raw(tenant.bot_token, db, "fraud", report_router.build_fraud_event(
+            "topup_ai", topup_id, tg_id, ai_result.get("reject_reason") or "", topup["amount"], "مینی‌اپ"))
         await send_photo_to_admins(
             db, tenant.bot_token,
             caption + "\n\n🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n"
@@ -4395,6 +4400,8 @@ async def api_order_receipt(
             0, "order_ai_auto_reject",
             f"سفارش #{order_id} | کاربر {tg_id} | دلیل: {ai_result.get('reject_reason') or ''}",
         )
+        await report_router.notify_raw(tenant.bot_token, db, "fraud", report_router.build_fraud_event(
+            "order_ai", order_id, tg_id, ai_result.get("reject_reason") or "", order["final_price"], "مینی‌اپ"))
         await send_photo_to_admins(
             db, tenant.bot_token,
             caption + "\n\n🚫 این رسید توسط بررسی هوشمند بسیار مشکوک تشخیص داده شد و به‌صورت خودکار رد شد.\n"
