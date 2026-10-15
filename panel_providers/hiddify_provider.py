@@ -265,6 +265,14 @@ class HiddifyProvider(BasePanelProvider):
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 raise PanelError(f"خطا در اتصال به پنل: {e or 'پاسخی از سرور در زمان مقرر دریافت نشد (timeout)'}") from e
 
+    supports_fingerprints = True
+
+    async def get_fingerprints(self, username: str) -> list:
+        """UUID کاربر، که در هیدیفای همزمان شناسه‌ی کاربر و توکن لینک اشتراک است."""
+        async with self._session() as session:
+            user = await self._find_by_name(session, username)
+        return [str(user["uuid"])] if user.get("uuid") else []
+
     async def revoke_credentials(self, username: str) -> PanelUserResult:
         """روی هیدیفای خودِ UUID هم شناسه‌ی کاربر و هم لینک اشتراک است، پس
         «قطع دسترسی و لینک جدید» یعنی یک UUID تازه بسازیم و در همان PUT که

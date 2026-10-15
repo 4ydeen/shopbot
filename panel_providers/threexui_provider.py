@@ -442,6 +442,20 @@ class ThreeXUIProvider(BasePanelProvider):
         sub_url = f"{sub_base_url.rstrip('/')}/{sub_id}" if (sub_id and sub_base_url) else ""
         return PanelUserResult(username=username, subscription_url=sub_url, raw=updated_client)
 
+    supports_fingerprints = True
+
+    async def get_fingerprints(self, username: str) -> list:
+        """id، password و subId کلاینت را از همه‌ی inbound ها می‌خواند (برای ایندکس تشخیص نشت)."""
+        async with self._session() as session:
+            matches = await self._find_client_all_inbounds(session, username)
+        values = []
+        for client, _inbound_id in matches:
+            for key in ("id", "password", "subId"):
+                value = client.get(key)
+                if value:
+                    values.append(str(value))
+        return list(dict.fromkeys(values))
+
     async def revoke_credentials(self, username: str) -> PanelUserResult:
         """چون 3X-UI endpoint مستقلی برای «revoke» ندارد، همان کلاینت را با
         clients/update به‌روزرسانی می‌کنیم: فقط id/password/subId جدید (UUID

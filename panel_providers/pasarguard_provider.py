@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 
 from . import auth_cache
-from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError
+from .base import BasePanelProvider, PanelUserResult, PanelError, PanelUsernameTakenError, subscription_token
 
 API_KEY_PREFIX = "pg_key_"
 
@@ -51,6 +51,19 @@ def _expire_to_epoch(value):
         except ValueError:
             return None
     return None
+
+
+def _collect_secret_fields(obj, out: list) -> None:
+    """id/password/uuid های تودرتوی یک دیکشنری (مثلاً proxies پازارگارد) را جمع می‌کند."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in ("id", "password", "uuid") and isinstance(value, str) and value:
+                out.append(value)
+            else:
+                _collect_secret_fields(value, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_secret_fields(item, out)
 
 
 class PasarguardProvider(BasePanelProvider):
@@ -248,6 +261,18 @@ class PasarguardProvider(BasePanelProvider):
         if sub_url.startswith("/"):
             sub_url = self._base_url() + sub_url
         return PanelUserResult(username=data.get("username", username), subscription_url=sub_url, raw=data)
+
+    supports_fingerprints = True
+
+    async def get_fingerprints(self, username: str) -> list:
+        """توکن اشتراک و کلیدهای پروتکل (id/password/uuid داخل proxies) کاربر."""
+        data = await self._get_json(f"/api/user/{username}", "خواندن اثر انگشت کاربر")
+        values = []
+        _collect_secret_fields(data.get("proxies"), values)
+        token = subscription_token(data.get("subscription_url") or "")
+        if token:
+            values.append(token)
+        return list(dict.fromkeys(values))
 
     async def revoke_credentials(self, username: str) -> PanelUserResult:
         """POST /api/user/{username}/revoke_sub: کلید/UUID پروتکل‌های کاربر را
