@@ -164,7 +164,7 @@ async def deliver_gift_order(bot: Bot, db, order_id: int) -> bool:
     code = card["code_plain"]
     image = None
     try:
-        path = await gc.build_card_image(db, card, code)
+        path = await gc.build_card_image(db, card, code, await _bot_username(bot))
         image = gc.card_image_bytes({"image_path": path})
     except Exception:
         _log.exception("gift order card render failed for card %s", card["id"])
@@ -179,14 +179,17 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
     def is_admin(user_id: int) -> bool:
         return db.is_full_admin(user_id)
 
-    async def _sample_card(theme_id: int):
+    async def _sample_card(theme_id: int, bot: Bot):
         theme = await asyncio.to_thread(db.gift_get_theme, theme_id)
         content = {
-            "recipient": "نام گیرنده", "message": "اینجا متن پیام فرستنده نوشته می‌شود؛ یک نمونه‌ی چندخطی برای تست جای متن.",
+            "recipient": "مهسا", "recipient_label": gc.recipient_label("مهسا"), "title": gc.gca.fallback("", theme["title"])["title"],
+            "message": gc.gca.fallback("مهسا", theme["title"])["message"], "signature": gc.gca.DEFAULT_SIGNATURE,
+            "qr_link": gc.deep_link(await _bot_username(bot), "GIFTSAMPLE"),
             "info_lines": [(f"{gc.money(250000)} تومان", 1.7), ("اعتبار کیف پول", 0.7)],
             "code_lines": [("GIFT-ABCD-EFGH-JKMN", 1.0), ("اعتبار تا ۱۴۰۵/۰۱/۰۱", 0.75)],
         }
-        return await asyncio.to_thread(gr.render_card, gc.theme_background(theme), gc.theme_layout(theme), content)
+        layout = await gc.ensure_layout(db, theme)
+        return await asyncio.to_thread(gr.render_card, gc.theme_background(theme), layout, content)
 
     @router.callback_query(F.data == "gift_menu")
     async def cb_gift_menu(call: CallbackQuery, state: FSMContext):
@@ -343,7 +346,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         await state.update_data(recipient=name)
         await state.set_state(GiftSend.message)
         await message.answer(tr(f"✍️ متن پیام کارت را بنویسید (حداکثر {_MAX_MESSAGE} حرف):"), reply_markup=_kb(
-            [_btn("بدون متن", "gift_nomsg")], [_btn("❌ انصراف", "gift_cancel")]))
+            [_btn("✨ متن را هوش مصنوعی بنویسد", "gift_nomsg")], [_btn("❌ انصراف", "gift_cancel")]))
 
     async def _confirm(message: Message, state: FSMContext, text_message: str):
         await state.update_data(text=text_message)
@@ -358,7 +361,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
             what = "🛒 خرید یک کانفیگ جدید از فروشگاه (قیمت را در مرحله‌ی خرید می‌بینید)"
         else:
             what = "📦 کانفیگ انتخاب‌شده"
-        summary = f"{what}\n👤 گیرنده: {data['recipient']}\n✍️ پیام: {text_message or '-'}\n⏳ اعتبار: {str(days).translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))} روز\n\nاگر تا آن زمان دریافت نشود، به شما برمی‌گردد."
+        summary = f"{what}\n👤 گیرنده: {data['recipient']}\n✍️ پیام: {text_message or 'متن تبریک متناسب با موضوع کارت را هوش مصنوعی می‌نویسد'}\n⏳ اعتبار: {str(days).translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))} روز\n\nاگر تا آن زمان دریافت نشود، به شما برمی‌گردد."
         await message.answer(tr(f"🧾 پیش از ساخت کارت بررسی کنید:\n\n{summary}"), reply_markup=_kb(
             [_btn("✅ ساخت کارت", "gift_ok")], [_btn("❌ انصراف", "gift_cancel")]))
 
@@ -421,7 +424,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         card = await asyncio.to_thread(db.gift_get_card, result["id"])
         image = None
         try:
-            path = await gc.build_card_image(db, card, result["code"])
+            path = await gc.build_card_image(db, card, result["code"], await _bot_username(bot))
             image = gc.card_image_bytes({"image_path": path})
         except Exception:
             _log.exception("card image render failed for card %s", result["id"])
@@ -482,7 +485,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         image = gc.card_image_bytes(card)
         if not image and open_card and card["code_plain"]:
             try:
-                await gc.build_card_image(db, card, card["code_plain"])
+                await gc.build_card_image(db, card, card["code_plain"], await _bot_username(bot))
                 image = gc.card_image_bytes(await asyncio.to_thread(db.gift_get_card, card["id"]))
             except Exception:
                 _log.exception("lazy card render failed for card %s", card["id"])
@@ -656,7 +659,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
             await wait.edit_text(tr("❌ ذخیره‌ی عکس ناموفق بود؛ مطمئن شوید فایل یک تصویر معتبر است."))
             return
         await state.clear()
-        sample = await _sample_card(theme_id)
+        sample = await _sample_card(theme_id, bot)
         source = "تشخیص AI" if layout.get("source") == "ai" else "پیش‌فرض (AI در دسترس نبود یا پاسخ معتبر نداد)"
         await wait.delete()
         await message.answer_photo(BufferedInputFile(sample, filename="preview.png"), caption=tr(f"✅ عکس پایه ذخیره شد.\nچیدمان متن: {source}"), reply_markup=_kb(
@@ -667,7 +670,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         await message.answer(tr("لطفاً یک تصویر بفرستید."))
 
     @router.callback_query(F.data.startswith("gc_adm_thre:"))
-    async def cb_adm_theme_redetect(call: CallbackQuery):
+    async def cb_adm_theme_redetect(call: CallbackQuery, bot: Bot):
         if not is_admin(call.from_user.id):
             await call.answer()
             return
@@ -678,17 +681,17 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         except Exception:
             await call.message.answer(tr("⚠️ ابتدا عکس پایه آپلود کنید."))
             return
-        sample = await _sample_card(theme_id)
+        sample = await _sample_card(theme_id, bot)
         source = "تشخیص AI" if layout.get("source") == "ai" else "پیش‌فرض"
         await call.message.answer_photo(BufferedInputFile(sample, filename="preview.png"), caption=tr(f"چیدمان متن: {source}"), reply_markup=_kb([_btn("⬅️ موضوع", f"gc_adm_th:{theme_id}")]))
 
     @router.callback_query(F.data.startswith("gc_adm_thpv:"))
-    async def cb_adm_theme_preview(call: CallbackQuery):
+    async def cb_adm_theme_preview(call: CallbackQuery, bot: Bot):
         if not is_admin(call.from_user.id):
             await call.answer()
             return
         theme_id = int(call.data.split(":")[1])
-        sample = await _sample_card(theme_id)
+        sample = await _sample_card(theme_id, bot)
         await call.answer()
         await call.message.answer_photo(BufferedInputFile(sample, filename="preview.png"), reply_markup=_kb([_btn("⬅️ موضوع", f"gc_adm_th:{theme_id}")]))
 

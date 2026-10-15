@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 
+import gift_card_ai as gca
 import gift_card_render as gr
 from jalali import to_jalali_str
 
@@ -99,11 +100,30 @@ def theme_background(theme) -> bytes:
     return raw or gr.fallback_background(theme["color_a"], theme["color_b"])
 
 
-def theme_layout(theme) -> dict:
+def _stored_layout(theme):
     try:
-        return gr.sanitize_layout(json.loads(theme["layout_json"])) if theme["layout_json"] else gr.DEFAULT_LAYOUT
+        return json.loads(theme["layout_json"]) if theme["layout_json"] else None
     except (TypeError, ValueError):
+        return None
+
+
+def theme_layout(theme) -> dict:
+    stored = _stored_layout(theme)
+    return gr.sanitize_layout(stored) if gr.layout_is_current(stored) else gr.DEFAULT_LAYOUT
+
+
+async def ensure_layout(db, theme) -> dict:
+    """چیدمان قدیمی (بدون ناحیه‌ی تیتر و QR) را یک‌بار با AI به نسخه‌ی جدید ارتقا می‌دهد."""
+    stored = _stored_layout(theme)
+    if gr.layout_is_current(stored):
+        return gr.sanitize_layout(stored)
+    raw = _read(theme["base_image_path"]) if theme["base_image_path"] else None
+    if not raw:
         return gr.DEFAULT_LAYOUT
+    layout = await gr.detect_layout(db, raw)
+    if layout.get("source") == "ai":
+        await asyncio.to_thread(db.gift_update_theme, theme["id"], layout_json=json.dumps(layout, ensure_ascii=False))
+    return layout
 
 
 async def save_theme_image(db, theme_id: int, raw: bytes) -> dict:
@@ -135,7 +155,34 @@ async def redetect_theme_layout(db, theme_id: int) -> dict:
     return layout
 
 
-def card_content(card, code: str) -> dict:
+def _row_value(row, key: str) -> str:
+    try:
+        return str(row[key] or "").strip()
+    except (IndexError, KeyError):
+        return ""
+
+
+def recipient_label(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        return ""
+    if len(name.split()) == 1:
+        return name if name.endswith(("جان", "عزیز")) else f"{name} جان"
+    return f"برای {name}"
+
+
+async def ensure_texts(db, card, theme) -> tuple:
+    """پیام و تیتر کارت؛ اگر فرستنده متنی ننوشته باشد AI می‌نویسد و برای رندرهای بعدی ذخیره می‌شود."""
+    message, headline = _row_value(card, "message"), _row_value(card, "headline")
+    if message and headline:
+        return message, headline
+    greeting = await gca.write_greeting(db, card["recipient_name"], theme["title"] if theme else "", message)
+    message, headline = message or greeting["message"], headline or greeting["title"]
+    await asyncio.to_thread(db.gift_set_text, card["id"], message, headline)
+    return message, headline
+
+
+def card_content(card, code: str, link: str = "", message: str = None, headline: str = None) -> dict:
     """متن‌های چاپی کارت. لینک اشتراک کانفیگ عمداً روی تصویر نمی‌آید؛ فقط بعد از دریافت تحویل داده می‌شود."""
     if card["kind"] == "wallet":
         info = [(f"{money(card['amount'])} تومان", 1.7), ("اعتبار کیف پول", 0.7)]
@@ -153,18 +200,24 @@ def card_content(card, code: str) -> dict:
     if until:
         code_lines.append((f"اعتبار تا {until}", 0.75))
     return {
-        "recipient": card["recipient_name"], "message": card["message"],
+        "recipient": card["recipient_name"], "recipient_label": recipient_label(card["recipient_name"]),
+        "title": headline if headline is not None else _row_value(card, "headline"),
+        "message": message if message is not None else card["message"],
+        "signature": gca.DEFAULT_SIGNATURE, "qr_link": link,
         "info_lines": info, "code_lines": code_lines,
     }
 
 
-async def build_card_image(db, card, code: str) -> str:
+async def build_card_image(db, card, code: str, bot_username: str = None) -> str:
     """تصویر نهایی کارت را می‌سازد، ذخیره می‌کند و مسیرش را در کارت ثبت می‌کند."""
     theme = await asyncio.to_thread(db.gift_get_theme, card["theme_id"])
     if not theme:
         theme = (await asyncio.to_thread(db.gift_list_themes, False))[0]
+    layout = await ensure_layout(db, theme)
+    message, headline = await ensure_texts(db, card, theme)
+    link = deep_link(bot_username, code) if bot_username else ""
     png = await asyncio.to_thread(
-        gr.render_card, theme_background(theme), theme_layout(theme), card_content(card, code)
+        gr.render_card, theme_background(theme), layout, card_content(card, code, link, message, headline)
     )
     path = await asyncio.to_thread(_write, db, "cards", png, "png")
     await asyncio.to_thread(db.gift_set_image, card["id"], path)
