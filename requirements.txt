@@ -19,7 +19,8 @@ cryptography>=41.0.0
 telethon>=1.36.0
 
 # Automatic multi-language translation
-# Local/offline translation engine. Language models are downloaded automatically by install/update scripts.
-argostranslate>=1.11.0
+# NOTE: argostranslate is intentionally NOT listed here. It pulls in several GB of
+# dependencies (torch, stanza, ...). setup_local_translation.sh installs it only
+# when the user answers "y" to the local translation prompt.
 # Optional public fallback providers; only used when SHOPVPN_TRANSLATION_ALLOW_PUBLIC_APIS=1.
 deep-translator>=1.11.4
