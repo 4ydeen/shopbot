@@ -431,6 +431,19 @@ class UsersMixin:
     # --------------------- اپ موبایل: توکن دسترسی طولانی‌مدت (PAT) ---------------------
 
 
+    def get_max_admin_log_id(self) -> int:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT MAX(id) m FROM admin_logs").fetchone()
+        return int(row["m"] or 0)
+
+    def get_admin_logs_after(self, last_id: int, limit: int = 100):
+        """لاگ‌های مدیران با id بزرگ‌تر از last_id به ترتیب صعودی (برای ارسال به تاپیک «لاگ مدیران»)."""
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT id, admin_id, action, details, created_at FROM admin_logs WHERE id>? ORDER BY id ASC LIMIT ?",
+                (int(last_id), int(limit)),
+            ).fetchall()
+
     def log_admin_action(self, admin_id: int, action: str, details: str = "",
                           record_type: str = None, record_id=None):
         """ثبت یک رخداد حساس (تغییر موجودی کیف‌پول، ویرایش قیمت و ...) در لاگ فعالیت ادمین.

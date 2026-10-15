@@ -529,6 +529,15 @@ class DatabaseBase:
                     PRIMARY KEY (chat_id, topic_key)
                 );
 
+                CREATE TABLE IF NOT EXISTS report_topic_stats (
+                    chat_id INTEGER NOT NULL,
+                    topic_key TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 0,
+                    last_at TEXT,
+                    PRIMARY KEY (chat_id, topic_key, day)
+                );
+
                 CREATE TABLE IF NOT EXISTS wallet_topups (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -1490,7 +1499,7 @@ class DatabaseBase:
         "crypto_invoices", "support_messages", "support_conversations",
         "admin_presence", "tickets", "ticket_messages", "ticket_departments", "ticket_department_admins", "admin_logs",
         "abangateway_invoices", "blupal_invoices", "noapay_invoices", "extra_gateway_invoices", "custom_gateways", "custom_gateway_invoices",
-        "card_to_card_cards", "card_to_card_invoices", "panel_servers", "panel_health", "panel_health_events", "report_topics",
+        "card_to_card_cards", "card_to_card_invoices", "panel_servers", "panel_health", "panel_health_events", "report_topics", "report_topic_stats",
         "custom_config_pricing_tiers", "custom_config_products",
         "custom_config_product_pricing_tiers", "custom_configs",
         "custom_config_history", "location_change_log", "bulk_gift_jobs", "bulk_gift_items", "price_change_log", "lottery_log", "reseller_credit_log", "wallet_transactions", "wallet_tx_label", "coin_batches", "coin_wallet_credits", "reseller_requests",
