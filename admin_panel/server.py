@@ -507,7 +507,7 @@ async def _server_status_loop():
                                 # با HTTP خام (توکن بات) به تاپیک «سرویس» ارسال می‌شود.
                                 try:
                                     await report_router.send_raw_to_group(
-                                        _bot_token(), db, "service",
+                                        _bot_token(), db, "panel",
                                         f"🔴 قطعی کانفیگ\n\nکانفیگ «{key}» آفلاین شده است.",
                                     )
                                 except Exception:
@@ -523,7 +523,7 @@ async def _server_status_loop():
                                 })
                                 try:
                                     await report_router.send_raw_to_group(
-                                        _bot_token(), db, "service",
+                                        _bot_token(), db, "panel",
                                         f"🟢 اتصال مجدد کانفیگ\n\nکانفیگ «{key}» دوباره آنلاین شد.",
                                     )
                                 except Exception:
@@ -805,18 +805,42 @@ def require_bank_tenant(admin=Depends(get_current_admin)):
     return admin
 
 
+def _client_ip(request: Request) -> str:
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return fwd or (request.client.host if request.client else "") or "?"
+
+
 @app.post("/api/login")
-def api_login(body: LoginBody, response: Response):
+def api_login(body: LoginBody, response: Response, request: Request):
     tenant = resolve_tenant_by_slug(body.b or "")
     if not tenant:
         raise HTTPException(401, tr("این پنل در دسترس نیست."))
     admin = tenant.db.get_web_admin_by_username(body.username)
     if not admin or not admin["is_active"] or not verify_password(body.password, admin["password_hash"]):
+        ip = _client_ip(request)
+        report_router.fire_and_forget_raw(
+            tenant.bot_token, tenant.db, "login",
+            report_router.format_event("ورود ناموفق به پنل وب", [
+                ("نام کاربری", report_router.code(body.username[:64])),
+                ("IP", report_router.code(ip)),
+                ("وضعیت حساب", "" if not admin else ("غیرفعال" if not admin["is_active"] else "رمز اشتباه")),
+            ], icon="🚫", note="اگر این تلاش از شما نیست، رمز را عوض کنید."),
+            throttle_key=f"login-fail:{tenant.slug}:{ip}", throttle_seconds=120,
+        )
         raise HTTPException(401, tr("یوزرنیم یا پسورد اشتباه است."))
     token = create_session_token(
         ADMIN_PANEL_SECRET, admin["id"], admin["username"], admin["role"], tenant=tenant.slug,
     )
     tenant.db.touch_web_admin_login(admin["id"])
+    report_router.fire_and_forget_raw(
+        tenant.bot_token, tenant.db, "login",
+        report_router.format_event("ورود موفق به پنل وب", [
+            ("مدیر", report_router.code(admin["username"])),
+            ("نقش", admin["role"]),
+            ("IP", report_router.code(_client_ip(request))),
+        ], icon="🔐"),
+        throttle_key=f"login-ok:{tenant.slug}:{admin['id']}", throttle_seconds=600,
+    )
     response.set_cookie(
         COOKIE_NAME, token, httponly=True, samesite="lax", max_age=12 * 3600, path="/",
     )
@@ -3661,6 +3685,9 @@ async def api_reseller_self_delete(config_id: int, admin=Depends(get_current_adm
     if not removed:
         raise HTTPException(404, tr("سرویس یافت نشد."))
     refunded = await grant_service_refund_credit(main_db, owner_id, quote, panel_deleted, cc["username"])
+    if refunded > 0:
+        await report_router.notify_raw(_bot_token(), db, "refund", report_router.build_refund_event(
+            owner_id, cc["username"], quote, refunded, "پنل وب نماینده"))
     await asyncio.to_thread(main_db.log_admin_action, admin["id"], "reseller_self_delete",
                             f"نماینده {owner_id} سرویس «{cc['username']}» را حذف کرد؛ برگشتی: {refunded} (پنل وب)",
                             "reseller", owner_id)
