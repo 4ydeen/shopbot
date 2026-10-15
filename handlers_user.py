@@ -1001,6 +1001,11 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             reply_markup=kb.categories_kb(db, categories, full_access_bot),
         )
 
+    @router.callback_query(F.data == "gift_open_store")
+    async def cb_gift_open_store(call: CallbackQuery, state: FSMContext):
+        await call.answer()
+        await show_categories(call.message, state)
+
     @router.callback_query(F.data == "custom_config_start")
     async def cb_custom_config_start(call: CallbackQuery, state: FSMContext):
         await call.answer()
@@ -1830,6 +1835,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
             tier_discount_amount=tier_info["amount"],
             user_limit=users or None,
         ))
+        if quantity == 1:
+            await asyncio.to_thread(db.gift_register_order, call.from_user.id, order_id)
         order = (await asyncio.to_thread(db.get_order, order_id))
         await state.update_data(order_id=order_id)
         await state.update_data(
@@ -7728,6 +7735,8 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         except Exception:
             await asyncio.to_thread(db.add_wallet_credit, user_id, total_price, "order_refund", "بازگشت وجه خرید ناموفق")
             raise
+        if quantity == 1:
+            await asyncio.to_thread(db.gift_register_order, user_id, order_id)
         order = await asyncio.to_thread(db.get_order, order_id)
 
         try:

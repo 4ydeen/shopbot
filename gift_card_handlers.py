@@ -127,11 +127,16 @@ async def redeem_gift_for_message(db, message: Message, code: str):
 
 async def _deliver_config(db, message: Message, card):
     snap = json.loads(card["config_snapshot"] or "{}")
-    rows = await asyncio.to_thread(db.get_user_custom_configs, message.from_user.id)
-    link = next((r["subscription_url"] for r in rows if r["id"] == card["custom_config_id"]), "") or ""
-    volume = f"{snap.get('volume_gb')} گیگابایت" if snap.get("volume_gb") else "نامحدود"
-    days = f"{snap.get('duration_days')} روز" if snap.get("duration_days") else "نامحدود"
-    text = f"🎉 کارت هدیه دریافت شد!\n📦 کانفیگ: {snap.get('name') or '-'}\n💾 حجم: {volume}\n⏳ مدت: {days}\n"
+    if card["kind"] == "stock":
+        link = await asyncio.to_thread(db.gift_stock_link, card["stock_config_id"])
+    else:
+        rows = await asyncio.to_thread(db.get_user_custom_configs, message.from_user.id)
+        link = next((r["subscription_url"] for r in rows if r["id"] == card["custom_config_id"]), "") or ""
+    text = f"🎉 کارت هدیه دریافت شد!\n📦 کانفیگ: {snap.get('name') or '-'}\n"
+    if "volume_gb" in snap:
+        text += f"💾 حجم: {str(snap['volume_gb']) + ' گیگابایت' if snap['volume_gb'] else 'نامحدود'}\n"
+    if "duration_days" in snap:
+        text += f"⏳ مدت: {str(snap['duration_days']) + ' روز' if snap['duration_days'] else 'نامحدود'}\n"
     if link:
         text += f"\n🔗 لینک اشتراک:\n{link}\n"
     text += "\nهمین کانفیگ از بخش «سرویس‌ها و سفارش‌های من» هم قابل مشاهده است."
@@ -350,7 +355,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
             if fee:
                 what += f"\nکارمزد: {gc.money(fee)} تومان\nمجموع کسر از کیف پول: {gc.money(data['amount'] + fee)} تومان"
         elif data["kind"] == "buy":
-            what = "🛒 خرید کانفیگ جدید (قیمت را در مرحله‌ی خرید می‌بینید)"
+            what = "🛒 خرید یک کانفیگ جدید از فروشگاه (قیمت را در مرحله‌ی خرید می‌بینید)"
         else:
             what = "📦 کانفیگ انتخاب‌شده"
         summary = f"{what}\n👤 گیرنده: {data['recipient']}\n✍️ پیام: {text_message or '-'}\n⏳ اعتبار: {str(days).translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))} روز\n\nاگر تا آن زمان دریافت نشود، به شما برمی‌گردد."
@@ -388,9 +393,13 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
             await asyncio.to_thread(
                 db.gift_set_intent, uid, data["theme_id"], data["recipient"], data.get("text", ""),
                 gc.int_setting(db, "gift_expire_days") or 30)
-            await _edit(call, tr("✅ مشخصات کارت ذخیره شد.\nحالا کانفیگ دلخواهتان را از «خرید کانفیگ شخصی» بخرید؛ همان خرید (تا ۶۰ دقیقه‌ی آینده) به‌جای تحویل به شما، داخل کارت هدیه قرار می‌گیرد و کارت برایتان ارسال می‌شود."), _kb(
-                [_btn("🛒 رفتن به خرید کانفیگ", "custom_config_start")],
-                [_btn("🛑 لغو", "gift_intent_cancel")]))
+            rows = [[_btn("🛒 رفتن به فروشگاه", "gift_open_store")]]
+            if db.is_full_access_bot(is_main_bot) and (
+                db.get_setting("custom_config_enabled", "0") == "1" or db.count_active_custom_config_products() > 0
+            ):
+                rows.append([_btn("🛠 ساخت کانفیگ شخصی", "custom_config_start")])
+            rows.append([_btn("🛑 لغو", "gift_intent_cancel")])
+            await _edit(call, tr("✅ مشخصات کارت ذخیره شد.\nحالا از فروشگاه یک کانفیگ (تعداد ۱) بخرید؛ همان خرید (تا ۶۰ دقیقه‌ی آینده) به‌جای تحویل به شما، داخل کارت هدیه قرار می‌گیرد و کارت برایتان ارسال می‌شود.\nمحصولاتی که چند عدد خریداری شوند به کارت تبدیل نمی‌شوند."), _kb(*rows))
             await call.answer()
             return
         common = dict(theme_id=data["theme_id"], recipient_name=data["recipient"], message=data.get("text", ""),

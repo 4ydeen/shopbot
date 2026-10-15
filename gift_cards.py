@@ -142,10 +142,12 @@ def card_content(card, code: str) -> dict:
     else:
         snap = json.loads(card["config_snapshot"] or "{}")
         info = [(str(snap.get("name") or "کانفیگ"), 1.2)]
-        volume = int(snap.get("volume_gb") or 0)
-        days = int(snap.get("duration_days") or 0)
-        info.append((f"{str(volume).translate(_FA)} گیگابایت" if volume else "حجم نامحدود", 0.9))
-        info.append((f"{str(days).translate(_FA)} روز" if days else "زمان نامحدود", 0.9))
+        if "volume_gb" in snap:
+            volume = int(snap.get("volume_gb") or 0)
+            info.append((f"{str(volume).translate(_FA)} گیگابایت" if volume else "حجم نامحدود", 0.9))
+        if "duration_days" in snap:
+            days = int(snap.get("duration_days") or 0)
+            info.append((f"{str(days).translate(_FA)} روز" if days else "زمان نامحدود", 0.9))
     until = to_jalali_str(card["expires_at"]).translate(_FA) if card["expires_at"] else ""
     code_lines = [(code, 1.0)]
     if until:
