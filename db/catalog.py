@@ -1366,6 +1366,12 @@ class CatalogMixin:
             )
             new_id = cur.lastrowid
         self.add_custom_config_history(new_id, "purchase", f"{volume_gb} گیگ / {duration_days} روز")
+        if order_id:
+            try:
+                self.gift_attach_order(order_id, new_id, user_id)
+            except Exception:
+                import logging
+                logging.getLogger("catalog").exception("gift attach failed for order %s", order_id)
         return new_id
 
 
