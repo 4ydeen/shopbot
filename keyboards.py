@@ -1655,6 +1655,7 @@ ADMIN_PANEL_ITEMS = [
     ("adm_backup_menu", "🗄 بکاپ و بازیابی", "adm_backup_menu"),
     ("adm_report_group", "📣 گروه گزارش تاپیک‌دار", "adm_report_group"),
     ("adm_bulk_gift", "🎁 هدیه‌ی گروهی", "adm_bulk_gift"),
+    ("adm_gift_cards", "🎴 کارت‌های هدیه", "gc_adm"),
     ("adm_spam_settings", "🛡 ضداسپم کاربران", "adm_spam_settings"),
     ("adm_gswitch", "🔌 سوئیچ سراسری ربات (خاموش/روشن)", "adm_gswitch"),
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
@@ -1725,6 +1726,7 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_lottery_settings",
         "adm_cashback_settings",
         "adm_bulk_gift",
+        "adm_gift_cards",
         "adm_referral_settings",
         "adm_signup_gift_settings",
         "adm_broadcast",
@@ -3605,7 +3607,6 @@ def discount_codes_kb(codes=None, db=None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr("➕ ساخت کد تخفیف جدید"), callback_data="adm_disc_add")],
         [InlineKeyboardButton(text=tr("🎯 کد تخفیف گروهی (بر اساس فیلتر)"), callback_data="adm_bulk_disc")],
         [InlineKeyboardButton(text=tr("🎁 گیفت‌کدهای شارژ کیف پول"), callback_data="adm_gift_menu")],
-        [InlineKeyboardButton(text=tr("🎴 کارت‌های هدیه"), callback_data="gc_adm")],
         [InlineKeyboardButton(text=tr("⬅️ بازگشت"), callback_data="adm_cat:marketing")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

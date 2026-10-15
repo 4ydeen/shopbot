@@ -198,6 +198,7 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         if await asyncio.to_thread(db.gift_get_intent, call.from_user.id):
             text += "\n\n⏳ یک خرید هدیه در انتظار شماست: خرید بعدیِ کانفیگ شخصی شما به‌صورت کارت هدیه تحویل می‌شود."
             rows.insert(0, [_btn("🛑 لغو هدیه‌ی در انتظار خرید", "gift_intent_cancel")])
+        rows.append([_btn("⬅️ بازگشت", "coins_back")])
         await _edit(call, tr(text), _kb(*rows))
         await call.answer()
 
@@ -513,7 +514,8 @@ def create_gift_router(db, is_main_bot: bool = True) -> Router:
         stats = await asyncio.to_thread(db.gift_stats)
         await _edit(call, tr(_admin_menu_text(stats)), _kb(
             [_btn("🎨 موضوع‌ها و عکس پایه", "gc_adm_th")], [_btn("🗂 کارت‌ها", "gc_adm_cl:all:0")],
-            [_btn("⚙️ تنظیمات", "gc_adm_set")], [_btn("📜 لاگ رویدادها", "gc_adm_log")]))
+            [_btn("⚙️ تنظیمات", "gc_adm_set")], [_btn("📜 لاگ رویدادها", "gc_adm_log")],
+            [_btn("⬅️ بازگشت", "adm_cat:marketing")]))
         await call.answer()
 
     @router.message(Command("giftadmin"))
