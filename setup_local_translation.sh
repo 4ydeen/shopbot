@@ -77,23 +77,30 @@ ask_enable() {
   elif [ "$has_key" -eq 1 ] && [ "${SHOPVPN_TRANSLATION_CHOOSE:-0}" != "1" ]; then
     ENABLE="$saved"
   elif has_tty; then
-    local answer
+    local answer RED=$'\033[1;31m' RST=$'\033[0m'
     echo "" >/dev/tty
     if [ "$UI_LANG" = "fa" ]; then
-      printf '[translation] موتور ترجمه محلی (برای زبان‌های غیر از فارسی و انگلیسی) نصب شود؟ [Y/n]: ' >/dev/tty
+      printf '%s⚠️  هشدار: موتور ترجمه محلی (Argos) چند گیگابایت فضای دیسک می‌گیرد (torch و ...).%s\n' "$RED" "$RST" >/dev/tty
+      printf '%s    روی سرورهای کم‌حجم ممکن است دیسک پر شود و ربات اجرا نشود.%s\n' "$RED" "$RST" >/dev/tty
+      printf '%s    فقط برای ترجمه‌ی خودکار به زبان‌هایی غیر از فارسی و انگلیسی لازم است.%s\n' "$RED" "$RST" >/dev/tty
+      printf '[translation] موتور ترجمه محلی نصب شود؟ [y/N] (پیش‌فرض: خیر): ' >/dev/tty
     else
-      printf '[translation] Install the local translation engine (for languages other than Persian and English)? [Y/n]: ' >/dev/tty
+      printf '%s⚠️  WARNING: the local translation engine (Argos) needs several GB of disk space (torch, etc.).%s\n' "$RED" "$RST" >/dev/tty
+      printf '%s    On small servers the disk can fill up and the bot may fail to start.%s\n' "$RED" "$RST" >/dev/tty
+      printf '%s    It is only needed for automatic translation to languages other than Persian and English.%s\n' "$RED" "$RST" >/dev/tty
+      printf '[translation] Install the local translation engine? [y/N] (default: No): ' >/dev/tty
     fi
     read -r answer </dev/tty || answer=""
     answer="$(echo "$answer" | tr 'A-Z' 'a-z' | tr -d ' ')"
     case "$answer" in
-      n|no|خیر) ENABLE=0 ;;
-      *) ENABLE=1 ;;
+      y|yes|بله|آره) ENABLE=1 ;;
+      *) ENABLE=0 ;;
     esac
   else
-    ENABLE=1
+    # No terminal: never install the heavy engine unless explicitly enabled.
+    ENABLE=0
   fi
-  case "$ENABLE" in 0|false|no) ENABLE=0 ;; *) ENABLE=1 ;; esac
+  case "$ENABLE" in 1|true|yes) ENABLE=1 ;; *) ENABLE=0 ;; esac
   set_env SHOPVPN_TRANSLATION_ENABLE "$ENABLE"
 }
 
