@@ -424,7 +424,14 @@ class OrdersMixin:
                 [(order_id, cid) for cid in config_ids],
             )
             self._award_order_score(conn, order_id, purchase_points, coin_days)
-            return True
+            buyer_id = conn.execute("SELECT user_id FROM orders WHERE id=?", (order_id,)).fetchone()["user_id"]
+        if len(config_ids) == 1:
+            try:
+                self.gift_attach_order(order_id, config_ids[0], buyer_id, kind="stock")
+            except Exception:
+                import logging
+                logging.getLogger("orders").exception("gift attach failed for order %s", order_id)
+        return True
 
 
     def approve_order_auto(self, order_id: int) -> bool:

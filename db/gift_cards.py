@@ -113,6 +113,9 @@ class GiftCardsMixin:
                 CREATE INDEX IF NOT EXISTS idx_gift_card_log_event ON gift_card_log(event, actor_id, created_at);
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(gift_cards)")}
+            if "stock_config_id" not in columns:
+                conn.execute("ALTER TABLE gift_cards ADD COLUMN stock_config_id INTEGER")
             if not conn.execute("SELECT 1 FROM gift_themes LIMIT 1").fetchone():
                 for order, (code, title, emoji, a, b) in enumerate(_DEFAULT_THEMES):
                     conn.execute(
@@ -274,7 +277,7 @@ class GiftCardsMixin:
         return {"ok": True, "id": card_id, "code": code, "fee": fee, "expires_at": expires_at}
 
     def gift_create_config_card(self, sender_id: int, custom_config_id: int, theme_id: int, recipient_name: str,
-                                message: str, expires_days: int, max_open: int = 0) -> dict:
+                                message: str, expires_days: int, max_open: int = 0, title: str = None) -> dict:
         self._ensure_gift_tables()
         code = generate_gift_code()
         expires_at = (datetime.utcnow() + timedelta(days=max(int(expires_days), 1))).isoformat()
@@ -290,7 +293,7 @@ class GiftCardsMixin:
             if not cfg or (cfg["status"] or "active") not in ("active",):
                 return {"ok": False, "error": "config"}
             snapshot = json.dumps({
-                "name": (cfg["display_name"] if "display_name" in cfg.keys() else None) or cfg["username"],
+                "name": title or (cfg["display_name"] if "display_name" in cfg.keys() else None) or cfg["username"],
                 "username": cfg["username"], "volume_gb": cfg["volume_gb"], "duration_days": cfg["duration_days"],
                 "expires_at": cfg["expires_at"], "panel_server_id": cfg["panel_server_id"],
             }, ensure_ascii=False)
@@ -312,6 +315,50 @@ class GiftCardsMixin:
             )
             self._gift_log(conn, card_id, "created", sender_id, f"config #{custom_config_id}")
         return {"ok": True, "id": card_id, "code": code, "fee": 0, "expires_at": expires_at}
+
+    def gift_create_stock_config_card(self, sender_id: int, stock_config_id: int, theme_id: int, recipient_name: str,
+                                      message: str, expires_days: int, max_open: int = 0, title: str = None) -> dict:
+        """کانفیگ بانک کانفیگ (جدول configs) که به sender تخصیص یافته را وارد escrow کارت می‌کند."""
+        self._ensure_gift_tables()
+        code = generate_gift_code()
+        expires_at = (datetime.utcnow() + timedelta(days=max(int(expires_days), 1))).isoformat()
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if max_open and conn.execute(
+                "SELECT COUNT(*) FROM gift_cards WHERE sender_id=? AND status IN ('active','disabled')", (sender_id,)
+            ).fetchone()[0] >= max_open:
+                return {"ok": False, "error": "limit"}
+            cfg = conn.execute(
+                "SELECT c.id, c.expires_at, p.name AS product_name FROM configs c "
+                "LEFT JOIN products p ON p.id=c.product_id WHERE c.id=? AND c.assigned_user_id=? AND c.is_used=1",
+                (stock_config_id, sender_id),
+            ).fetchone()
+            if not cfg:
+                return {"ok": False, "error": "config"}
+            snapshot = json.dumps({
+                "name": title or cfg["product_name"] or "کانفیگ", "expires_at": cfg["expires_at"],
+            }, ensure_ascii=False)
+            cur = conn.execute(
+                "INSERT INTO gift_cards (code_hash, code_hint, code_plain, kind, stock_config_id, config_snapshot, "
+                "sender_id, recipient_name, message, theme_id, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (gift_code_hash(code), code[-4:], code, "stock", stock_config_id, snapshot, sender_id,
+                 (recipient_name or "")[:60], (message or "")[:400], theme_id, expires_at),
+            )
+            card_id = cur.lastrowid
+            moved = conn.execute(
+                "UPDATE configs SET assigned_user_id=? WHERE id=? AND assigned_user_id=?",
+                (-card_id, stock_config_id, sender_id),
+            )
+            if moved.rowcount != 1:
+                raise RuntimeError("gift stock escrow failed")
+            self._gift_log(conn, card_id, "created", sender_id, f"stock config #{stock_config_id}")
+        return {"ok": True, "id": card_id, "code": code, "fee": 0, "expires_at": expires_at}
+
+    def gift_stock_link(self, stock_config_id: int) -> str:
+        self._ensure_gift_tables()
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT link FROM configs WHERE id=?", (stock_config_id,)).fetchone()
+        return row["link"] if row else ""
 
     def gift_set_image(self, card_id: int, image_path: str):
         self._ensure_gift_tables()
@@ -344,6 +391,13 @@ class GiftCardsMixin:
                         "UPDATE users SET referral_credit=referral_credit+? WHERE telegram_id=?",
                         (card["amount"], receiver_id),
                     )
+            elif card["kind"] == "stock":
+                moved = conn.execute(
+                    "UPDATE configs SET assigned_user_id=? WHERE id=? AND assigned_user_id=?",
+                    (receiver_id, card["stock_config_id"], -card["id"]),
+                )
+                if moved.rowcount != 1:
+                    return {"ok": False, "error": "escrow_lost", "card": dict(card)}
             else:
                 moved = conn.execute(
                     "UPDATE custom_configs SET user_id=? WHERE id=? AND user_id=?",
@@ -371,6 +425,13 @@ class GiftCardsMixin:
                     "UPDATE users SET referral_credit=referral_credit+? WHERE telegram_id=?",
                     (refund, card["sender_id"]),
                 )
+        elif card["kind"] == "stock":
+            back = conn.execute(
+                "UPDATE configs SET assigned_user_id=? WHERE id=? AND assigned_user_id=?",
+                (card["sender_id"], card["stock_config_id"], -card["id"]),
+            )
+            if back.rowcount != 1:
+                return False
         else:
             back = conn.execute(
                 "UPDATE custom_configs SET user_id=? WHERE id=? AND user_id=?",
@@ -477,15 +538,22 @@ class GiftCardsMixin:
         with self._get_conn() as conn:
             return conn.execute("SELECT * FROM gift_orders WHERE order_id=?", (order_id,)).fetchone()
 
-    def gift_attach_order(self, order_id: int, custom_config_id: int, buyer_id: int):
-        """بعد از ساخت کانفیگِ یک سفارش هدیه، همان کانفیگ را وارد کارت (escrow) می‌کند."""
+    def gift_attach_order(self, order_id: int, item_id: int, buyer_id: int, kind: str = "custom"):
+        """بعد از ساخت/تخصیص کانفیگِ یک سفارش هدیه، همان کانفیگ را وارد کارت (escrow) می‌کند.
+        kind: custom (جدول custom_configs: کانفیگ شخصی و محصولات متصل به پنل) | stock (بانک کانفیگ)."""
         self._ensure_gift_tables()
         order = self.gift_get_order(order_id)
         if not order or order["card_id"] or order["user_id"] != buyer_id:
             return None
-        result = self.gift_create_config_card(
-            buyer_id, custom_config_id, order["theme_id"], order["recipient_name"], order["message"],
-            order["expires_days"],
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT p.name FROM orders o LEFT JOIN products p ON p.id=o.product_id WHERE o.id=?", (order_id,)
+            ).fetchone()
+        title = row["name"] if row and row["name"] else None
+        make = self.gift_create_stock_config_card if kind == "stock" else self.gift_create_config_card
+        result = make(
+            buyer_id, item_id, order["theme_id"], order["recipient_name"], order["message"],
+            order["expires_days"], title=title,
         )
         if not result["ok"]:
             return None
