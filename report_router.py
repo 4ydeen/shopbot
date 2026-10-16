@@ -108,6 +108,7 @@ GROUP_CALLBACK_PREFIXES = (
     "order_approve:", "order_reject:", "order_fake_receipt:",
     "topup_approve:", "topup_reject:",
     "qa_profile:", "qa_block:", "qa_block_go:", "qa_cancel", "qa_msg:",
+    "lk:rot:", "lk:warn:", "lk:ign:",
 )
 RETRY_AFTER_CAP = 30
 
