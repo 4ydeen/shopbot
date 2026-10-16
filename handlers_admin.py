@@ -13404,7 +13404,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         for chunk_start in range(0, len(text), 3500):
             await call.message.answer(text[chunk_start:chunk_start + 3500])
         is_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
-        await call.message.answer(tr(f"🔍 آمار کامل کاربر {tg_id}"), reply_markup=kb.user_full_stats_kb(tg_id, is_blocked))
+        _stats_kb = kb.user_group_stats_kb if report_router.is_report_group_message(db, call.message) else kb.user_full_stats_kb
+        await call.message.answer(tr(f"🔍 آمار کامل کاربر {tg_id}"), reply_markup=_stats_kb(tg_id, is_blocked))
         await call.answer()
 
     def _eligible_configs_for_bulk_toggle(custom_configs: list) -> list:
@@ -14451,7 +14452,8 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         stats = await asyncio.to_thread(db.get_user_full_stats, tg_id)
         is_blocked = (user["is_blocked"] if "is_blocked" in user.keys() else 0) == 1
         text = _fmt_user_full_stats_report(stats)
-        markup = kb.user_full_stats_kb(tg_id, is_blocked)
+        in_group = report_router.is_report_group_message(db, call.message)
+        markup = kb.user_group_stats_kb(tg_id, is_blocked) if in_group else kb.user_full_stats_kb(tg_id, is_blocked)
         try:
             await call.message.reply(text, reply_markup=markup)
         except TelegramBadRequest:

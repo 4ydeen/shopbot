@@ -2565,6 +2565,17 @@ def user_full_stats_kb(tg_id: int, is_blocked: bool = False) -> InlineKeyboardMa
     ])
 
 
+def user_group_stats_kb(tg_id: int, is_blocked: bool = False) -> InlineKeyboardMarkup:
+    """نسخه‌ی سبک کارت پروفایل برای گروه گزارش: فقط دکمه‌هایی که بدون تایپ/FSM در گروه کار می‌کنند."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("📦 لیست کامل کانفیگ‌های این کاربر"), callback_data=f"adm_user_configs:{tg_id}")],
+        [
+            InlineKeyboardButton(text=tr("✅ آنبلاک") if is_blocked else tr("🚫 بلاک"), callback_data=f"qa_block:{tg_id}"),
+            InlineKeyboardButton(text=tr("✉️ پیام"), callback_data=f"qa_msg:{tg_id}"),
+        ],
+    ])
+
+
 def user_toggle_all_confirm_kb(tg_id: int, new_enabled: bool) -> InlineKeyboardMarkup:
     flag = "1" if new_enabled else "0"
     label = "✅ بله، همه را فعال کن" if new_enabled else "⚠️ بله، همه را غیرفعال کن"
