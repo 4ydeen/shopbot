@@ -1863,6 +1863,10 @@ class DatabaseBase:
             # با product_id=0 سنتینل استفاده می‌کند تا همه‌ی روش‌های پرداخت
             # (کارت/کیف‌پول/کریپتو/آبان‌گیت‌وی/درگاه سفارشی) بدون تغییر کار کنند.
             ("orders", "is_renewal", "INTEGER DEFAULT 0"),
+            # خرید «صندوق شانس» مثل یک محصول: از همان جدول orders با product_id=0 سنتینل
+            # استفاده می‌کند (مثل تمدید) تا همه‌ی روش‌های پرداخت بدون تغییر کار کنند؛
+            # lootbox_type_id به lootbox_types اشاره می‌کند و quantity تعداد صندوق است.
+            ("orders", "lootbox_type_id", "INTEGER"),
             ("orders", "renewal_target_kind", "TEXT"),
             ("orders", "renewal_target_id", "INTEGER"),
             ("orders", "renewal_mode", "TEXT"),

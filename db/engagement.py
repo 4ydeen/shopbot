@@ -2,6 +2,7 @@
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
 """صندوق‌های شانس (Loot Box)، استریک روزانه و نقاط عطف پیشرفت کاربر."""
 
+import json
 import random
 import secrets
 from datetime import datetime, timedelta
@@ -114,6 +115,9 @@ class EngagementMixin:
                 );
                 """
             )
+            # روش‌های پرداخت مجاز هر نوع صندوق (JSON آرایه‌ی کلیدها؛ NULL = همه‌ی روش‌ها) - مثل products.payment_methods
+            if not self._column_exists(conn, "lootbox_types", "payment_methods"):
+                conn.execute("ALTER TABLE lootbox_types ADD COLUMN payment_methods TEXT")
             seeded = conn.execute("SELECT value FROM settings WHERE key='streak_milestones_seeded'").fetchone()
             if not seeded:
                 for track, threshold, emoji, title in _DEFAULT_MILESTONES:
@@ -229,6 +233,92 @@ class EngagementMixin:
                     (int(user_id), box_type["id"], box_type["title"], box_type["emoji"], source),
                 )
             return max(1, int(count))
+
+    # ------------------------------------------------------------------
+    # خرید صندوق مثل یک محصول: روش‌های پرداخت + سفارش + تحویل بعد از پرداخت
+    # ------------------------------------------------------------------
+
+    def box_type_payment_methods(self, type_id: int):
+        """None = همه‌ی روش‌های پرداخت برای این صندوق مجازند؛ وگرنه لیست کلیدهای مجاز."""
+        row = self.box_type_get(type_id)
+        if not row:
+            return None
+        raw = row["payment_methods"] if "payment_methods" in row.keys() else None
+        if not raw:
+            return None
+        try:
+            methods = json.loads(raw)
+        except Exception:
+            return None
+        return methods or None
+
+    def box_type_set_payment_methods(self, type_id: int, methods):
+        """methods=None یا [] یعنی «همه‌ی روش‌ها مجاز» (حذف محدودیت)."""
+        self._ensure_engage_tables()
+        value = json.dumps(list(methods), ensure_ascii=False) if methods else None
+        with self._get_conn() as conn:
+            conn.execute("UPDATE lootbox_types SET payment_methods=? WHERE id=?", (value, int(type_id)))
+
+    def box_type_allows_payment_method(self, type_id: int, method_key: str) -> bool:
+        allowed = self.box_type_payment_methods(type_id)
+        return allowed is None or method_key in allowed
+
+    def box_bought_today(self, user_id: int) -> int:
+        """تعداد صندوق‌های خریداری‌شده‌ی امروز + صندوق‌های سفارش‌های در انتظار پرداخت (برای سقف روزانه)."""
+        self._ensure_engage_tables()
+        with self._get_conn() as conn:
+            bought = conn.execute(
+                "SELECT COUNT(*) c FROM user_lootboxes WHERE user_id=? AND source='purchase' AND date(created_at)=date('now')",
+                (int(user_id),),
+            ).fetchone()["c"]
+            pending = conn.execute(
+                "SELECT COALESCE(SUM(quantity),0) s FROM orders WHERE user_id=? AND lootbox_type_id>0 "
+                "AND status IN ('pending','processing') AND date(created_at)=date('now')",
+                (int(user_id),),
+            ).fetchone()["s"]
+            return int(bought) + int(pending or 0)
+
+    def create_lootbox_order(self, user_tg_id: int, type_id: int, quantity: int, base_price: int, wallet_used: int = 0) -> int:
+        """سفارش «خرید صندوق شانس» - از همان جدول orders با product_id=0 سنتینل (مثل تمدید) تا
+        کارت‌به‌کارت/کیف‌پول/کریپتو/درگاه‌ها بدون تغییر کار کنند."""
+        quantity = max(1, int(quantity))
+        final_price = max(int(base_price) - int(wallet_used), 0)
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO orders (user_id, product_id, status, base_price, wallet_used, final_price, "
+                "quantity, lootbox_type_id) VALUES (?, 0, 'pending', ?, ?, ?, ?, ?)",
+                (int(user_tg_id), int(base_price), int(wallet_used), final_price, quantity, int(type_id)),
+            )
+            return cur.lastrowid
+
+    def approve_lootbox_order(self, order_id: int):
+        """تایید اتمیک سفارش صندوق و تحویل همان لحظه‌ی صندوق‌ها (فقط یک‌بار؛ pending/processing).
+        خروجی: لیست شناسه‌ی صندوق‌های ساخته‌شده، یا None اگر سفارش معتبر/در انتظار نبود."""
+        self._ensure_engage_tables()
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM orders WHERE id=?", (int(order_id),)).fetchone()
+            if not row or not row["lootbox_type_id"]:
+                return None
+            cur = conn.execute(
+                "UPDATE orders SET status='approved', updated_at=? WHERE id=? AND status IN ('pending','processing')",
+                (datetime.utcnow().isoformat(), int(order_id)),
+            )
+            if cur.rowcount == 0:
+                return None
+            self._mark_receipt_decision(conn, "order", int(order_id), "approved")
+            box_type = conn.execute("SELECT * FROM lootbox_types WHERE id=?", (int(row["lootbox_type_id"]),)).fetchone()
+            quantity = max(1, int(row["quantity"] or 1))
+            unit_price = int(row["base_price"] or 0) // quantity
+            title = box_type["title"] if box_type else ""
+            emoji = box_type["emoji"] if box_type else "📦"
+            ids = []
+            for _ in range(quantity):
+                ids.append(conn.execute(
+                    "INSERT INTO user_lootboxes (user_id, type_id, type_title, emoji, source, price_paid) VALUES (?,?,?,?,?,?)",
+                    (int(row["user_id"]), int(row["lootbox_type_id"]), title, emoji, "purchase", unit_price),
+                ).lastrowid)
+            return ids
 
     def box_list_user(self, user_id: int):
         self._ensure_engage_tables()
