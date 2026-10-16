@@ -192,7 +192,10 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         if await asyncio.to_thread(db.card_method_blocked_for_user, order["user_id"], method_key):
             return "⛔️ این روش پرداخت هنوز برای حساب شما فعال نشده است. از روش‌های دیگر استفاده کنید."
         product_id = order["product_id"] if "product_id" in order.keys() else None
-        if "is_custom_config" in order.keys() and order["is_custom_config"]:
+        if "lootbox_type_id" in order.keys() and order["lootbox_type_id"]:
+            if not (await asyncio.to_thread(db.box_type_allows_payment_method, order["lootbox_type_id"], method_key)):
+                return "⛔️ این روش پرداخت برای این صندوق مجاز نیست."
+        elif "is_custom_config" in order.keys() and order["is_custom_config"]:
             if not (await asyncio.to_thread(db.custom_config_allows_payment_method, order["custom_product_id"], method_key)):
                 return "⛔️ این روش پرداخت برای ساخت کانفیگ شخصی مجاز نیست."
         elif product_id and not (await asyncio.to_thread(db.product_allows_payment_method, product_id, method_key)):
@@ -1524,6 +1527,53 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                         aid, caption, reply_markup=reply_markup,
                     )
                 sent = await _send_admin_notification(bot, admin_id, factory, "سفارش کانفیگ شخصی", order_id)
+                if sent:
+                    (await asyncio.to_thread(db.set_order_admin_message, order_id, admin_id, sent.message_id))
+            return
+
+        if order["lootbox_type_id"]:
+            # سفارش «خرید صندوق شانس» - product_id سنتینل ۰ است، پس caption از lootbox_types ساخته می‌شود.
+            user_row = (await asyncio.to_thread(db.get_user, order["user_id"]))
+            username = user_row["username"] if user_row else ""
+            first_name = user_row["first_name"] if user_row else ""
+            box_type = (await asyncio.to_thread(db.box_type_get, order["lootbox_type_id"]))
+            box_label = f"{box_type['emoji'] or '📦'} {box_type['title']}" if box_type else f"#{order['lootbox_type_id']}"
+            purchase_info_line = await _user_purchase_info_line(user_row)
+            quantity = order["quantity"] or 1
+            caption = (
+                f"🧾 سفارش صندوق شانس #{order_id}\n"
+                f"👤 کاربر: {escape_html(first_name)} (@{escape_html(username) or '---'})\n"
+                f"🆔 آیدی عددی: {order['user_id']}\n"
+                f"{purchase_info_line}"
+                f"📦 صندوق: {box_label}" + (f" × {quantity}\n" if quantity > 1 else "\n")
+                + f"💰 قیمت پایه: {order['base_price']:,} تومان\n"
+            )
+            if order["wallet_used"]:
+                caption += f"👛 استفاده از کیف پول: {order['wallet_used']:,} تومان\n"
+            caption += f"💵 مبلغ قابل پرداخت: {order['final_price']:,} تومان"
+            already_approved = order["status"] != "pending"
+            reply_markup = kb.user_quick_actions_kb(order["user_id"]) if already_approved else kb.order_review_kb(order_id, order["user_id"])
+            if ai_rejected_note:
+                caption += "\n\n" + ai_rejected_note
+            elif already_approved:
+                caption += "\n\n✅ این سفارش به‌طور خودکار تایید و صندوق برای کاربر ثبت شد."
+            if not receipt_file_id and not already_approved:
+                caption += "\n\n(بدون نیاز به رسید - مبلغ کاملاً از کیف پول پوشش داده شده)"
+            elif receipt_file_id and not already_approved:
+                caption += "\n\n" + (await _admin_card_hint_line())
+                caption += _ai_note_line(ai_note, ai_available)
+            if await _report_order_to_group(bot, order_id, caption, reply_markup, receipt_file_id, receipt_type):
+                return
+            for admin_id in (await asyncio.to_thread(db.list_admins)):
+                if receipt_file_id:
+                    factory = lambda aid=admin_id: _send_receipt_to_admin(
+                        bot, aid, receipt_file_id, receipt_type, caption, reply_markup
+                    )
+                else:
+                    factory = lambda aid=admin_id: bot.send_message(
+                        aid, caption, reply_markup=reply_markup,
+                    )
+                sent = await _send_admin_notification(bot, admin_id, factory, "سفارش صندوق شانس", order_id)
                 if sent:
                     (await asyncio.to_thread(db.set_order_admin_message, order_id, admin_id, sent.message_id))
             return
@@ -3658,6 +3708,9 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         items = []
         for o in db.get_user_orders(user_tg_id):
             if o["status"] == "rejected":
+                continue
+            if o["lootbox_type_id"]:
+                # سفارش «صندوق شانس» سرویسی نیست؛ صندوق‌ها از «صندوق شانس» دیده/باز می‌شوند.
                 continue
             if o["is_renewal"]:
                 # سفارش‌های «تمدید سرویس» فقط یک رکورد داخلی برای پرداخت‌اند

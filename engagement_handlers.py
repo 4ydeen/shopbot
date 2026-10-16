@@ -13,12 +13,15 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 import engagement as eg
 from i18n import tr
+from states import BuyFlow
 
 _log = logging.getLogger("engagement_handlers")
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫", "01234567890123456789.")
 _TOGGLES = {"lootbox_enabled": "0", "streak_enabled": "0"}
 _KIND_LABELS = {"wallet": "💰 شارژ کیف پول", "discount": "🎟 کد تخفیف", "product": "🆓 سرویس رایگان"}
 _BACK_WALLET = "coins_back"
+_BACK_ACCOUNT = "acct:hub"
+_MAX_BOX_QTY = 10
 
 
 class EngageAdmin(StatesGroup):
@@ -68,7 +71,7 @@ async def lootbox_user_view(db, user_id: int):
     balance = await asyncio.to_thread(db.get_wallet_credit, user_id)
     inventory = await asyncio.to_thread(db.box_list_user, user_id)
     types = [t for t in await asyncio.to_thread(db.box_type_list, True) if t["price"] > 0]
-    lines = ["📦 صندوق‌های شانس", "", f"👛 موجودی کیف پول: {eg.money(balance)} تومان", ""]
+    lines = ["🎁 صندوق شانس", "", f"👛 موجودی کیف پول: {eg.money(balance)} تومان", ""]
     rows = []
     if inventory:
         lines.append("صندوق‌های بسته‌ی تو (هر وقت خواستی باز کن):")
@@ -84,8 +87,65 @@ async def lootbox_user_view(db, user_id: int):
             lines.append(f"{box_type['emoji']} {html.escape(box_type['title'])} — {eg.money(box_type['price'])} تومان")
             rows.append([_btn(f"🛒 {box_type['emoji']} {box_type['title']} ({eg.money(box_type['price'])} تومان)", f"lb_buy:{box_type['id']}")])
     rows.append([_btn("📜 تاریخچه‌ی بازشدن‌ها", "lb_hist")])
-    rows.append([_btn("⬅️ بازگشت", _BACK_WALLET)])
+    rows.append([_btn("⬅️ بازگشت", _BACK_ACCOUNT)])
     return tr("\n".join(lines)), _kb(*rows)
+
+
+async def notify_lootbox_delivered(bot, db, user_id: int, type_id: int, box_ids) -> None:
+    """بعد از پرداخت موفق (هر روشی) صندوق‌های خریداری‌شده را به کاربر اطلاع می‌دهد و دکمه‌ی باز کردن می‌دهد."""
+    box_type = await asyncio.to_thread(db.box_type_get, type_id)
+    label = f"{box_type['emoji'] or '📦'} {box_type['title']}" if box_type else "📦 صندوق شانس"
+    count = len(box_ids)
+    text = f"✅ پرداخت انجام شد!\n{label}" + (f" × {count}" if count > 1 else "") + " به صندوق‌های تو اضافه شد.\nهر وقت خواستی بازش کن 👇"
+    await bot.send_message(
+        user_id, tr(text),
+        reply_markup=_kb([_btn("🔓 باز کردن", f"lb_open:{box_ids[0]}")], [_btn("🎁 صندوق شانس", "lb_menu")]),
+    )
+
+
+async def _pm_summary(db, allowed) -> str:
+    if allowed is None:
+        return "همه‌ی روش‌های پرداخت"
+    catalog = {item["key"]: item["label"] for item in await asyncio.to_thread(db.get_payment_methods_catalog)}
+    return "، ".join(catalog.get(key, key) for key in allowed) or "---"
+
+
+async def lootbox_confirm_view(db, user_id: int, type_id: int, quantity: int):
+    """صفحه‌ی تایید خرید صندوق (مثل صفحه‌ی تایید خرید محصول). خروجی: (text, markup) یا رشته‌ی خطا."""
+    if not eg.lootbox_enabled(db):
+        return "صندوق شانس در حال حاضر فعال نیست."
+    box_type = await asyncio.to_thread(db.box_type_get, type_id)
+    if not box_type or not box_type["is_active"] or box_type["price"] <= 0:
+        return "این صندوق در دسترس نیست."
+    max_qty = _MAX_BOX_QTY
+    limit = eg.get_int(db, "lootbox_daily_limit")
+    if limit:
+        max_qty = min(max_qty, max(limit - await asyncio.to_thread(db.box_bought_today, user_id), 0))
+        if max_qty <= 0:
+            return "به سقف خرید روزانه‌ی صندوق رسیده‌ای؛ فردا دوباره امتحان کن."
+    quantity = max(1, min(int(quantity), max_qty))
+    balance = await asyncio.to_thread(db.get_wallet_credit, user_id)
+    allowed = await asyncio.to_thread(db.box_type_payment_methods, type_id)
+    odds = await asyncio.to_thread(eg.odds_lines, db, box_type["id"])
+    total = int(box_type["price"]) * quantity
+    lines = [
+        f"{box_type['emoji']} {html.escape(box_type['title'])}",
+        f"💵 قیمت هر صندوق: {eg.money(box_type['price'])} تومان",
+        f"🔢 تعداد: {quantity}",
+        f"💰 مبلغ کل: {eg.money(total)} تومان",
+        f"👛 موجودی کیف پول: {eg.money(balance)} تومان",
+    ]
+    if allowed is not None:
+        lines.append(f"💳 روش‌های پرداخت: {await _pm_summary(db, allowed)}")
+    lines += ["", "🎲 شانس جوایز:", "\n".join(odds) if odds else "هنوز جایزه‌ای تعریف نشده."]
+    qty_row = []
+    if quantity > 1:
+        qty_row.append(_btn("➖", f"lb_q:{type_id}:{quantity - 1}"))
+    qty_row.append(_btn(f"🔢 تعداد: {quantity}", "noop"))
+    if quantity < max_qty:
+        qty_row.append(_btn("➕", f"lb_q:{type_id}:{quantity + 1}"))
+    markup = _kb(qty_row, [_btn("✅ ادامه و انتخاب پرداخت", f"lb_pay:{type_id}:{quantity}")], [_btn("⬅️ بازگشت", "lb_menu")])
+    return tr("\n".join(lines)), markup
 
 
 async def show_lootbox_for_message(db, message: Message):
@@ -143,49 +203,133 @@ def create_engagement_router(db, is_main_bot: bool = True) -> Router:
         await _edit(call, tr("\n".join(lines)), _kb([_btn("⬅️ بازگشت", "lb_menu")]))
         await call.answer()
 
-    @router.callback_query(F.data.startswith("lb_buy:"))
-    async def cb_lb_buy(call: CallbackQuery):
+    @router.callback_query(F.data.startswith("lb_buy:") | F.data.startswith("lb_q:"))
+    async def cb_lb_buy(call: CallbackQuery, state: FSMContext):
+        parts = call.data.split(":")
+        type_id = int(parts[1])
+        quantity = int(parts[2]) if len(parts) > 2 else 1
+        view = await lootbox_confirm_view(db, call.from_user.id, type_id, quantity)
+        if isinstance(view, str):
+            await call.answer(tr(view), show_alert=True)
+            return
+        await _edit(call, view[0], view[1])
+        await call.answer()
+
+    async def _start_purchase(call: CallbackQuery, state: FSMContext, bot: Bot, type_id: int, quantity: int):
+        """خرید صندوق دقیقاً مثل خرید یک محصول: سفارش ساخته می‌شود و کاربر با هر روش پرداخت
+        مجاز (کیف پول/کارت/کریپتو/درگاه‌ها) پرداخت می‌کند؛ بعد از تایید پرداخت صندوق تحویل می‌شود."""
         if not eg.lootbox_enabled(db):
             await call.answer(tr("صندوق شانس در حال حاضر فعال نیست."), show_alert=True)
             return
-        box_type = await asyncio.to_thread(db.box_type_get, int(call.data.split(":")[1]))
+        box_type = await asyncio.to_thread(db.box_type_get, type_id)
         if not box_type or not box_type["is_active"] or box_type["price"] <= 0:
             await call.answer(tr("این صندوق در دسترس نیست."), show_alert=True)
             return
-        odds = await asyncio.to_thread(eg.odds_lines, db, box_type["id"])
-        text = (
-            f"{box_type['emoji']} {html.escape(box_type['title'])}\n"
-            f"💵 قیمت: {eg.money(box_type['price'])} تومان (از کیف پول)\n\n"
-            "🎲 شانس جوایز:\n" + ("\n".join(odds) if odds else "هنوز جایزه‌ای تعریف نشده.")
-        )
-        await _edit(
-            call, tr(text),
-            _kb([_btn("✅ خرید", f"lb_buyok:{box_type['id']}")], [_btn("⬅️ بازگشت", "lb_menu")]),
-        )
-        await call.answer()
-
-    @router.callback_query(F.data.startswith("lb_buyok:"))
-    async def cb_lb_buy_ok(call: CallbackQuery):
-        if not eg.lootbox_enabled(db):
-            await call.answer(tr("صندوق شانس در حال حاضر فعال نیست."), show_alert=True)
-            return
-        type_id = int(call.data.split(":")[1])
         if not await asyncio.to_thread(db.box_prize_list, type_id):
             await call.answer(tr("این صندوق هنوز جایزه ندارد."), show_alert=True)
             return
-        result = await asyncio.to_thread(db.box_buy, call.from_user.id, type_id, eg.get_int(db, "lootbox_daily_limit"))
-        if not result["ok"]:
-            messages = {
-                "balance": "موجودی کیف پول کافی نیست.", "limit": "به سقف خرید روزانه‌ی صندوق رسیده‌ای؛ فردا دوباره امتحان کن.",
-                "unavailable": "این صندوق در دسترس نیست.",
-            }
-            await call.answer(tr(messages.get(result["error"], "خرید انجام نشد.")), show_alert=True)
+        user_id = call.from_user.id
+        quantity = max(1, min(int(quantity), _MAX_BOX_QTY))
+        limit = eg.get_int(db, "lootbox_daily_limit")
+        if limit and (await asyncio.to_thread(db.box_bought_today, user_id)) + quantity > limit:
+            await call.answer(tr("به سقف خرید روزانه‌ی صندوق رسیده‌ای؛ فردا دوباره امتحان کن."), show_alert=True)
             return
-        await _edit(
-            call, tr("✅ صندوق خریداری شد. همین حالا بازش می‌کنی؟"),
-            _kb([_btn("🔓 باز کردن", f"lb_open:{result['box_id']}")], [_btn("📦 صندوق‌های من", "lb_menu")]),
-        )
-        await call.answer()
+
+        total = int(box_type["price"]) * quantity
+        allowed = await asyncio.to_thread(db.box_type_payment_methods, type_id)
+        wallet_allowed = allowed is None or "wallet" in allowed
+        plan = await asyncio.to_thread(db.plan_wallet_spend, user_id, total, wallet_allowed)
+        if plan["blocked"]:
+            await call.message.answer(tr(plan["message"]))
+            await call.answer()
+            return
+        wallet_used = plan["wallet_used"]
+        if wallet_used > 0:
+            wallet_used = await asyncio.to_thread(db.deduct_wallet_credit, user_id, wallet_used)
+
+        order_id = await asyncio.to_thread(db.create_lootbox_order, user_id, type_id, quantity, total, wallet_used)
+        order = await asyncio.to_thread(db.get_order, order_id)
+        label = f"{box_type['emoji']} {box_type['title']}" + (f" × {quantity}" if quantity > 1 else "")
+        try:
+            if order["final_price"] <= 0:
+                # کل مبلغ از کیف پول پوشش داده شده: همان لحظه تحویل بده
+                await state.clear()
+                box_ids = await asyncio.to_thread(db.approve_lootbox_order, order_id)
+                if not box_ids:
+                    await asyncio.to_thread(db.reject_order, order_id)
+                    await _edit(call, tr("⛔️ خرید انجام نشد. مبلغ کسرشده از کیف پول شما بازگردانده شد."))
+                    await call.answer()
+                    return
+                await _edit(call, tr("✅ مبلغ سفارش از کیف پول پوشش داده شد."))
+                await notify_lootbox_delivered(bot, db, user_id, type_id, box_ids)
+                await call.answer()
+                return
+
+            remaining = order["final_price"]
+            if not await asyncio.to_thread(db.has_any_payable_method, remaining, allowed):
+                await asyncio.to_thread(db.reject_order, order_id)
+                await state.clear()
+                msg = "⛔️ در حال حاضر هیچ روش پرداخت فعالی برای این مبلغ در دسترس نیست."
+                if allowed == ["wallet"]:
+                    msg = "⛔️ این صندوق فقط با کیف پول قابل خرید است و موجودی کیف پول شما کافی نیست."
+                if wallet_used > 0:
+                    msg += "\nمبلغ کسرشده از کیف پول شما بازگردانده شد."
+                await _edit(call, tr(msg))
+                await call.answer()
+                return
+
+            import abangateway_payment
+            import blupal_payment
+            import crypto_payment
+            import custom_gateway_payment
+            import extra_gateway_payment
+            import keyboards as kb
+            import noapay_payment
+
+            await state.set_state(BuyFlow.waiting_receipt)
+            await state.update_data(order_id=order_id)
+            text = f"🎁 {label}\n💰 قیمت: {eg.money(total)} تومان\n"
+            if wallet_used:
+                text += f"👛 استفاده از کیف پول: {eg.money(wallet_used)} تومان\n"
+            text += f"💰 مبلغ نهایی قابل پرداخت: {eg.money(order['final_price'])} تومان\n\nلطفاً روش پرداخت را انتخاب کنید:"
+            markup = kb.payment_choice_kb(
+                crypto_payment.crypto_payment_available(db),
+                abangateway_payment.abangateway_payment_available(db),
+                custom_gateway_payment.list_enabled_gateways(db),
+                (await asyncio.to_thread(db.get_setting, "card_to_card_enabled", "1")) == "1",
+                card_auto_enabled=(await asyncio.to_thread(db.get_setting, "card_to_card_auto_enabled", "0")) == "1",
+                amount=remaining,
+                db=db,
+                allowed_methods=allowed,
+                noapay_enabled=noapay_payment.noapay_payment_available(db),
+                blupal_enabled=blupal_payment.blupal_payment_available(db),
+                extra_gateways=extra_gateway_payment.available_keys(db, is_main_bot),
+                user_id=user_id,
+            )
+            await _edit(call, tr(text), markup)
+            await call.answer()
+        except Exception:
+            _log.exception("خطای غیرمنتظره در خرید صندوق شانس (سفارش #%s) برای کاربر %s", order_id, user_id)
+            await asyncio.to_thread(db.reject_order, order_id)
+            await state.clear()
+            await _edit(call, tr(
+                "⛔️ خطای غیرمنتظره‌ای در پردازش خرید رخ داد.\n"
+                "اگر مبلغی از کیف پول شما کسر شده بود، به‌طور کامل بازگردانده شد. لطفاً دوباره تلاش کنید."
+            ))
+            try:
+                await call.answer()
+            except Exception:
+                pass
+
+    @router.callback_query(F.data.startswith("lb_pay:"))
+    async def cb_lb_pay(call: CallbackQuery, state: FSMContext, bot: Bot):
+        _p, type_id, quantity = call.data.split(":")
+        await _start_purchase(call, state, bot, int(type_id), int(quantity))
+
+    @router.callback_query(F.data.startswith("lb_buyok:"))
+    async def cb_lb_buy_ok(call: CallbackQuery, state: FSMContext, bot: Bot):
+        # دکمه‌ی قدیمیِ پیام‌های قبلی: به همان مسیر جدید (سفارش + انتخاب روش پرداخت) می‌رود.
+        await _start_purchase(call, state, bot, int(call.data.split(":")[1]), 1)
 
     @router.callback_query(F.data.startswith("lb_open:"))
     async def cb_lb_open(call: CallbackQuery):
@@ -273,6 +417,7 @@ def create_engagement_router(db, is_main_bot: bool = True) -> Router:
         lines = [
             f"{box_type['emoji']} {html.escape(box_type['title'])} (#{box_type['id']})",
             f"وضعیت: {_on(bool(box_type['is_active']))} | قیمت: {eg.money(box_type['price'])} تومان (۰ = فقط اهدایی)",
+            f"💳 روش‌های پرداخت: {await _pm_summary(db, await asyncio.to_thread(db.box_type_payment_methods, type_id))}",
             "", "جوایز:" if prizes else "هنوز جایزه‌ای تعریف نشده؛ بدون جایزه این صندوق قابل خرید نیست.",
         ]
         lines += [f"• {eg.prize_summary(p)} — {p['chance']:g}٪" for p in prizes]
@@ -281,6 +426,7 @@ def create_engagement_router(db, is_main_bot: bool = True) -> Router:
             lines.append(f"میانگین جایزه‌ی نقدی هر باز کردن: {eg.money(round(expected))} تومان")
         rows = [
             [_btn(("🔴 غیرفعال کردن" if box_type["is_active"] else "🟢 فعال کردن"), f"lb_tgt:{type_id}"), _btn("✏️ قیمت", f"lb_price:{type_id}")],
+            [_btn("💳 روش‌های پرداخت", f"lb_pm:{type_id}")],
             [_btn("➕ افزودن جایزه", f"lb_pa:{type_id}"), _btn("🎁 اهدا به کاربر", f"lb_g:{type_id}")],
         ]
         rows += [[_btn(f"🗑 {eg.prize_summary(p)[:30]} ({p['chance']:g}٪)", f"lb_pd:{p['id']}:{type_id}")] for p in prizes]
@@ -404,6 +550,63 @@ def create_engagement_router(db, is_main_bot: bool = True) -> Router:
             return
         type_id = int(call.data.split(":")[1])
         await _ask_value(call, state, "قیمت جدید صندوق (تومان) را بفرستید؛ ۰ یعنی فقط اهدایی:", f"lb_t:{type_id}", mode="box_price", id=type_id)
+
+    async def _pm_view(type_id: int):
+        box_type = await asyncio.to_thread(db.box_type_get, type_id)
+        if not box_type:
+            return None
+        allowed = await asyncio.to_thread(db.box_type_payment_methods, type_id)
+        catalog = await asyncio.to_thread(db.get_payment_methods_catalog)
+        all_allowed = allowed is None
+        rows = [[_btn(f"{'✅' if all_allowed else '⬜️'} همه‌ی روش‌ها فعال باشند", f"lb_pma:{type_id}")]]
+        for item in catalog:
+            checked = all_allowed or item["key"] in (allowed or [])
+            suffix = "" if item["enabled"] else " (غیرفعال)"
+            rows.append([InlineKeyboardButton(
+                text=f"{'✅' if checked else '⬜️'} {item['label']}{suffix}",
+                callback_data=f"lb_pmt:{type_id}:{item['key']}",
+            )])
+        rows.append([_btn("⬅️ بازگشت", f"lb_t:{type_id}")])
+        text = (
+            f"💳 روش‌های پرداخت مجاز برای «{box_type['title']}»:\n\n"
+            "با لمس هر گزینه، فعال/غیرفعال می‌شود. اگر «همه‌ی روش‌ها» تیک بخورد، این صندوق از هر روش پرداخت فعالی "
+            "قابل خرید است (با اضافه‌شدن هر درگاه جدید هم خودکار برایش فعال می‌شود)."
+        )
+        return text, _kb(*rows)
+
+    @router.callback_query(F.data.startswith("lb_pm:") | F.data.startswith("lb_pma:") | F.data.startswith("lb_pmt:"))
+    async def cb_lb_paymethods(call: CallbackQuery, state: FSMContext):
+        if not await _guard(call):
+            return
+        await state.clear()
+        parts = call.data.split(":", 2)
+        action = parts[0]
+        try:
+            type_id = int(parts[1])
+        except (ValueError, IndexError):
+            await call.answer(tr("درخواست نامعتبر است."), show_alert=True)
+            return
+        if action == "lb_pma":
+            await asyncio.to_thread(db.box_type_set_payment_methods, type_id, None)
+        elif action == "lb_pmt":
+            method_key = parts[2] if len(parts) > 2 else ""
+            catalog_keys = [item["key"] for item in await asyncio.to_thread(db.get_payment_methods_catalog)]
+            allowed = await asyncio.to_thread(db.box_type_payment_methods, type_id)
+            current = set(catalog_keys) if allowed is None else set(allowed)
+            if method_key in current:
+                current.discard(method_key)
+            else:
+                current.add(method_key)
+            if not current:
+                await call.answer(tr("⚠️ حداقل یک روش پرداخت باید برای این صندوق فعال بماند."), show_alert=True)
+                return
+            await asyncio.to_thread(db.box_type_set_payment_methods, type_id, None if current == set(catalog_keys) else sorted(current))
+        view = await _pm_view(type_id)
+        if view is None:
+            await call.answer(tr("⚠️ این صندوق دیگر وجود ندارد."), show_alert=True)
+            return
+        await _edit(call, tr(view[0]), view[1])
+        await call.answer()
 
     @router.callback_query(F.data.startswith("st_f:"))
     async def cb_ms_field(call: CallbackQuery, state: FSMContext):

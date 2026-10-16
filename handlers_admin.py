@@ -3302,6 +3302,34 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
             await call.answer(db.get_text('handlers_admin.auto_30ff7b82', 'این سفارش قبلاً بررسی شده است.'), show_alert=True)
             return
 
+        # ===== سفارش صندوق شانس: بعد از تایید رسید، صندوق‌ها همان لحظه به کاربر تحویل می‌شوند =====
+        if order["lootbox_type_id"]:
+            box_ids = await asyncio.to_thread(db.approve_lootbox_order, order_id)
+            if not box_ids:
+                await asyncio.to_thread(db.release_order_claim, order_id)
+                await call.answer(db.get_text('handlers_admin.lootbox_deliver_failed', '⛔️ تحویل صندوق ناموفق بود؛ دوباره تلاش کنید.'), show_alert=True)
+                return
+            (await asyncio.to_thread(db.log_admin_action,
+                call.from_user.id, "lootbox_order_approve",
+                f"سفارش صندوق شانس #{order_id} | کاربر {order['user_id']} | تعداد: {len(box_ids)} | مبلغ: {order['final_price']:,}",
+            ))
+            try:
+                from engagement_handlers import notify_lootbox_delivered
+                await notify_lootbox_delivered(bot, db, order["user_id"], order["lootbox_type_id"], box_ids)
+                await _notify_user_inline_menu(bot, order["user_id"])
+            except Exception:
+                pass
+            try:
+                await call.message.edit_caption(caption=(call.message.caption or "") + "\n\n✅ تایید شد و صندوق شانس به کاربر تحویل داده شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
+            except Exception:
+                try:
+                    await safe_edit(call, (call.message.text or "") + "\n\n✅ تایید شد و صندوق شانس به کاربر تحویل داده شد.", reply_markup=kb.user_quick_actions_kb(order["user_id"]))
+                except Exception:
+                    pass
+            await call.answer(tr("سفارش تایید و صندوق شانس تحویل داده شد."))
+            await _notify_admin_panel_menu(bot, call.from_user.id, call)
+            return
+
         # ===== سفارش تمدید سرویس از حساب کاربری =====
         if order["is_renewal"]:
             try:
