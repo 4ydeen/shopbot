@@ -1656,6 +1656,8 @@ ADMIN_PANEL_ITEMS = [
     ("adm_report_group", "📣 گروه گزارش تاپیک‌دار", "adm_report_group"),
     ("adm_bulk_gift", "🎁 هدیه‌ی گروهی", "adm_bulk_gift"),
     ("adm_gift_cards", "🎴 کارت‌های هدیه", "gc_adm"),
+    ("adm_season_quiz", "🏆 فصل رقابتی و کوییز", "ssq_adm"),
+    ("adm_engage", "🎁 صندوق شانس و پیشرفت", "eng_adm"),
     ("adm_spam_settings", "🛡 ضداسپم کاربران", "adm_spam_settings"),
     ("adm_gswitch", "🔌 سوئیچ سراسری ربات (خاموش/روشن)", "adm_gswitch"),
     ("adm_temp_message", "⏳ پیام موقت (خودحذف‌شونده)", "adm_temp_message"),
@@ -1728,6 +1730,8 @@ ADMIN_PANEL_CATEGORIES = [
         "adm_cashback_settings",
         "adm_bulk_gift",
         "adm_gift_cards",
+        "adm_season_quiz",
+        "adm_engage",
         "adm_referral_settings",
         "adm_signup_gift_settings",
         "adm_broadcast",
@@ -1972,9 +1976,11 @@ USER_SCREENS = {
             ("wal_transfer", "💸 انتقال موجودی به کاربر دیگر", "wallet_show_transfer", False),
             ("wal_coins", "🪙 سکه‌های من", "score_enabled", False),
             ("wal_giftcard", "🎁 کارت هدیه", None, False),
+            ("wal_lootbox", "📦 صندوق‌های شانس", None, False),
+            ("wal_progress", "📈 پیشرفت من", None, False),
             ("wal_history", "📜 تاریخچه تراکنش‌ها", None, False),
         ],
-        "default_rows": [["wal_topup"], ["wal_gift"], ["wal_transfer"], ["wal_coins"], ["wal_giftcard"], ["wal_history"]],
+        "default_rows": [["wal_topup"], ["wal_gift"], ["wal_transfer"], ["wal_coins"], ["wal_giftcard"], ["wal_lootbox"], ["wal_progress"], ["wal_history"]],
     },
     "contact_menu": {
         "label": "ارتباط با پشتیبانی",
@@ -4569,6 +4575,10 @@ def wallet_menu_kb(db=None) -> InlineKeyboardMarkup:
         add("wal_coins", "🪙 سکه‌های من", "coins_menu")
     if db.get_setting("gift_enabled", "1") == "1":
         add("wal_giftcard", "🎁 کارت هدیه", "gift_menu")
+    if db.get_setting("lootbox_enabled", "0") == "1":
+        add("wal_lootbox", "📦 صندوق‌های شانس", "lb_menu")
+    if db.get_setting("streak_enabled", "0") == "1":
+        add("wal_progress", "📈 پیشرفت من", "prog_view")
     add("wal_history", "📜 تاریخچه تراکنش‌ها", "wallet_history")
     rows = _layout_group_rows(db, "wallet_menu", entries, default_rows=USER_SCREENS["wallet_menu"]["default_rows"])
     return InlineKeyboardMarkup(inline_keyboard=rows)

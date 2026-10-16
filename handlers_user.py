@@ -29,6 +29,10 @@ from md_utils import escape_md, escape_html
 from price_display import price_label_plain
 import keyboards as kb
 from gift_card_handlers import redeem_gift_for_message
+from daily_quiz import answer_quiz_for_message
+from season_quiz_handlers import show_season_for_message
+from engagement_handlers import show_lootbox_for_message, show_progress_for_message
+import seasons as season_logic
 from states import BuyFlow, ContactFlow, TicketFlow, TicketReplyFlow, AIChatFlow, DiscountEntry, RenewalDiscountEntry, WalletTopup, WalletGiftCode, WalletTransfer, CoinConvert, CustomConfigFlow, AddServiceFlow, RenewalFlow, ResellerFlow, ResellerRequestFlow, ServiceRenameFlow, ServiceTransferFlow, CommissionResellerRequestFlow
 import ai_support
 import ai_media
@@ -528,6 +532,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await _open_service_from_deeplink(message, action.split(":", 1)[1])
             elif action.startswith("__redeem_gift__:"):
                 await redeem_gift_for_message(db, message, action.split(":", 1)[1])
+            elif action == "__open_season__":
+                await show_season_for_message(db, message)
+            elif action == "__open_lootbox__":
+                await show_lootbox_for_message(db, message)
+            elif action == "__open_progress__":
+                await show_progress_for_message(db, message)
+            elif action.startswith("__quiz_answer__:"):
+                _quiz_id, _choice = action.split(":")[1:3]
+                await answer_quiz_for_message(db, message, int(_quiz_id), int(_choice))
             else:
                 await message.answer(action)
 
@@ -776,6 +789,14 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 post_start_actions.append(f"__open_svcitem__:{token[4:]}")
             elif token.startswith("gift_") and len(token) > 5:
                 post_start_actions.append(f"__redeem_gift__:{token[5:]}")
+            elif token == "season" and is_main_bot:
+                post_start_actions.append("__open_season__")
+            elif token == "lootbox" and is_main_bot:
+                post_start_actions.append("__open_lootbox__")
+            elif token == "progress" and is_main_bot:
+                post_start_actions.append("__open_progress__")
+            elif is_main_bot and re.fullmatch(r"quiz_\d{1,9}_\d{1,2}", token):
+                post_start_actions.append("__quiz_answer__:" + token[5:].replace("_", ":"))
             elif token == "nofj":
                 pass  # دیگر نیازی نیست؛ ورود با هر دیپ‌لینکی خودش معافیت می‌دهد (بالاتر انجام شد)
             elif _CHANNEL_POST_TOKEN.fullmatch(token):
@@ -853,6 +874,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 await _open_service_from_deeplink(message, action.split(":", 1)[1])
             elif action.startswith("__redeem_gift__:"):
                 await redeem_gift_for_message(db, message, action.split(":", 1)[1])
+            elif action == "__open_season__":
+                await show_season_for_message(db, message)
+            elif action == "__open_lootbox__":
+                await show_lootbox_for_message(db, message)
+            elif action == "__open_progress__":
+                await show_progress_for_message(db, message)
+            elif action.startswith("__quiz_answer__:"):
+                _quiz_id, _choice = action.split(":")[1:3]
+                await answer_quiz_for_message(db, message, int(_quiz_id), int(_choice))
             else:
                 await message.answer(action)
 
@@ -5517,9 +5547,12 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         lines.append(f"👥 تعداد زیرمجموعه‌های شما: {stats['count']}")
         lines.append(f"👛 موجودی کیف پول شما: {stats['credit']:,} تومان")
 
+        markup = kb.referral_share_kb(link)
+        if is_main_bot and season_logic.enabled(db):
+            markup.inline_keyboard.append([InlineKeyboardButton(text=tr("🏆 فصل رقابتی"), callback_data="season_view")])
         await message.answer(
             "\n".join(lines),
-            reply_markup=kb.referral_share_kb(link),
+            reply_markup=markup,
         )
 
     # -----------------------------------------------------------------------
