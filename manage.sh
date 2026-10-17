@@ -594,6 +594,34 @@ MSG_EN[menu_31]="Login Telegram account (AI support in your private chats)"
 MSG_FA[menu_31]="ورود به اکانت تلگرام (پشتیبان هوش مصنوعی در پی‌وی)"
 MSG_EN[menu_32]="Logout Telegram account (userbot)"
 MSG_FA[menu_32]="خروج از اکانت تلگرام (یوزربات)"
+MSG_EN[menu_33]="Telegram accounts (userbot / leak scanner)"
+MSG_FA[menu_33]="اکانت‌های تلگرام (یوزربات / اسکنر نشت کانفیگ)"
+MSG_EN[acc_title]="TELEGRAM ACCOUNTS"
+MSG_FA[acc_title]="اکانت‌های تلگرام"
+MSG_EN[acc_1]="Login USERBOT account (AI replies to customers)"
+MSG_FA[acc_1]="ورود حساب یوزربات (پاسخ هوش مصنوعی به مشتری‌ها)"
+MSG_EN[acc_2]="Login LEAK SCANNER account (separate account, recommended)"
+MSG_FA[acc_2]="ورود حساب اسکنر نشت کانفیگ (اکانت جدا، پیشنهادی)"
+MSG_EN[acc_3]="Use ONE account for both (userbot + scanner)"
+MSG_FA[acc_3]="هر دو روی یک اکانت (یوزربات + اسکنر)"
+MSG_EN[acc_4]="Show account status"
+MSG_FA[acc_4]="نمایش وضعیت حساب‌ها"
+MSG_EN[acc_5]="Logout userbot account"
+MSG_FA[acc_5]="خروج از حساب یوزربات"
+MSG_EN[acc_6]="Logout leak scanner account (scanner falls back to the userbot account)"
+MSG_FA[acc_6]="خروج از حساب اسکنر نشت (اسکنر به حساب یوزربات برمی‌گردد)"
+MSG_EN[acc_back]="Back"
+MSG_FA[acc_back]="بازگشت"
+MSG_EN[acc_scanner_ok]="✅ Scanner account saved. It starts automatically (bot restarted)."
+MSG_FA[acc_scanner_ok]="✅ حساب اسکنر ذخیره شد و خودکار شروع می‌شود (بات ری‌استارت شد)."
+MSG_EN[acc_both_ok]="✅ Now the userbot and the scanner share ONE account (dedicated scanner account removed)."
+MSG_FA[acc_both_ok]="✅ حالا یوزربات و اسکنر روی یک اکانت‌اند (حساب اختصاصی اسکنر حذف شد)."
+MSG_EN[acc_both_warn]="⚠️ Heavy scanning/joining on the customer-facing account can get it limited by Telegram. Keep the join caps low."
+MSG_FA[acc_both_warn]="⚠️ اسکن و عضویت زیاد روی اکانت پاسخ‌گوی مشتری ممکن است باعث محدودیت تلگرام شود؛ سقف عضویت را کم نگه دارید."
+MSG_EN[acc_scanner_removed]="✅ Scanner account removed and bot restarted."
+MSG_FA[acc_scanner_removed]="✅ حساب اسکنر حذف شد و بات ری‌استارت شد."
+MSG_EN[acc_choice]="Choose: "
+MSG_FA[acc_choice]="انتخاب کنید: "
 MSG_EN[ub_need_update]="⛔️ userbot.py not found. Update the bot first (option 2)."
 MSG_FA[ub_need_update]="⛔️ فایل userbot.py پیدا نشد. اول بات را آپدیت کن (گزینه ۲)."
 MSG_EN[ub_installing]="📦 Installing Telegram client library..."
@@ -2709,6 +2737,93 @@ setup_userbot() {
     fi
 }
 
+_ub_ready() {
+    if [ ! -f "$INSTALL_DIR/main.py" ]; then
+        echo -e "${RED}$(t bot_not_installed)${RESET}"; return 1
+    fi
+    if [ ! -x "$INSTALL_DIR/venv/bin/python3" ]; then
+        echo -e "${RED}$(t venv_missing)${RESET}"; return 1
+    fi
+    if [ ! -f "$INSTALL_DIR/userbot.py" ]; then
+        echo -e "${RED}$(t ub_need_update)${RESET}"; return 1
+    fi
+    cd "$INSTALL_DIR" || return 1
+    echo -e "${CYAN}$(t ub_installing)${RESET}"
+    if ! venv/bin/pip install --quiet "telethon>=1.36.0"; then
+        echo -e "${RED}$(t ub_pip_failed)${RESET}"; return 1
+    fi
+    return 0
+}
+
+setup_scanner_account() {
+    _ub_ready || return
+    if venv/bin/python3 userbot.py login-scanner; then
+        sudo systemctl restart "$SERVICE_NAME"
+        sleep 1
+        echo -e "${GREEN}$(t acc_scanner_ok)${RESET}"
+    else
+        echo -e "${RED}$(t ub_login_failed)${RESET}"
+    fi
+}
+
+setup_shared_account() {
+    _ub_ready || return
+    # اگر هنوز حساب یوزربات نیست، همین‌جا وارد می‌شود؛ بعد حساب اختصاصی اسکنر حذف می‌شود.
+    if ! venv/bin/python3 userbot.py status >/dev/null 2>&1; then
+        if ! venv/bin/python3 userbot.py login; then
+            echo -e "${RED}$(t ub_login_failed)${RESET}"; return
+        fi
+    fi
+    venv/bin/python3 userbot.py logout-scanner >/dev/null 2>&1
+    sudo systemctl restart "$SERVICE_NAME"
+    sleep 1
+    echo -e "${GREEN}$(t acc_both_ok)${RESET}"
+    echo -e "${YELLOW}$(t acc_both_warn)${RESET}"
+}
+
+show_accounts_status() {
+    _ub_ready || return
+    echo -n "userbot : "; venv/bin/python3 userbot.py status
+    echo -n "scanner : "; venv/bin/python3 userbot.py status-scanner
+}
+
+remove_scanner_account() {
+    _ub_ready || return
+    read -rp "$(t confirm_prompt)" CONFIRM
+    [ "$CONFIRM" != "yes" ] && { echo -e "${YELLOW}$(t cancelled)${RESET}"; return; }
+    venv/bin/python3 userbot.py logout-scanner
+    sudo systemctl restart "$SERVICE_NAME"
+    sleep 1
+    echo -e "${GREEN}$(t acc_scanner_removed)${RESET}"
+}
+
+telegram_accounts_menu() {
+    local sub
+    while true; do
+        echo ""
+        menu_section acc_title
+        menu_item 1 acc_1
+        menu_item 2 acc_2
+        menu_item 3 acc_3
+        menu_item 4 acc_4
+        menu_item 5 acc_5 "$RED"
+        menu_item 6 acc_6 "$RED"
+        menu_item 0 acc_back "$DIM"
+        echo ""
+        read -rp "$(t acc_choice)" sub
+        case $sub in
+            1) setup_userbot; pause ;;
+            2) setup_scanner_account; pause ;;
+            3) setup_shared_account; pause ;;
+            4) show_accounts_status; pause ;;
+            5) remove_userbot; pause ;;
+            6) remove_scanner_account; pause ;;
+            0) return ;;
+            *) echo -e "${RED}$(t invalid_choice)${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
 remove_userbot() {
     if [ ! -x "$INSTALL_DIR/venv/bin/python3" ] || [ ! -f "$INSTALL_DIR/userbot.py" ]; then
         echo -e "${RED}$(t ub_need_update)${RESET}"
@@ -2787,8 +2902,7 @@ while true; do
     menu_item 22 menu_22
     menu_item 23 menu_23
     menu_section sec_userbot
-    menu_item 31 menu_31
-    menu_item 32 menu_32 "$RED"
+    menu_item 31 menu_33
     draw_rule
     menu_item L menu_lang "$MAGENTA"
     menu_item 0 menu_0 "$DIM"
@@ -2827,7 +2941,7 @@ while true; do
         28) remove_libretranslate; pause ;;
         29) factory_reset; pause ;;
         30) remove_translation_languages; pause ;;
-        31) setup_userbot; pause ;;
+        31) telegram_accounts_menu ;;
         32) remove_userbot; pause ;;
         [Ll]) toggle_lang ;;
         0) echo -e "${CYAN}$(t goodbye)${RESET}"; exit 0 ;;

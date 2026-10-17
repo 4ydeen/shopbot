@@ -195,6 +195,21 @@ The AI layer answers repetitive customer questions before escalating to human su
 
 <a id="channel-ai"></a>
 
+## 🚨 Config Leak Detection & Smart Discovery
+
+The scanner (running on the userbot session) hashes every active service's credentials (UUID / password / subscription token) and checks public Telegram posts for matches. On a hit, admins get an alert with *Rotate link / Warn / Ignore* buttons.
+
+**Smart discovery** (🚨 Leak detection → 🧭 Smart discovery) lets it find sources on its own instead of only watching channels you add by hand:
+
+- **Telegram search** with built-in Persian / English / Russian / Chinese keywords. Keywords learn: productive ones run more often, and new ones are derived from the titles of good channels. Admins can add their own keywords and enable/disable or delete any keyword from the bot menu.
+- **Link crawling**: `t.me/...`, `@username` and invite links found in posts, channel descriptions and search results become candidates.
+- **Scored before joining**: the last ~40 posts are read *without joining* (and scanned for leaks right away). Score = config density, freshness, posting rate, title relevance, member count.
+- **Careful joining**: daily cap, total cap, random delays, full stop on FloodWait. Modes: automatic, admin approval, or watch-only (public channels, no joining).
+- **Real-time monitoring** of joined channels (new *and* edited posts), including links hidden behind text hyperlinks and buttons.
+- **Auto-leave** of channels the scanner joined that produced no configs or leaks after 14 days. Channels you were already in are never left.
+
+Everything is off by default (`leak_scanner_enabled`, `leak_discovery_enabled`). Because the scanner shares the userbot account, keep the join caps low, or give the scanner its own Telegram account: `python userbot.py login-scanner` (undo: `logout-scanner`, status: `status-scanner`). It starts without a restart and never touches the customer-facing account.
+
 ## 📣 AI Channel Posts
 
 <details>
