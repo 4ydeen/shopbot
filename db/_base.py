@@ -749,6 +749,42 @@ class DatabaseBase:
 
                 CREATE INDEX IF NOT EXISTS idx_leak_events_user ON leak_events (user_id);
 
+                -- کشف هوشمند: استخر کاندیداها (کانال/گروه‌هایی که خود اسکنر پیدا کرده) و
+                -- کلیدواژه‌های جستجو با آمار بازدهی هرکدام (برای یادگیری)
+                CREATE TABLE IF NOT EXISTS leak_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    channel_id INTEGER DEFAULT 0,
+                    username TEXT DEFAULT '',
+                    invite_hash TEXT DEFAULT '',
+                    title TEXT DEFAULT '',
+                    members INTEGER DEFAULT 0,
+                    kind TEXT DEFAULT '',
+                    source TEXT DEFAULT '',
+                    source_query TEXT DEFAULT '',
+                    state TEXT NOT NULL DEFAULT 'new',
+                    score REAL DEFAULT 0,
+                    config_posts INTEGER DEFAULT 0,
+                    reason TEXT DEFAULT '',
+                    seen_count INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    joined_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_leak_candidates_state ON leak_candidates (state, score);
+
+                CREATE TABLE IF NOT EXISTS leak_queries (
+                    query TEXT PRIMARY KEY,
+                    source TEXT DEFAULT 'seed',
+                    runs INTEGER DEFAULT 0,
+                    new_found INTEGER DEFAULT 0,
+                    good_found INTEGER DEFAULT 0,
+                    last_run_at REAL DEFAULT 0,
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS ai_faq_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     question TEXT NOT NULL,
@@ -1920,6 +1956,17 @@ class DatabaseBase:
             ("wallet_topups", "receipt_ai_note", "TEXT"),
             ("orders", "close_reason", "TEXT"),
             ("wallet_topups", "close_reason", "TEXT"),
+            # تشخیص نشت: متادیتای کانال‌های زیر نظر (کشف هوشمند)
+            ("leak_channels", "source", "TEXT DEFAULT 'manual'"),
+            ("leak_channels", "joined", "INTEGER DEFAULT 0"),
+            ("leak_channels", "auto_joined", "INTEGER DEFAULT 0"),
+            ("leak_channels", "joined_at", "TEXT"),
+            ("leak_channels", "score", "REAL DEFAULT 0"),
+            ("leak_channels", "members", "INTEGER DEFAULT 0"),
+            ("leak_channels", "config_posts", "INTEGER DEFAULT 0"),
+            ("leak_channels", "leak_hits", "INTEGER DEFAULT 0"),
+            ("leak_channels", "last_scan_ts", "REAL DEFAULT 0"),
+            ("leak_queries", "active", "INTEGER DEFAULT 1"),
         ]
         for table, col, coltype in migrations:
             if not self._column_exists(conn, table, col):
