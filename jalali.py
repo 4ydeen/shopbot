@@ -55,6 +55,8 @@ def gregorian_to_jalali(gy: int, gm: int, gd: int):
             jd = j_day_no + 1
             break
         j_day_no -= j_days_in_month[i]
+    else:
+        jd = j_day_no + 1
 
     return jy, jm, jd
 #‍​‌‌​​​‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​‌‌‌‌​‌‌‌​​‌​‍
