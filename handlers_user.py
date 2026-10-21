@@ -3148,7 +3148,7 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
         )
         await _send_test_success_message(
             message,
-            plan_name=plan.get("name", ""),
+            plan_name=plan["name"],
             amount=format_plan_amount(plan),
             username=result.get("username", ""),
         )
