@@ -6897,6 +6897,50 @@ def api_admin_get_user(telegram_id: int, auth=Depends(require_full_admin)):
     }
 
 
+def _admin_referrals_payload(db, telegram_id: int) -> dict:
+    items = db.list_referrals_for_admin(telegram_id)
+    return {
+        "items": items,
+        "total": len(items),
+        "pending_bonus_count": sum(1 for r in items if not r["bonus_given"]),
+        "bonus_amount": int(db.get_setting("referral_invite_bonus_amount", "0") or 0),
+        "bonus_enabled": db.get_setting("referral_invite_bonus_enabled", "0") == "1",
+        "suspended": db.is_referral_fraud_suspended(telegram_id),
+    }
+
+
+@app.get("/api/admin/users/{telegram_id}/referrals")
+def api_admin_user_referrals(telegram_id: int, auth=Depends(require_full_admin)):
+    _, db, _ = auth
+    if not db.get_user(telegram_id):
+        raise HTTPException(status_code=404, detail=tr("کاربری با این آیدی عددی پیدا نشد."))
+    return _admin_referrals_payload(db, telegram_id)
+
+
+@app.post("/api/admin/users/{telegram_id}/referrals/pay-pending")
+async def api_admin_pay_pending_referral_bonus(telegram_id: int, tenant: Tenant = Depends(get_tenant), auth=Depends(require_full_admin)):
+    admin_id, db, _ = auth
+    if not db.get_user(telegram_id):
+        raise HTTPException(status_code=404, detail=tr("کاربری با این آیدی عددی پیدا نشد."))
+    res = await asyncio.to_thread(db.pay_pending_invite_bonuses, telegram_id)
+    if res["paid_count"] <= 0:
+        raise HTTPException(status_code=400, detail=tr("پاداشی برای پرداخت وجود ندارد (مبلغ پاداش صفر است، سقف پر شده یا همه پرداخت شده‌اند)."))
+    db.log_admin_action(
+        admin_id, "referral_bonus_manual",
+        f"پاداش دعوت {res['paid_count']} زیرمجموعه ({res['total']:,} تومان) برای کاربر {telegram_id} پرداخت شد (مینی‌اپ)",
+        "user", telegram_id,
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{tenant.bot_token}/sendMessage",
+                json={"chat_id": telegram_id, "text": f"🤝 پاداش دعوت {res['paid_count']} زیرمجموعه‌ی شما پرداخت شد.\n💰 {res['total']:,} تومان به کیف پول شما اضافه شد."},
+            )
+    except Exception:
+        pass
+    return {"status": "ok", **res, **_admin_referrals_payload(db, telegram_id)}
+
+
 class UserBlockUpdate(BaseModel):
     blocked: bool
 
