@@ -3114,6 +3114,41 @@ class WalletAdjustBody(BaseModel):
     delta: int
 
 
+def _referrals_payload(tg_id: int) -> dict:
+    items = db.list_referrals_for_admin(tg_id)
+    amount = int(db.get_setting("referral_invite_bonus_amount", "0") or 0)
+    return {
+        "items": items,
+        "total": len(items),
+        "pending_bonus_count": sum(1 for r in items if not r["bonus_given"]),
+        "bonus_amount": amount,
+        "bonus_enabled": db.get_setting("referral_invite_bonus_enabled", "0") == "1",
+        "suspended": db.is_referral_fraud_suspended(tg_id),
+    }
+
+
+@app.get("/api/users/{tg_id}/referrals")
+def api_user_referrals(tg_id: int, admin=Depends(get_current_admin)):
+    if not db.get_user(tg_id):
+        raise HTTPException(404, tr("کاربر یافت نشد."))
+    return _referrals_payload(tg_id)
+
+
+@app.post("/api/users/{tg_id}/referrals/pay-pending")
+async def api_pay_pending_referral_bonus(tg_id: int, admin=Depends(require_permission("users"))):
+    if not db.get_user(tg_id):
+        raise HTTPException(404, tr("کاربر یافت نشد."))
+    res = await asyncio.to_thread(db.pay_pending_invite_bonuses, tg_id)
+    if res["paid_count"] <= 0:
+        raise HTTPException(400, tr("پاداشی برای پرداخت وجود ندارد (مبلغ پاداش صفر است، سقف پر شده یا همه پرداخت شده‌اند)."))
+    await asyncio.to_thread(db.log_admin_action,
+        admin["id"], "referral_bonus_manual", f"پاداش دعوت {res['paid_count']} زیرمجموعه ({res['total']:,} تومان) برای کاربر {tg_id} پرداخت شد (پنل وب - {admin['username']})",
+        "user", tg_id,
+    )
+    await notify_user(tg_id, f"🤝 پاداش دعوت {res['paid_count']} زیرمجموعه‌ی شما پرداخت شد.\n💰 {res['total']:,} تومان به کیف پول شما اضافه شد.")
+    return {"ok": True, **res, **_referrals_payload(tg_id)}
+
+
 @app.post("/api/users/{tg_id}/wallet")
 async def api_adjust_wallet(tg_id: int, body: WalletAdjustBody, admin=Depends(require_permission("users"))):
     (await asyncio.to_thread(db.add_wallet_credit, tg_id, body.delta, "admin_adjust", f"تنظیم دستی توسط ادمین ({admin['username']})"))
