@@ -13408,6 +13408,64 @@ def create_admin_router(db, is_main_bot: bool = True, bot_manager=None) -> Route
         await call.message.answer(tr(f"🔍 آمار کامل کاربر {tg_id}"), reply_markup=_stats_kb(tg_id, is_blocked))
         await call.answer()
 
+    async def _send_user_referrals(call: CallbackQuery, tg_id: int):
+        rows = await asyncio.to_thread(db.list_referrals_for_admin, tg_id)
+        amount = int((await asyncio.to_thread(db.get_setting, "referral_invite_bonus_amount", "0")) or 0)
+        pending = sum(1 for r in rows if not r["bonus_given"])
+        suspended = await asyncio.to_thread(db.is_referral_fraud_suspended, tg_id)
+        lines = [f"👥 زیرمجموعه‌های کاربر {tg_id}: {len(rows):,} نفر"]
+        if suspended:
+            lines.append("⛔️ پاداش رفرال این کاربر به‌خاطر تشخیص تقلب متوقف شده است.")
+        if pending and amount > 0:
+            lines.append(f"⏳ {pending:,} نفر پاداش دعوت دریافت نکرده‌اند (هرکدام {amount:,} تومان)")
+        lines.append("")
+        for r in rows:
+            name = f"@{r['username']}" if r["username"] else (r["first_name"] or "نامشخص")
+            bonus = "✅" if r["bonus_given"] else "⏳"
+            lines.append(f"{bonus} {name} — {r['telegram_id']} — {to_jalali_str(r['joined_at'])} — خرید: {r['approved_orders']:,}")
+        if not rows:
+            lines.append("زیرمجموعه‌ای ندارد.")
+        text = "\n".join(lines)
+        chunks = [text[i:i + 3500] for i in range(0, len(text), 3500)]
+        for chunk in chunks[:-1]:
+            await call.message.answer(chunk)
+        await call.message.answer(chunks[-1], reply_markup=kb.user_referrals_kb(tg_id, bool(pending and amount > 0)))
+
+    @router.callback_query(F.data.startswith("adm_user_refs:"))
+    async def cb_admin_user_referrals(call: CallbackQuery):
+        if not db.is_admin(call.from_user.id):
+            return await deny_support(call)
+        tg_id = callback_id(call.data, "adm_user_refs")
+        if tg_id is None or not await asyncio.to_thread(db.get_user, tg_id):
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        await _send_user_referrals(call, tg_id)
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("adm_user_refpay:"))
+    async def cb_admin_user_referral_pay(call: CallbackQuery, bot: Bot):
+        if not senior_admin_only(call.from_user.id):
+            return await deny_mid(call)
+        tg_id = callback_id(call.data, "adm_user_refpay")
+        if tg_id is None or not await asyncio.to_thread(db.get_user, tg_id):
+            await call.answer(tr("کاربر یافت نشد."), show_alert=True)
+            return
+        res = await asyncio.to_thread(db.pay_pending_invite_bonuses, tg_id)
+        if res["paid_count"] <= 0:
+            await call.answer(tr("پاداشی برای پرداخت وجود ندارد."), show_alert=True)
+            return
+        await asyncio.to_thread(
+            db.log_admin_action, call.from_user.id, "referral_bonus_manual",
+            f"پاداش دعوت {res['paid_count']} زیرمجموعه ({res['total']:,} تومان) برای کاربر {tg_id} پرداخت شد (ربات)",
+            "user", tg_id,
+        )
+        try:
+            await bot.send_message(tg_id, f"🤝 پاداش دعوت {res['paid_count']} زیرمجموعه‌ی شما پرداخت شد.\n💰 {res['total']:,} تومان به کیف پول شما اضافه شد.")
+        except Exception:
+            pass
+        await call.message.answer(f"✅ {res['total']:,} تومان پاداش دعوت ({res['paid_count']:,} نفر) به کیف پول کاربر اضافه شد.")
+        await call.answer()
+
     def _eligible_configs_for_bulk_toggle(custom_configs: list) -> list:
         # فقط سرویس‌های مستقیم‌-پنل (غیر تست) که به یک سرور پنل وصل‌اند، برای این عملیات دسته‌جمعی در نظر گرفته می‌شوند
         return [cc for cc in custom_configs if cc["source"] != "test" and cc["panel_server_id"]]

@@ -704,6 +704,15 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                 text += f"\n💰 پاداش دعوت‌کننده: {invite_bonus:,} تومان"
             if reward_info.get("free_config_product_id"):
                 text += "\n🎁 دعوت‌کننده یک کانفیگ رایگان جایزه گرفت"
+            skip_labels = {
+                "suspended": "⛔️ پاداش پرداخت نشد: رفرال این کاربر به‌خاطر تشخیص تقلب متوقف شده است",
+                "cap_reached": "⚠️ پاداش پرداخت نشد: سقف تعداد دعوت‌های مشمول پر شده است",
+                "no_amount": "⚠️ پاداش پرداخت نشد: مبلغ پاداش دعوت صفر است",
+                "bonus_disabled": "⚠️ پاداش پرداخت نشد: پاداش دعوت غیرفعال است",
+                "referral_disabled": "⚠️ پاداش پرداخت نشد: زیرمجموعه‌گیری غیرفعال است",
+            }
+            if reward_info.get("skipped") in skip_labels and not invite_bonus:
+                text += "\n" + skip_labels[reward_info["skipped"]]
         try:
             await report_router.send_text(bot, db, "referral", text, kb.user_quick_actions_kb(referred_user_id))
         except Exception:
@@ -752,9 +761,13 @@ def create_user_router(db, is_main_bot: bool = True, bot_manager=None) -> Router
                     already_referred = bool(already_referred and already_referred["referred_by"])
                     if not already_referred:
                         (await asyncio.to_thread(db.set_referred_by, message.from_user.id, referrer_id))
-                        reward_info = (await asyncio.to_thread(
-                            db.apply_referral_invite_rewards, message.from_user.id, referrer_id
-                        ))
+                        try:
+                            reward_info = (await asyncio.to_thread(
+                                db.apply_referral_invite_rewards, message.from_user.id, referrer_id
+                            ))
+                        except Exception:
+                            logging.getLogger("handlers_user").exception("اعمال پاداش دعوت ناموفق بود.")
+                            reward_info = {"skipped": "error"}
                         await _handle_referral_invite_rewards(bot, referrer_id, reward_info)
                         await _notify_new_referral(bot, message.from_user.id, referrer_id, reward_info)
                         await check_and_notify_referral_fraud(bot.send_message, db, referrer_id, bot_token=bot.token)

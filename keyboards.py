@@ -2553,6 +2553,7 @@ def user_full_stats_kb(tg_id: int, is_blocked: bool = False) -> InlineKeyboardMa
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=tr("📦 لیست کامل کانفیگ‌های این کاربر"), callback_data=f"adm_user_configs:{tg_id}")],
         [InlineKeyboardButton(text=tr("🛠 مدیریت تک‌تک کانفیگ‌ها"), callback_data=f"adm_user_cfglist:{tg_id}")],
+        [InlineKeyboardButton(text=tr("👥 زیرمجموعه‌های این کاربر"), callback_data=f"adm_user_refs:{tg_id}")],
         [InlineKeyboardButton(text=tr("⏻ فعال/غیرفعال کردن همه‌ی کانفیگ‌های این کاربر"), callback_data=f"adm_user_toggle_all:{tg_id}")],
         [InlineKeyboardButton(text=tr("✉️ ارسال پیام مستقیم"), callback_data=f"adm_user_msg:{tg_id}")],
         [InlineKeyboardButton(text=tr("🎁 ارسال کد تخفیف اختصاصی"), callback_data=f"adm_user_disc:{tg_id}")],
@@ -2569,11 +2570,20 @@ def user_group_stats_kb(tg_id: int, is_blocked: bool = False) -> InlineKeyboardM
     """نسخه‌ی سبک کارت پروفایل برای گروه گزارش: فقط دکمه‌هایی که بدون تایپ/FSM در گروه کار می‌کنند."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=tr("📦 لیست کامل کانفیگ‌های این کاربر"), callback_data=f"adm_user_configs:{tg_id}")],
+        [InlineKeyboardButton(text=tr("👥 زیرمجموعه‌ها"), callback_data=f"adm_user_refs:{tg_id}")],
         [
             InlineKeyboardButton(text=tr("✅ آنبلاک") if is_blocked else tr("🚫 بلاک"), callback_data=f"qa_block:{tg_id}"),
             InlineKeyboardButton(text=tr("✉️ پیام"), callback_data=f"qa_msg:{tg_id}"),
         ],
     ])
+
+
+def user_referrals_kb(tg_id: int, can_pay: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if can_pay:
+        rows.append([InlineKeyboardButton(text=tr("💰 پرداخت پاداش‌های پرداخت‌نشده"), callback_data=f"adm_user_refpay:{tg_id}")])
+    rows.append([InlineKeyboardButton(text=tr("👤 پروفایل کاربر"), callback_data=f"qa_profile:{tg_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def user_toggle_all_confirm_kb(tg_id: int, new_enabled: bool) -> InlineKeyboardMarkup:
