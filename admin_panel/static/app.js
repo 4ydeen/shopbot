@@ -2937,6 +2937,7 @@ async function showUserDetail(tgId) {
   const d = await apiGet(`/users/${tgId}`);
   const services = await apiGet(`/users/${tgId}/custom-configs`).catch(() => []);
   const bankConfigs = await apiGet(`/users/${tgId}/configs`).catch(() => []);
+  const refs = await apiGet(`/users/${tgId}/referrals`).catch(() => ({ items: [], total: 0, pending_bonus_count: 0, bonus_amount: 0 }));
   const isSenior = hasPerm('users');
   const u = d.user;
   const displayName = u.username ? '@' + u.username : (u.first_name || tgId);
@@ -3002,6 +3003,12 @@ async function showUserDetail(tgId) {
     <div class="table-wrap"><table><thead><tr><th>#</th><th>محصول</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
     <tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">#${o.id}</td><td>${esc(o.product_name || '-')}</td><td class="mono">${fmt(o.final_price)}${tierDiscountNote(o)}</td><td>${esc(o.status)}</td><td class="mono">${fmtDate(o.created_at)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>سفارشی نیست</td></tr>`}</tbody></table></div>
 
+    <h4 class="ud-section-title">زیرمجموعه‌ها (${fmt(refs.total)})</h4>
+    ${refs.suspended ? '<div class="hint-text" style="color:var(--danger,#c0392b)">⛔️ پاداش رفرال این کاربر به‌خاطر تشخیص تقلب متوقف شده است.</div>' : ''}
+    ${isSenior && refs.pending_bonus_count > 0 && refs.bonus_amount > 0 ? `<div class="form-row" style="margin:8px 0"><span class="hint-text">${fmt(refs.pending_bonus_count)} زیرمجموعه پاداش دعوت دریافت نکرده‌اند (هرکدام ${fmt(refs.bonus_amount)} تومان)</span><button class="btn btn-primary btn-sm" id="ud-pay-pending-refs">💰 پرداخت پاداش‌های پرداخت‌نشده</button></div>` : ''}
+    <div class="table-wrap"><table><thead><tr><th>کاربر</th><th>آیدی</th><th>عضویت</th><th>خرید تاییدشده</th><th>پاداش دعوت</th></tr></thead>
+    <tbody>${(refs.items || []).map(r => `<tr><td>${esc(r.username ? '@' + r.username : (r.first_name || '-'))}</td><td class="mono">${r.telegram_id}</td><td class="mono">${fmtDate(r.joined_at)}</td><td class="mono">${fmt(r.approved_orders)}</td><td>${r.bonus_given ? '✅ پرداخت شده' : '⏳ پرداخت نشده'}</td></tr>`).join('') || `<tr><td colspan="5" class="empty-state"><div class="icon">${svg('empty')}</div>زیرمجموعه‌ای نیست</td></tr>`}</tbody></table></div>
+
     <h4 class="ud-section-title">شارژهای کیف پول</h4>
     <div class="table-wrap"><table><thead><tr><th>#</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th></tr></thead>
     <tbody>${(d.topups || []).slice(0, 10).map(t => `<tr><td class="mono">#${t.id}</td><td class="mono">${fmt(t.amount)}</td><td>${esc(t.status)}</td><td class="mono">${fmtDate(t.created_at)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-state"><div class="icon">${svg('empty')}</div>شارژی ثبت نشده</td></tr>`}</tbody></table></div>
@@ -3015,6 +3022,11 @@ async function showUserDetail(tgId) {
       const delta = Number($('#wallet-delta', body).value);
       if (!delta) return;
       try { await apiPost(`/users/${tgId}/wallet`, { delta }); toast('کیف پول به‌روزرسانی شد.'); close(); }
+      catch (e) { handleErr(e); }
+    });
+    const payRefsBtn = $('#ud-pay-pending-refs', body);
+    if (payRefsBtn) payRefsBtn.addEventListener('click', async () => {
+      try { const r = await apiPost(`/users/${tgId}/referrals/pay-pending`); toast(`${fmt(r.total)} تومان پاداش دعوت پرداخت شد.`); close(); await showUserDetail(tgId); }
       catch (e) { handleErr(e); }
     });
     const creditLimitBtn = $('#credit-limit-submit', body);
